@@ -10,7 +10,7 @@ export default defineConfig({
   clearScreen: false,
   plugins: [viteSingleFile()],
   build: {
-    outDir: 'src-tauri/target/quicklook-renderer',
+    outDir: 'target/quicklook-renderer',
     emptyOutDir: true,
     rollupOptions: {
       input: resolve(__dirname, 'src/quicklook/index.html'),

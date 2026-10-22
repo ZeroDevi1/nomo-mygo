@@ -11,7 +11,7 @@
     "build": "pnpm exec paraglide-js compile && vite build",
     "build:quicklook-renderer": "vite build --config vite.quicklook.config.ts",
     "build:quicklook-extension": "bash scripts/build-macos-quicklook.sh",
-    "build:macos": "bash scripts/compile-macos-appicon.sh && mygo build -platform darwin/universal",
+    "build:macos": "bash scripts/build-macos.sh",
     "preview": "vite preview --host 0.0.0.0",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "format": "prettier --write .",

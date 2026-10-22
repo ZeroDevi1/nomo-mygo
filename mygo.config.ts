@@ -32,6 +32,9 @@ export default defineConfig({
     signingIdentity: process.env.APPLE_SIGNING_IDENTITY ?? '-',
     ...(existsSync(macosAssetCatalog) ? { icon: macosAssetCatalog } : {}),
     infoPlist: {
+      // 声明内嵌的 Quick Look 扩展（由 scripts/build-macos.sh 在 MyGo 构建后放入），
+      // 使 App 首次被 LaunchServices 注册时交给 PlugInKit 扫描；主应用不主动执行 pluginkit。
+      CFBundlePlugIns: ['Contents/PlugIns/NomoQuickLookPreview.appex'],
       // 导出 Markdown UTI，供 Quick Look 扩展的 QLSupportedContentTypes 匹配 .md 文件。
       UTExportedTypeDeclarations: [
         {

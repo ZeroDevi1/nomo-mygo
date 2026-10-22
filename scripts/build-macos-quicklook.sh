@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# 构建未签名的 Quick Look 预览扩展 target/quicklook/NomoQuickLookPreview.appex。
+# 签名与嵌入由 scripts/build-macos.sh 在 MyGo 产出 .app 之后完成：扩展必须带自己的沙盒
+# entitlements 单独签名，而 MyGo 对 .app 的 `codesign --deep` 会以主应用身份覆盖嵌套签名。
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -7,37 +10,43 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXTENSION_SRC_DIR="$ROOT_DIR/src-tauri/macos/NomoQuickLookPreview"
-RENDERER_DIR="$ROOT_DIR/src-tauri/target/quicklook-renderer"
-OUTPUT_DIR="$ROOT_DIR/src-tauri/target/quicklook/NomoQuickLookPreview.appex"
+EXTENSION_SRC_DIR="$ROOT_DIR/desktop/packaging/macos/NomoQuickLookPreview"
+RENDERER_DIR="$ROOT_DIR/target/quicklook-renderer"
+OUTPUT_DIR="$ROOT_DIR/target/quicklook/NomoQuickLookPreview.appex"
 CONTENTS_DIR="$OUTPUT_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+BUILD_DIR="$ROOT_DIR/target/quicklook/build"
 
 PNPM_BIN="${PNPM_BIN:-pnpm}"
 
 cd "$ROOT_DIR"
 "$PNPM_BIN" run build:quicklook-renderer
 
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+rm -rf "$OUTPUT_DIR" "$BUILD_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$BUILD_DIR"
 
 cp "$EXTENSION_SRC_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp -R "$RENDERER_DIR" "$RESOURCES_DIR/quicklook-renderer"
 
+# MyGo 以 package.json 版本同时写入主应用的 CFBundleShortVersionString 与 CFBundleVersion；
+# 扩展构建版本须与主应用一致，覆盖同一营销版本时 PlugInKit 才会刷新扩展。
+# 嵌入时 build-macos.sh 还会按最终 .app 的 Info.plist 再同步一次，防止 infoPlist 覆盖造成漂移。
 APP_VERSION="$(node -p "require('./package.json').version")"
-APP_BUNDLE_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS.bundleVersion || require('./src-tauri/tauri.conf.json').version")"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$CONTENTS_DIR/Info.plist"
-# 扩展构建版本必须与主 App 的 CFBundleVersion 一致，覆盖同一营销版本时也让 PlugInKit 刷新扩展。
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUNDLE_VERSION" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$CONTENTS_DIR/Info.plist"
 
-ARCH="${QUICKLOOK_ARCH:-$(uname -m)}"
+# 主应用默认以 darwin/universal 构建，扩展默认同样产出双架构；单架构构建可显式指定。
+ARCH="${QUICKLOOK_ARCH:-universal}"
 case "$ARCH" in
+  universal)
+    SWIFT_TARGET_ARCHS=(arm64 x86_64)
+    ;;
   arm64|aarch64)
-    SWIFT_TARGET_ARCH="arm64"
+    SWIFT_TARGET_ARCHS=(arm64)
     ;;
   x86_64|amd64)
-    SWIFT_TARGET_ARCH="x86_64"
+    SWIFT_TARGET_ARCHS=(x86_64)
     ;;
   *)
     echo "Unsupported Quick Look architecture: $ARCH" >&2
@@ -45,34 +54,33 @@ case "$ARCH" in
     ;;
 esac
 
-# Xcode 的 App Extension target 会自动把入口设为 _NSExtensionMain；
-# 直接调用 swiftc 时必须显式设置，否则生成的进程会启动后立即退出，导致 PlugInKit XPC Code=4097。
-xcrun swiftc \
-  "$EXTENSION_SRC_DIR/PreviewViewController.swift" \
-  -emit-executable \
-  -parse-as-library \
-  -module-name NomoQuickLookPreview \
-  -application-extension \
-  -target "${SWIFT_TARGET_ARCH}-apple-macosx12.0" \
-  -Xlinker -e \
-  -Xlinker _NSExtensionMain \
-  -Xlinker -rpath \
-  -Xlinker @executable_path/../Frameworks \
-  -Xlinker -rpath \
-  -Xlinker @executable_path/../../../../Frameworks \
-  -o "$MACOS_DIR/NomoQuickLookPreview" \
-  -framework Cocoa \
-  -framework QuickLook \
-  -framework QuickLookUI \
-  -framework WebKit
+SLICES=()
+for SWIFT_TARGET_ARCH in "${SWIFT_TARGET_ARCHS[@]}"; do
+  SLICE="$BUILD_DIR/NomoQuickLookPreview-$SWIFT_TARGET_ARCH"
+  # Xcode 的 App Extension target 会自动把入口设为 _NSExtensionMain；
+  # 直接调用 swiftc 时必须显式设置，否则生成的进程会启动后立即退出，导致 PlugInKit XPC Code=4097。
+  xcrun swiftc \
+    "$EXTENSION_SRC_DIR/PreviewViewController.swift" \
+    -emit-executable \
+    -parse-as-library \
+    -module-name NomoQuickLookPreview \
+    -application-extension \
+    -target "${SWIFT_TARGET_ARCH}-apple-macosx12.0" \
+    -Xlinker -e \
+    -Xlinker _NSExtensionMain \
+    -Xlinker -rpath \
+    -Xlinker @executable_path/../Frameworks \
+    -Xlinker -rpath \
+    -Xlinker @executable_path/../../../../Frameworks \
+    -o "$SLICE" \
+    -framework Cocoa \
+    -framework QuickLook \
+    -framework QuickLookUI \
+    -framework WebKit
+  SLICES+=("$SLICE")
+done
 
-ENTITLEMENTS="$EXTENSION_SRC_DIR/NomoQuickLookPreview.entitlements"
-# Tauri 使用 APPLE_SIGNING_IDENTITY；保留旧变量作为显式扩展签名覆盖，并确保嵌套扩展与主 App 同身份。
-CODESIGN_IDENTITY="${APPLE_CODESIGN_IDENTITY:-${APPLE_SIGNING_IDENTITY:--}}"
-/usr/bin/codesign \
-  --force \
-  --sign "$CODESIGN_IDENTITY" \
-  --entitlements "$ENTITLEMENTS" \
-  "$OUTPUT_DIR"
+xcrun lipo -create "${SLICES[@]}" -output "$MACOS_DIR/NomoQuickLookPreview"
+rm -rf "$BUILD_DIR"
 
-echo "Built $OUTPUT_DIR"
+echo "Built $OUTPUT_DIR (unsigned, ${ARCH})"

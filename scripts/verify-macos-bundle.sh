@@ -7,15 +7,14 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUNDLE_DIR="$ROOT_DIR/src-tauri/target/release/bundle/macos"
-APP_BUNDLES=("$BUNDLE_DIR"/*.app)
+# 默认校验 build-macos.sh 的 universal 产物；单架构构建传入 .app 路径。
+APP_BUNDLE="${1:-$ROOT_DIR/target/mygo/darwin-universal/Nomo.app}"
 
-if [[ ${#APP_BUNDLES[@]} -ne 1 || ! -d "${APP_BUNDLES[0]}" ]]; then
-  echo "Expected exactly one macOS app bundle under $BUNDLE_DIR." >&2
+if [[ ! -d "$APP_BUNDLE" ]]; then
+  echo "macOS app bundle not found: $APP_BUNDLE." >&2
   exit 1
 fi
 
-APP_BUNDLE="${APP_BUNDLES[0]}"
 APP_INFO="$APP_BUNDLE/Contents/Info.plist"
 EXTENSION_BUNDLE="$APP_BUNDLE/Contents/PlugIns/NomoQuickLookPreview.appex"
 EXTENSION_INFO="$EXTENSION_BUNDLE/Contents/Info.plist"
@@ -31,7 +30,7 @@ if [[ "$DECLARED_EXTENSION" != "Contents/PlugIns/NomoQuickLookPreview.appex" ]];
   exit 1
 fi
 
-APP_VERSION="$(node -p "require('$ROOT_DIR/package.json').version")"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO")"
 APP_BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO")"
 EXTENSION_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$EXTENSION_INFO")"
 EXTENSION_BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$EXTENSION_INFO")"
@@ -55,5 +54,11 @@ if [[ ! -f "$APP_BUNDLE/Contents/Resources/Assets.car" ]]; then
 fi
 
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+# PlugInKit 拒绝加载未沙盒化的扩展；对主应用 --deep 重签会静默抹掉这些 entitlements。
+if ! /usr/bin/codesign -d --entitlements - --xml "$EXTENSION_BUNDLE" 2>/dev/null | grep -q "com.apple.security.app-sandbox"; then
+  echo "Quick Look extension lost its App Sandbox entitlement." >&2
+  exit 1
+fi
 
 echo "Verified embedded Quick Look extension: $EXTENSION_BUNDLE"
