@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, resolve } from '@tauri-apps/api/path';
+import { dirname, isAbsolute, resolve } from '../../lib/desktop/runtime/path';
 import type { DocumentKind } from '../types';
 import { getDocumentKindFromPath } from './tabs';
 

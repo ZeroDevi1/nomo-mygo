@@ -8,7 +8,7 @@ export type ClipboardReadResult =
 export type ClipboardReadPreference = 'rich' | 'text';
 
 export async function writeFileClipboard(path: string): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
+  const { invoke } = await import('../../lib/desktop/runtime/core');
   await invoke('copy_file_to_clipboard', { path });
 }
 
@@ -17,16 +17,16 @@ export async function writeEditorClipboard(
   desktopEnabled: boolean,
 ): Promise<void> {
   if (desktopEnabled) {
-    const { writeHtml, writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+    const { writeClipboard } = await import('../../lib/desktop/runtime/clipboard');
     if (payload.html) {
       try {
-        await writeHtml(payload.html, payload.text);
+        await writeClipboard(payload.text, payload.html);
         return;
       } catch {
         // 部分平台或剪贴板实现不接受 HTML，降级为纯文本。
       }
     }
-    await writeText(payload.text);
+    await writeClipboard(payload.text);
     return;
   }
 
@@ -53,20 +53,13 @@ export async function readEditorClipboard(
     return { kind: 'text', text };
   }
 
-  const { readImage, readText } = await import('@tauri-apps/plugin-clipboard-manager');
+  const { readClipboardImage, readClipboardText } = await import('../../lib/desktop/runtime/clipboard');
   if (preference === 'text') {
-    return { kind: 'text', text: await readText().catch(() => '') };
+    return { kind: 'text', text: await readClipboardText().catch(() => '') };
   }
-  try {
-    const image = await readImage();
-    const size = await image.size();
-    const rgba = await image.rgba();
-    const file = await rgbaToPngFile(rgba, size.width, size.height);
-    return { kind: 'image', files: [file] };
-  } catch {
-    const text = await readText();
-    return { kind: 'text', text };
-  }
+  const image = await readClipboardImage().catch(() => null);
+  if (image) return { kind: 'image', files: [image] };
+  return { kind: 'text', text: await readClipboardText() };
 }
 
 async function tryReadWebClipboard(
@@ -99,24 +92,6 @@ async function tryReadWebClipboard(
     // WebView 可能拒绝 clipboard.read；由桌面插件完成降级读取。
   }
   return null;
-}
-
-async function rgbaToPngFile(
-  rgba: Uint8Array,
-  width: number,
-  height: number,
-): Promise<File> {
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context is unavailable');
-  const pixels = Uint8ClampedArray.from(rgba);
-  context.putImageData(new ImageData(pixels, width, height), 0, 0);
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((value) => (value ? resolve(value) : reject(new Error('PNG encode failed'))), 'image/png');
-  });
-  return new File([blob], 'clipboard.png', { type: 'image/png' });
 }
 
 function extensionForMime(mime: string): string {

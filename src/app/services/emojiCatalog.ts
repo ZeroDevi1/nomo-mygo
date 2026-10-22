@@ -1,4 +1,4 @@
-import { isTauriRuntime } from '../../lib/desktop/tauriStorage';
+import { isDesktopRuntime } from '../../lib/desktop/desktopStorage';
 import {
   buildEmojiCatalog,
   type EmojiCatalogPayload,
@@ -16,8 +16,8 @@ export function loadEmojiCatalog(retry = false): Promise<readonly EmojiEntry[]> 
   if (!retry && Date.now() < failedUntil)
     return Promise.reject(new Error('emoji-catalog-unavailable'));
   pending = (async () => {
-    if (!isTauriRuntime()) throw new Error('emoji-catalog-desktop-required');
-    const { invoke } = await import('@tauri-apps/api/core');
+    if (!isDesktopRuntime()) throw new Error('emoji-catalog-desktop-required');
+    const { invoke } = await import('../../lib/desktop/runtime/core');
     const payload = await invoke<EmojiCatalogPayload>('load_emoji_catalog');
     catalog = buildEmojiCatalog(payload);
     if (!catalog.length) throw new Error('emoji-catalog-empty');

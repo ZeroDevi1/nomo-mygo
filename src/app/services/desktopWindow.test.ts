@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+vi.mock('../../lib/desktop/runtime/core', () => ({ invoke }));
 import {
   activateDocumentWindow,
   prepareOpenTargetWindow,

@@ -567,7 +567,7 @@ function bindDesktopSystemThemeListeners(
   onScheme: (scheme: ColorScheme) => void,
   onReady: (unlisten: () => void) => void,
 ) {
-  void import('@tauri-apps/api/event')
+  void import('../../lib/desktop/runtime/event')
     .then(({ listen }) =>
       listen<unknown>(SYSTEM_THEME_CHANGED_EVENT, (event) => {
         if (isColorScheme(event.payload)) {
@@ -578,7 +578,7 @@ function bindDesktopSystemThemeListeners(
     .then(onReady)
     .catch(() => undefined);
 
-  void import('@tauri-apps/api/window')
+  void import('../../lib/desktop/runtime/window')
     .then(({ getCurrentWindow }) =>
       getCurrentWindow().onThemeChanged((event) => {
         onScheme(event.payload === 'dark' ? 'dark' : 'light');

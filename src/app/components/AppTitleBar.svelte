@@ -12,8 +12,8 @@
     PinOff,
     Sun,
   } from '@lucide/svelte';
-  import type { SoftwareUpdateSnapshot } from '../../lib/desktop/tauriUpdater';
-  import type { RecentEntry } from '../../lib/desktop/tauriStorage';
+  import type { SoftwareUpdateSnapshot } from '../../lib/desktop/desktopUpdater';
+  import type { RecentEntry } from '../../lib/desktop/desktopStorage';
   import {
     DIAGRAM_TEMPLATES,
     type DiagramType,
@@ -179,7 +179,7 @@
 
     const requestId = ++windowStateRequestId;
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { getCurrentWindow } = await import('../../lib/desktop/runtime/window');
       const appWindow = getCurrentWindow();
       const fullscreen = await appWindow.isFullscreen();
 
@@ -214,7 +214,7 @@
 
     windowStateListenerReady = true;
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { getCurrentWindow } = await import('../../lib/desktop/runtime/window');
       if (!canSyncWindowState) return;
 
       const appWindow = getCurrentWindow();
@@ -253,43 +253,6 @@
     };
   });
 
-  async function handleDrag(e: MouseEvent) {
-    if (!desktopEnabled || e.buttons !== 1) {
-      return;
-    }
-
-    const target = e.target as HTMLElement;
-
-    // 排除交互元素，避免影响按钮点击
-    if (
-      target.closest('button') ||
-      target.closest('.titlebar-right') ||
-      target.closest('.titlebar-menu')
-    ) {
-      return;
-    }
-
-    // 只在拖动区域触发
-    if (!target.closest('[data-drag-region]')) {
-      return;
-    }
-
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const appWindow = getCurrentWindow();
-
-      if (e.detail === 2) {
-        if (markdownMiniActive) return;
-        // 双击最大化/还原
-        await appWindow.toggleMaximize();
-      } else if (e.detail === 1) {
-        await appWindow.startDragging();
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   async function handleTitlebarContextMenu(event: MouseEvent) {
     event.preventDefault();
     const target = event.target as HTMLElement | null;
@@ -298,14 +261,14 @@
       target.closest('button, .titlebar-menu, .dropdown-menu, input, textarea, select') ||
       !desktopEnabled ||
       !platformCapabilities.usesCustomWindowsTitlebar ||
-      !target.closest('[data-drag-region], [data-tauri-drag-region]')
+      !target.closest('[data-drag-region]')
     ) {
       return;
     }
 
     let maximized = false;
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { getCurrentWindow } = await import('../../lib/desktop/runtime/window');
       maximized = await getCurrentWindow().isMaximized();
     } catch {
       // 查询失败时仍提供可用的窗口菜单，最大化项使用默认文案。
@@ -356,7 +319,7 @@
 
   async function minimizeCurrentWindow() {
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { getCurrentWindow } = await import('../../lib/desktop/runtime/window');
       await getCurrentWindow().minimize();
     } catch {
       // 窗口状态可能在菜单打开后变化，失败时保持当前窗口状态。
@@ -365,7 +328,7 @@
 
   async function toggleCurrentWindowMaximized() {
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { getCurrentWindow } = await import('../../lib/desktop/runtime/window');
       await getCurrentWindow().toggleMaximize();
     } catch {
       // 窗口状态可能在菜单打开后变化，失败时保持当前窗口状态。
@@ -406,7 +369,7 @@
     {#if markdownMiniActive}
       <div
         class="titlebar-row top-row markdown-mini-titlebar-row"
-        data-tauri-drag-region="deep"
+        data-drag-region
         role="toolbar"
         tabindex="0"
         aria-label={t.markdownMiniWindow()}
@@ -459,7 +422,6 @@
       class="titlebar-row top-row"
       data-drag-region
       role="presentation"
-      on:mousedown={handleDrag}
     >
       <button
         class="icon-btn sidebar-toggle-btn"

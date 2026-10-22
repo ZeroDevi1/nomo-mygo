@@ -746,7 +746,7 @@
   // 在系统文件管理器中定位文件/文件夹
   async function revealPathInFolder(path: string) {
     try {
-      const { revealInExplorer } = await import('../../lib/desktop/tauriStorage');
+      const { revealInExplorer } = await import('../../lib/desktop/desktopStorage');
       await revealInExplorer(path);
     } catch (error) {
       dispatch('revealError', error);

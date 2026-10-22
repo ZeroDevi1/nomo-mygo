@@ -9,7 +9,7 @@
 
   const MAXIMIZED_STATE_SYNC_DELAY_MS = 80;
 
-  let appWindow: import('@tauri-apps/api/window').Window | null = null;
+  let appWindow: import('../../lib/desktop/runtime/window').DesktopWindow | null = null;
   let unlistenResized: (() => void) | null = null;
   let maximizedStateSyncTimer: number | null = null;
   let maximizedStateRequestId = 0;
@@ -41,7 +41,7 @@
 
   async function initializeWindowState() {
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { getCurrentWindow } = await import('../../lib/desktop/runtime/window');
       if (disposed) return;
 
       const currentWindow = getCurrentWindow();
@@ -78,7 +78,7 @@
   }
 
   async function syncMaximizedState(resizedEvent?: unknown) {
-    // Tauri resize 回调会传入事件；直接调用不带参数，用于立即读取最新状态。
+    // 尺寸变化回调会传入事件；直接调用不带参数，用于立即读取最新状态。
     if (resizedEvent !== undefined) {
       scheduleMaximizedStateSync();
       return;

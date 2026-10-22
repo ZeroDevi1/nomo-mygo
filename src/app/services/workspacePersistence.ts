@@ -2,7 +2,7 @@ import {
   deleteWorkspaceDraft,
   writeWorkspaceDraft,
   type SettingRecord,
-} from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopStorage';
 import {
   createEmptyExternalFileChange,
   normalizeRecoveryConflictPath,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EXPORT_IMAGE_LIMIT, EXPORT_MEDIA_LIMIT, ExportResourceBudget, inlineLocalImages } from './images';
 
-vi.mock('../../../lib/desktop/tauriStorage', () => ({ readFileAsBase64: vi.fn() }));
+vi.mock('../../../lib/desktop/desktopStorage', () => ({ readFileAsBase64: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 
 describe('export resources', () => {

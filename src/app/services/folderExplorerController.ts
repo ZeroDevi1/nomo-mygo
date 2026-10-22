@@ -1,5 +1,5 @@
 import type { FileTreeNode } from '../types';
-import { checkPathsExist } from '../../lib/desktop/tauriStorage';
+import { checkPathsExist } from '../../lib/desktop/desktopStorage';
 import { getFolderName } from '../utils/pathLabels';
 import { loadFolderChildren, loadFolderTree, pickFolderPath } from './documentFiles';
 import {

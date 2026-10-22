@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkPathsExist } from '../../lib/desktop/tauriStorage';
+import { checkPathsExist } from '../../lib/desktop/desktopStorage';
 import type { FileTreeNode } from '../types';
 import { loadFolderChildren, loadFolderTree } from './documentFiles';
 import { createFolderExplorerController } from './folderExplorerController';
 
-vi.mock('../../lib/desktop/tauriStorage', () => ({
+vi.mock('../../lib/desktop/desktopStorage', () => ({
   checkPathsExist: vi.fn(),
 }));
 

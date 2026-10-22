@@ -10,7 +10,7 @@ const storageMock = vi.hoisted(() => ({
   updateAppSettings: vi.fn(),
 }));
 
-vi.mock('../../lib/desktop/tauriStorage', () => storageMock);
+vi.mock('../../lib/desktop/desktopStorage', () => storageMock);
 
 import {
   DEFAULT_APP_PREFERENCES,
@@ -249,8 +249,8 @@ describe('settings', () => {
       'utf-8',
     );
     const settingsServiceSource = readFileSync(resolve(__dirname, 'settings.ts'), 'utf-8');
-    const tauriStorageSource = readFileSync(
-      resolve(__dirname, '../../lib/desktop/tauriStorage.ts'),
+    const desktopStorageSource = readFileSync(
+      resolve(__dirname, '../../lib/desktop/desktopStorage.ts'),
       'utf-8',
     );
 
@@ -275,7 +275,7 @@ describe('settings', () => {
     );
     expect(emitSettingsUpdatedSource).not.toContain('refresh_interface_language_chrome');
     expect(settingsServiceSource).toContain('updateAppSettings(persistedEntries)');
-    expect(tauriStorageSource).toContain("invoke('update_app_settings'");
+    expect(desktopStorageSource).toContain("invoke('update_app_settings'");
     expect(appSource).toContain('applyAppPreferencesPatch');
     expect(appSource).toContain('handleSettingsUpdated(event.payload)');
   });

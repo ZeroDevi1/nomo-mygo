@@ -15,13 +15,13 @@
   import { typographyRange } from '../actions/typographyRange';
   import { DIAGRAM_TEMPLATES } from '../../lib/editor-core/diagramTemplates';
   import { isQuickInsertTrigger } from '../../lib/editor-core/quickInsert';
-  import { isTauriRuntime, openExternalLink } from '../../lib/desktop/tauriStorage';
+  import { isDesktopRuntime, openExternalLink } from '../../lib/desktop/desktopStorage';
   import {
     type DownloadedSoftwareUpdate,
     type SoftwareUpdateCandidate,
     type SoftwareUpdateSnapshot,
     type SoftwareUpdateUiState,
-  } from '../../lib/desktop/tauriUpdater';
+  } from '../../lib/desktop/desktopUpdater';
   import packageInfo from '../../../package.json';
   import {
     DEFAULT_APP_PREFERENCES,
@@ -72,7 +72,7 @@
   import {
     pickUserThemeSource,
     saveUserThemeTemplateWithDialog,
-  } from '../../lib/desktop/tauriStorage';
+  } from '../../lib/desktop/desktopStorage';
   import type {
     ColorScheme,
     FontPreferences,
@@ -109,8 +109,8 @@
   } from '../services/softwareUpdate';
   import SoftwareUpdateDialog from './SoftwareUpdateDialog.svelte';
   import WindowsCaptionControls from './WindowsCaptionControls.svelte';
-  import nomoLogoDark from '../../../src-tauri/icons/nomo/source/nomo-app-dark.svg?url';
-  import nomoLogoLight from '../../../src-tauri/icons/nomo/source/nomo-app-light.svg?url';
+  import nomoLogoDark from '../../../desktop/packaging/icons/nomo/source/nomo-app-dark.svg?url';
+  import nomoLogoLight from '../../../desktop/packaging/icons/nomo/source/nomo-app-light.svg?url';
 
   const GITHUB_REPOSITORY_URL = 'https://github.com/nomo-md/nomo';
   const GITHUB_ISSUE_URL = 'https://github.com/nomo-md/nomo/issues/new/choose';
@@ -282,7 +282,7 @@
 
   onMount(() => {
     logToTerminal('info', 'SettingsWindow', '设置窗口打开');
-    desktopEnabled = isTauriRuntime();
+    desktopEnabled = isDesktopRuntime();
     platformCapabilities = getPlatformCapabilities();
     settingsCloseListenerCancelled = false;
     systemThemeSyncActive = true;
@@ -334,7 +334,7 @@
       return;
     }
     try {
-      const { emit } = await import('@tauri-apps/api/event');
+      const { emit } = await import('../../lib/desktop/runtime/event');
       emitDesktopEvent = emit;
     } catch {
       emitDesktopEvent = null;
@@ -343,7 +343,7 @@
 
   async function installSettingsCloseListener() {
     try {
-      const { listen } = await import('@tauri-apps/api/event');
+      const { listen } = await import('../../lib/desktop/runtime/event');
       const unlisten = await listen<number>('nomo://settings-request-close', (event) => {
         void handleClose(event.payload);
       });
@@ -352,7 +352,7 @@
         return;
       }
       settingsCloseUnlisten = unlisten;
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       if (settingsCloseListenerCancelled) {
         settingsCloseUnlisten?.();
         settingsCloseUnlisten = null;
@@ -463,7 +463,7 @@
               (keysToSave.includes('interfaceLanguage') ||
                 keysToSave.includes('shortcutPreferences'))
             ) {
-              const { invoke } = await import('@tauri-apps/api/core');
+              const { invoke } = await import('../../lib/desktop/runtime/core');
               await invoke('refresh_interface_language_chrome').catch(() => undefined);
             }
             lastPersistedSettings = normalizeAppPreferences({
@@ -538,6 +538,16 @@
     await saveLatestSettings();
   }
 
+  // macOS 设置窗口按系统设置惯例支持 Esc 关闭（⌘W 由窗口菜单提供）。
+  function handleSettingsKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+    if (!desktopEnabled || !platformCapabilities.isMac) return;
+    // 页内模态对话框（如软件更新）打开时 Esc 归它处理。
+    if (document.querySelector('[aria-modal="true"]')) return;
+    event.preventDefault();
+    void handleClose();
+  }
+
   async function handleClose(requestId?: number) {
     if (closeInProgress) {
       return;
@@ -546,7 +556,7 @@
     logToTerminal('info', 'SettingsWindow', '收到设置窗口关闭请求');
     try {
       if (desktopEnabled && requestId !== undefined) {
-        const { invoke } = await import('@tauri-apps/api/core');
+        const { invoke } = await import('../../lib/desktop/runtime/core');
         await invoke('acknowledge_settings_close_request', { requestId });
       }
       await flushPendingSettingsSave();
@@ -554,7 +564,7 @@
     } catch (error) {
       closeInProgress = false;
       if (desktopEnabled && requestId !== undefined) {
-        await import('@tauri-apps/api/core')
+        await import('../../lib/desktop/runtime/core')
           .then(({ invoke }) => invoke('cancel_settings_close_request', { requestId }))
           .catch(() => undefined);
       }
@@ -585,7 +595,7 @@
       await emitDesktopEvent(SETTINGS_UPDATED_EVENT, payload).catch(() => undefined);
       return;
     }
-    const { emit } = await import('@tauri-apps/api/event');
+    const { emit } = await import('../../lib/desktop/runtime/event');
     emitDesktopEvent = emit;
     await emit(SETTINGS_UPDATED_EVENT, payload).catch(() => undefined);
   }
@@ -595,7 +605,7 @@
       window.close();
       return;
     }
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import('../../lib/desktop/runtime/core');
     await invoke('close_window');
   }
 
@@ -769,7 +779,7 @@
     }
 
     const requestId = `update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const { emit, listen } = await import('@tauri-apps/api/event');
+    const { emit, listen } = await import('../../lib/desktop/runtime/event');
 
     return new Promise<boolean>((resolve) => {
       let settled = false;
@@ -930,7 +940,7 @@
       return;
     }
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       await invoke('open_microsoft_store_product');
     } catch (error) {
       showStatus(error instanceof Error ? error.message : String(error));
@@ -993,33 +1003,6 @@
     });
   }
 
-  async function handleWindowDrag(event: MouseEvent) {
-    if (!desktopEnabled || event.buttons !== 1) {
-      return;
-    }
-
-    const target = event.target as HTMLElement;
-    if (target.closest('button,input,select,textarea,label,a')) {
-      return;
-    }
-
-    if (!target.closest('[data-drag-region]')) {
-      return;
-    }
-
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const appWindow = getCurrentWindow();
-      if (event.detail === 2 && platformCapabilities.usesCustomWindowsTitlebar) {
-        await appWindow.toggleMaximize();
-      } else if (event.detail === 1) {
-        await appWindow.startDragging();
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   function setThemeMode(themeMode: ThemeMode) {
     updateDraft({ themeMode });
   }
@@ -1030,7 +1013,7 @@
 
   async function emitUserThemesChanged() {
     if (!desktopEnabled) return;
-    const { emit } = await import('@tauri-apps/api/event');
+    const { emit } = await import('../../lib/desktop/runtime/event');
     await emit(USER_THEMES_CHANGED_EVENT).catch(() => undefined);
   }
 
@@ -1072,7 +1055,7 @@
     if (userThemeBusy) return;
     userThemeBusy = true;
     try {
-      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const { ask } = await import('../../lib/desktop/runtime/dialog');
       const confirmed = await ask(t.deleteUserThemeConfirm({ name }), {
         title: t.deleteUserTheme(),
         kind: 'warning',
@@ -1262,7 +1245,7 @@
     logToTerminal('info', 'SettingsWindow', '测试 PicGo 连接');
     picgoTesting = true;
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<{ ok: boolean; message: string }>('test_picgo_connection', {
         input: {
           provider: draftSettings.imageHandlingSettings.uploadProvider,
@@ -1304,7 +1287,7 @@
     }, 8000);
 
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       mdAssociationStatus = await invoke<MarkdownAssociationStatus>(
         'get_markdown_file_association_status',
       );
@@ -1408,7 +1391,7 @@
     }, 8000);
 
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       contextMenuStatus = await invoke<WindowsContextMenuStatus>('get_windows_context_menu_status');
       contextMenuError = '';
       logToTerminal('info', 'SettingsWindow', '右键菜单状态查询完成', {
@@ -1588,7 +1571,7 @@
 
       // 步骤3：执行注册
       logToTerminal('info', 'SettingsWindow', '开始注册右键菜单');
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<{ ok: boolean; message: string }>(
         'register_windows_context_menu',
       );
@@ -1625,7 +1608,7 @@
 
       // 步骤3：执行绑定
       logToTerminal('info', 'SettingsWindow', '开始绑定 Markdown 默认打开方式');
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<{ ok: boolean; message: string }>(
         'register_markdown_file_association',
       );
@@ -1651,7 +1634,7 @@
     unbindingMdAssociation = true;
     try {
       logToTerminal('info', 'SettingsWindow', '开始取消 Markdown 默认打开方式绑定');
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<{ ok: boolean; message: string }>(
         'unregister_markdown_file_association',
       );
@@ -1677,7 +1660,7 @@
     unregisteringContextMenu = true;
     try {
       logToTerminal('info', 'SettingsWindow', '开始取消右键菜单注册');
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<{ ok: boolean; message: string }>(
         'unregister_windows_context_menu',
       );
@@ -1695,7 +1678,7 @@
   }
 </script>
 
-<svelte:window on:contextmenu={suppressUnhandledContextMenu} />
+<svelte:window on:contextmenu={suppressUnhandledContextMenu} on:keydown={handleSettingsKeydown} />
 
 <svelte:head>
   {#key interfaceLocale}
@@ -1704,13 +1687,16 @@
 </svelte:head>
 
 {#key interfaceLocale}
-  <div class="settings-window-shell" data-interface-locale={interfaceLocale}>
+  <div
+    class="settings-window-shell"
+    class:is-mac-window={desktopEnabled && platformCapabilities.isMac}
+    data-interface-locale={interfaceLocale}
+  >
     <aside class="settings-nav" aria-label={t.settingsTitle()}>
       <div
         class="settings-brand"
         data-drag-region
         role="presentation"
-        on:mousedown={handleWindowDrag}
       >
         <span class="settings-brand-logo" aria-hidden="true">
           <img class="logo-light" src={nomoLogoLight} alt="" draggable="false" />
@@ -1742,7 +1728,6 @@
         class="settings-header"
         data-drag-region
         role="presentation"
-        on:mousedown={handleWindowDrag}
       >
         <div class="settings-header-title" data-drag-region>
           <h1 id="settings-title">{categoryTitles[activeCategory]}</h1>
@@ -3147,6 +3132,11 @@
     font-weight: 700;
     border-bottom: 1px solid var(--md-editor-border);
     user-select: none;
+  }
+
+  /* macOS 红绿灯位于侧栏标识行左侧（关闭按钮左上角 16,14），标识让出其宽度。 */
+  .settings-window-shell.is-mac-window .settings-brand {
+    padding-left: 84px;
   }
 
   .settings-brand-logo {

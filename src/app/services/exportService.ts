@@ -3,7 +3,7 @@ import { restoreMermaidExportSize } from '../../lib/services/mermaidDiagramView'
 import {
   exportHtmlFile,
   exportPdfFromHtml,
-} from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopStorage';
 import { logDebug, logInfo, logWarn } from '../../lib/services/logger';
 import exportCssContent from '../styles/export-document.css?inline';
 import typographyRuntime from 'virtual:nomo-typography-runtime';
@@ -364,7 +364,7 @@ async function pickSavePath(
   defaultName: string,
   filters: Array<{ name: string; extensions: string[] }>,
 ): Promise<string | null> {
-  const { save } = await import('@tauri-apps/plugin-dialog');
+  const { save } = await import('../../lib/desktop/runtime/dialog');
   return save({
     defaultPath: defaultName,
     filters,

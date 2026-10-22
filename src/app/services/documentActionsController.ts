@@ -1,4 +1,4 @@
-import type { NativeDocument, RecentEntry } from '../../lib/desktop/tauriStorage';
+import type { NativeDocument, RecentEntry } from '../../lib/desktop/desktopStorage';
 import type { EditorCore } from '../../lib/editor-core';
 import { calculateDocumentStats } from '../../lib/outline/outlineService';
 import {

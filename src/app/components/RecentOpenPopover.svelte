@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, onDestroy } from 'svelte';
   import { History, FileText, FolderOpen, X } from '@lucide/svelte';
-  import type { RecentEntry } from '../../lib/desktop/tauriStorage';
+  import type { RecentEntry } from '../../lib/desktop/desktopStorage';
   import { t } from '../i18n';
 
   export let recentFiles: RecentEntry[];

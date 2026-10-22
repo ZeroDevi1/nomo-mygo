@@ -72,73 +72,32 @@ describe('App outline layout', () => {
     resolve(__dirname, 'services/themeManager.ts'),
     'utf-8',
   );
-  const tauriMenuSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/window/menu.rs'),
-    'utf-8',
-  );
-  const tauriLibSource = readFileSync(resolve(__dirname, '../../src-tauri/src/lib.rs'), 'utf-8');
-  const tauriConfigSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/tauri.conf.json'),
-    'utf-8',
-  );
-  const tauriWindowsConfigSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/tauri.windows.conf.json'),
-    'utf-8',
-  );
-  const tauriMacosConfigSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/tauri.macos.conf.json'),
-    'utf-8',
-  );
+  const readDesktopSource = (name: string) =>
+    readFileSync(resolve(__dirname, '../../desktop', name), 'utf-8');
+  const nativeMenuSource = readDesktopSource('menu.go');
+  const desktopMainSource = readDesktopSource('main.go');
+  const mygoConfigSource = readFileSync(resolve(__dirname, '../../mygo.config.ts'), 'utf-8');
   const releaseWorkflowSource = readFileSync(
     resolve(__dirname, '../../.github/workflows/release.yml'),
     'utf-8',
   );
-  const windowsOpenWithInstallerHookSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/installer/windows-open-with.nsh'),
-    'utf-8',
+  const windowsOpenWithInstallerHookSource = readDesktopSource(
+    'packaging/installer/windows-open-with.nsh',
   );
-  const simplifiedChineseInstallerLanguageSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/installer/SimpChinese.nsh'),
-    'utf-8',
+  const simplifiedChineseInstallerLanguageSource = readDesktopSource(
+    'packaging/installer/SimpChinese.nsh',
   );
-  const tauriTraySource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/window/tray.rs'),
-    'utf-8',
-  );
-  const tauriExternalOpenSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/window/external_open.rs'),
-    'utf-8',
-  );
-  const tauriWindowCommandsSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/window/commands.rs'),
-    'utf-8',
-  );
-  const tauriMacosSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/window/os/macos.rs'),
-    'utf-8',
-  );
-  const tauriWindowsSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/window/os/windows.rs'),
-    'utf-8',
-  );
-  const desktopCapabilitySource = readFileSync(
-    resolve(__dirname, '../../src-tauri/capabilities/default.json'),
-    'utf-8',
-  );
-  const tauriImageAssetsSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/file_system/image_assets.rs'),
-    'utf-8',
-  );
-  const tauriFileSystemSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/file_system.rs'),
-    'utf-8',
-  );
-  const tauriConfigCommandsSource = readFileSync(
-    resolve(__dirname, '../../src-tauri/src/config/commands.rs'),
-    'utf-8',
-  );
-  const tauriStorageSource = readFileSync(
-    resolve(__dirname, '../lib/desktop/tauriStorage.ts'),
+  const nativeTraySource = readDesktopSource('tray.go');
+  const nativeExternalOpenSource = readDesktopSource('external_open.go');
+  const nativeOpenTargetsSource = readDesktopSource('open_targets.go');
+  const nativeWindowsSource = readDesktopSource('windows.go');
+  const nativeLifecycleSource = readDesktopSource('lifecycle.go');
+  const nativeImageAssetsSource = readDesktopSource('image_assets.go');
+  const nativeWindowsIntegrationSource = readDesktopSource('windows_integration.go');
+  const nativeFileCommandsSource = readDesktopSource('commands_files.go');
+  const nativeConfigCommandsSource = readDesktopSource('commands_config.go');
+  const desktopStorageSource = readFileSync(
+    resolve(__dirname, '../lib/desktop/desktopStorage.ts'),
     'utf-8',
   );
   const outlineInteractionSource = readFileSync(
@@ -486,11 +445,10 @@ describe('App outline layout', () => {
     expect(appCommandsSource).toContain("type: 'insertMermaidBlock'");
     expect(appCommandsSource).toContain("command.startsWith('menu-chart:')");
     expect(appCommandsSource).toContain("type: 'insertDiagramBlock'");
-    expect(tauriMenuSource).toContain('SubmenuBuilder::new(app, tr(locale, "menu_chart"))');
-    expect(tauriMenuSource).toContain('"menu-chart"');
-    expect(tauriMenuSource).toContain('tr(locale, "menu_chart_blank")');
-    expect(tauriMenuSource).toContain('menu-chart:flowchart');
-    expect(tauriMenuSource).toContain('menu-chart:erDiagram');
+    expect(nativeMenuSource).toContain('{Label: tr("menu_chart"), Submenu:');
+    expect(nativeMenuSource).toContain('commandItem("menu-chart", tr("menu_chart_blank"), "")');
+    expect(nativeMenuSource).toContain('menu-chart:flowchart');
+    expect(nativeMenuSource).toContain('menu-chart:erDiagram');
   });
 
   it('wires highlight through toolbar, titlebar and native menu', () => {
@@ -500,8 +458,7 @@ describe('App outline layout', () => {
     expect(titleBarSource).not.toContain("comingSoon('高亮'");
     expect(appCommandsSource).toContain("command === 'menu-highlight'");
     expect(appCommandsSource).toContain("handlers.runCommand({ type: 'toggleHighlight' });");
-    expect(tauriMenuSource).toContain('"menu-highlight"');
-    expect(tauriMenuSource).toContain('tr(locale, "menu_highlight")');
+    expect(nativeMenuSource).toContain('commandItem("menu-highlight", tr("menu_highlight"), "")');
   });
 
   it('wires link editing through toolbar, titlebar and shortcuts', () => {
@@ -517,8 +474,7 @@ describe('App outline layout', () => {
     expect(appCommandsSource).toContain("command === 'menu-link'");
     expect(appCommandsSource).toContain('handlers.openLinkPicker();');
     expect(appCommandsSource).toContain("key === 'k' && !event.shiftKey");
-    expect(tauriMenuSource).toContain('"menu-link"');
-    expect(tauriMenuSource).toContain('tr(locale, "menu_link")');
+    expect(nativeMenuSource).toContain('commandItem("menu-link", tr("menu_link"), "CmdOrCtrl+K")');
     expect(appSource).toContain('editor.getActiveLink()');
     expect(appSource).toContain("type: 'insertLink'");
     expect(appSource).toContain('text: linkText');
@@ -537,71 +493,54 @@ describe('App outline layout', () => {
     expect(appCommandsSource).toContain("type: 'insertCommentInline'");
     expect(appCommandsSource).toContain("command === 'menu-comment-block'");
     expect(appCommandsSource).toContain("type: 'insertCommentBlock'");
-    expect(tauriMenuSource).toContain('"menu-comment"');
-    expect(tauriMenuSource).toContain('tr(locale, "menu_comment")');
-    expect(tauriMenuSource).toContain('"menu-comment-block"');
-    expect(tauriMenuSource).toContain('tr(locale, "menu_comment_block")');
+    expect(nativeMenuSource).toContain('commandItem("menu-comment", tr("menu_comment"), "")');
+    expect(nativeMenuSource).toContain(
+      'commandItem("menu-comment-block", tr("menu_comment_block"), "")',
+    );
   });
 
   it('forwards native menu events to desktop command handlers', () => {
-    const tauriLibSource = readFileSync(resolve(__dirname, '../../src-tauri/src/lib.rs'), 'utf-8');
-    const tauriCommandsSource = readFileSync(
-      resolve(__dirname, '../../src-tauri/src/window/commands.rs'),
-      'utf-8',
-    );
-
-    expect(tauriLibSource).toContain('install_window_menu(app.handle(), &window)');
-    expect(tauriCommandsSource).toContain('install_window_menu(&app, &window)');
-    expect(tauriMenuSource).toContain('app.set_menu(menu)');
-    expect(tauriMenuSource).toContain('app.on_menu_event(|app, event|');
-    expect(tauriMenuSource).toContain('focused_document_window(app)');
-    expect(tauriMenuSource).toContain('app.webview_windows()');
-    expect(tauriMenuSource).toContain('window.is_focused().unwrap_or(false)');
-    expect(tauriMenuSource).toContain('app.get_webview_window("main")');
-    expect(tauriMenuSource).toContain('window.on_menu_event(|window, event|');
-    expect(tauriMenuSource).toContain('window.emit("nomo://menu-command", command)');
-    expect(tauriMenuSource).toContain('emit_exit_request(window.app_handle())');
-    expect(tauriMenuSource).toContain('emit_exit_request(app)');
-    expect(tauriCommandsSource).toContain('app.emit("nomo://request-exit-app", ())');
+    expect(desktopMainSource).toContain('installWindowMenu(main)');
+    expect(nativeWindowsSource).toContain('installWindowMenu(window)');
+    expect(nativeMenuSource).toContain('mygo.App.SetMenu(buildWindowMenu())');
+    expect(nativeMenuSource).toContain('func onMenuCommand(item *mygo.MenuItem, win *mygo.Window)');
+    expect(nativeMenuSource).toContain('target = focusedDocumentWindow()');
+    expect(nativeMenuSource).toContain('window.win.IsFocused()');
+    expect(nativeMenuSource).toContain('const menuCommandEvent = "nomo://menu-command"');
+    expect(nativeMenuSource).toContain('emitToWindow(target, menuCommandEvent, command)');
+    expect(nativeMenuSource).toContain('go func() { _ = beginExit() }()');
+    expect(nativeLifecycleSource).toContain('broadcastTo("nomo://request-exit-app", id, label)');
     expect(appSource).toContain("listen('nomo://request-exit-app'");
     expect(appSource).toContain('requestExitApp()');
-    expect(tauriMenuSource).toContain('format!("open-recent:{}:{}", entry.entry_type, entry.path)');
+    expect(nativeMenuSource).toContain('commandItem("open-recent:"+entry.EntryType+":"+entry.Path');
     expect(appCommandsSource).toContain("command === 'new-window'");
     expect(appCommandsSource).toContain("command.startsWith('open-recent:')");
   });
 
   it('routes external document open requests into existing document windows', () => {
-    expect(tauriLibSource).toContain('tauri_plugin_single_instance::init');
-    expect(tauriLibSource).toContain('collect_external_open_targets_from_args');
-    expect(tauriLibSource).toContain('route_external_open_targets');
-    expect(tauriLibSource).toContain('tauri::RunEvent::Opened');
-    expect(tauriLibSource).toContain('collect_markdown_paths_from_urls');
-    expect(tauriLibSource).toContain('persist_pending_external_open');
-    expect(tauriLibSource).toContain('persist_pending_external_folder_open');
-    expect(tauriLibSource).toContain('try_state::<crate::config::ConfigManager>()');
-    expect(tauriLibSource).toContain('queue_early_external_open(paths)');
-    expect(tauriLibSource).toContain('take_early_external_open_paths()');
-    expect(tauriExternalOpenSource).toContain(
-      'const OPEN_DOCUMENT_EVENT: &str = "nomo://open-document"',
+    expect(desktopMainSource).toContain('mygo.App.RequestSingleInstanceLock()');
+    expect(desktopMainSource).toContain('collectExternalOpenTargets(os.Args[1:], mustGetwd())');
+    expect(desktopMainSource).toContain('mygo.App.OnSecondInstance(');
+    expect(desktopMainSource).toContain('queueExternalOpenTargets(targets)');
+    expect(desktopMainSource).toContain('mygo.App.OnOpenFile(handleOpenFile)');
+    expect(desktopMainSource).toContain('takeEarlyOpenPaths()');
+    expect(nativeExternalOpenSource).toContain('func persistPendingExternalOpen(');
+    expect(nativeExternalOpenSource).toContain('func persistPendingExternalFolderOpen(');
+    expect(nativeOpenTargetsSource).toContain('openDocumentEvent  = "nomo://open-document"');
+    expect(nativeExternalOpenSource).toContain('openFolderEvent              = "nomo://open-folder"');
+    expect(nativeExternalOpenSource).toContain(
+      'broadcastTo(openDocumentEvent, externalOpenPayload{WindowLabel: target.label, Paths: paths}, target.label)',
     );
-    expect(tauriExternalOpenSource).toContain(
-      'const OPEN_FOLDER_EVENT: &str = "nomo://open-folder"',
-    );
-    expect(tauriExternalOpenSource).toContain('.emit(');
-    expect(tauriExternalOpenSource).toContain('OPEN_DOCUMENT_EVENT');
-    expect(tauriExternalOpenSource).toContain('OPEN_FOLDER_EVENT');
-    expect(tauriExternalOpenSource).toContain('#[serde(rename = "windowLabel")]');
-    expect(tauriExternalOpenSource).toContain('window_label: label.clone()');
-    expect(tauriExternalOpenSource).toContain('is_document_window_label');
-    expect(tauriStorageSource).toContain('listenDesktopOpenDocuments');
-    expect(tauriStorageSource).toContain("listen<ExternalOpenPayload>('nomo://open-document'");
-    expect(tauriStorageSource).toContain('listenDesktopOpenFolder');
-    expect(tauriStorageSource).toContain("listen<ExternalOpenFolderPayload>('nomo://open-folder'");
-    expect(tauriStorageSource).toContain(
+    expect(nativeExternalOpenSource).toContain('WindowLabel string `json:"windowLabel"`');
+    expect(desktopStorageSource).toContain('listenDesktopOpenDocuments');
+    expect(desktopStorageSource).toContain("listen<ExternalOpenPayload>('nomo://open-document'");
+    expect(desktopStorageSource).toContain('listenDesktopOpenFolder');
+    expect(desktopStorageSource).toContain("listen<ExternalOpenFolderPayload>('nomo://open-folder'");
+    expect(desktopStorageSource).toContain(
       'const eventWindowLabel = normalizeEventWindowLabel(event.payload);',
     );
-    expect(tauriStorageSource).toContain('handler(paths, eventWindowLabel);');
-    expect(tauriStorageSource).toContain('handler(folderPath, eventWindowLabel);');
+    expect(desktopStorageSource).toContain('handler(paths, eventWindowLabel);');
+    expect(desktopStorageSource).toContain('handler(folderPath, eventWindowLabel);');
     expect(appSource).toContain('listenDesktopOpenDocuments');
     expect(appSource).toContain('listenDesktopOpenFolder');
     expect(appSource).toContain('listenDesktopOpenDocuments((paths, targetWindowLabel) =>');
@@ -624,35 +563,15 @@ describe('App outline layout', () => {
     expect(appSource).toContain('openExternalMarkdownPaths(paths)');
     expect(appSource).toContain('openFolderWithBehavior(folderPath)');
     expect(appSource).toContain("openRecentEntry(path, 'file')");
-    expect(tauriConfigSource).toContain('"fileAssociations"');
-    expect(tauriConfigSource).toContain('"md"');
-    expect(tauriConfigSource).toContain('"markdown"');
-    expect(tauriConfigSource).toContain('"role": "Editor"');
+    expect(mygoConfigSource).toContain('fileAssociations: [');
+    expect(mygoConfigSource).toContain("ext: ['md', 'markdown']");
+    expect(mygoConfigSource).toContain("role: 'Editor'");
   });
 
   it('ships Windows releases as NSIS plus zip without MSI', () => {
-    const tauriWindowsConfig = JSON.parse(tauriWindowsConfigSource);
-    const tauriMacosConfig = JSON.parse(tauriMacosConfigSource);
-
-    expect(tauriWindowsConfig.bundle.targets).toEqual(['nsis']);
-    expect(tauriWindowsConfig.bundle.windows.nsis.languages).toEqual(['SimpChinese', 'English']);
-    expect(tauriWindowsConfig.bundle.windows.nsis.displayLanguageSelector).toBe(true);
-    expect(tauriWindowsConfig.bundle.windows.nsis.startMenuFolder).toBe('Nomo');
-    expect(tauriWindowsConfig.bundle.windows.nsis.installerIcon).toBe('icons/icon.ico');
-    expect(tauriWindowsConfig.bundle.windows.nsis.uninstallerIcon).toBe('icons/icon.ico');
-    expect(tauriWindowsConfig.bundle.windows.nsis.customLanguageFiles.SimpChinese).toBe(
-      'installer/SimpChinese.nsh',
-    );
-    expect(tauriWindowsConfig.bundle.windows.nsis.installerHooks).toBe(
-      'installer/windows-open-with.nsh',
-    );
-    expect(tauriMacosConfig.bundle.targets).toEqual(['app', 'dmg']);
-    expect(tauriMacosConfig.bundle.macOS.files['Resources/Assets.car']).toBe(
-      'target/appicon/Assets.car',
-    );
-    expect(readFileSync(resolve(__dirname, '../../src-tauri/Info.plist'), 'utf-8')).toContain(
-      '<string>AppIcon</string>',
-    );
+    expect(mygoConfigSource).toContain("main: './desktop'");
+    expect(mygoConfigSource).toContain("const macosAssetCatalog = 'target/appicon/Assets.car'");
+    expect(mygoConfigSource).toContain("'net.daringfireball.markdown'");
     expect(
       readFileSync(resolve(__dirname, '../../scripts/compile-macos-appicon.sh'), 'utf-8'),
     ).toContain('nomo-app-light-catalog-1024.png');
@@ -674,9 +593,7 @@ describe('App outline layout', () => {
     expect(releaseWorkflowSource).not.toContain('includeUpdaterJson');
     expect(releaseWorkflowSource).not.toContain('x64_en-US.msi');
     expect(releaseWorkflowSource).not.toContain('portable');
-    expect(tauriConfigSource).not.toContain('createUpdaterArtifacts');
-    expect(tauriConfigSource).not.toContain('"pubkey"');
-    expect(tauriLibSource).not.toContain('tauri_plugin_updater');
+    expect(mygoConfigSource).not.toContain('updates:');
   });
 
   it('registers Nomo as an optional document open-with application', () => {
@@ -773,20 +690,17 @@ describe('App outline layout', () => {
   it('mirrors the app chrome menu into the native macOS menubar', () => {
     expect(appShellSource).toContain('{#if desktopEnabled}');
     expect(appShellSource).toContain('<AppTitleBar');
-    expect(tauriMenuSource).toContain('static APP_MENU_EVENT_INSTALLED');
-    expect(tauriMenuSource).toContain('SubmenuBuilder::new(app, tr(locale, "menu_paragraph"))');
-    expect(tauriMenuSource).toContain('SubmenuBuilder::new(app, tr(locale, "menu_settings"))');
-    expect(tauriMenuSource).toContain('"set-heading-1"');
-    expect(tauriMenuSource).toContain('"set-heading-6"');
-    expect(tauriMenuSource).toContain('"insert-callout",');
-    expect(tauriMenuSource).toContain('"toggle-ordered-list",');
-    expect(tauriMenuSource).toContain('"toggle-bullet-list",');
-    expect(tauriMenuSource).toContain('"toggle-task-list",');
-    expect(tauriMenuSource).toContain('"open-settings"');
-    expect(tauriMenuSource).toContain('tr(locale, "menu_preferences")');
-    expect(tauriMenuSource).toContain('Some("CmdOrCtrl+N")');
-    expect(tauriMenuSource).toContain('"Cmd+Q"');
-    expect(tauriMenuSource).toContain('"Alt+F4"');
+    expect(nativeMenuSource).toContain('{Label: tr("menu_paragraph"), Submenu:');
+    expect(nativeMenuSource).toContain('{Label: tr("menu_settings"), Submenu:');
+    expect(nativeMenuSource).toContain('commandItem("set-heading-"+digit');
+    expect(nativeMenuSource).toContain('commandItem("insert-callout"');
+    expect(nativeMenuSource).toContain('commandItem("toggle-ordered-list"');
+    expect(nativeMenuSource).toContain('commandItem("toggle-bullet-list"');
+    expect(nativeMenuSource).toContain('commandItem("toggle-task-list"');
+    expect(nativeMenuSource).toContain('commandItem("open-settings", tr("menu_preferences")');
+    expect(nativeMenuSource).toContain('commandItem("new-file", tr("menu_new"), "CmdOrCtrl+N")');
+    expect(nativeMenuSource).toContain('"Cmd+Q"');
+    expect(nativeMenuSource).toContain('"Alt+F4"');
     expect(appCommandsSource).toContain("command === 'close-current-file'");
     expect(appCommandsSource).toContain("command === 'close-current-window'");
     expect(appCommandsSource).toContain("command === 'open-settings'");
@@ -916,30 +830,15 @@ describe('App outline layout', () => {
     expect(windowsCaptionControlsSource).not.toContain('currentWindow.destroy()');
     expect(windowsCaptionControlsSource).toContain('width: 46px;');
     expect(windowsCaptionControlsSource).toContain('height: 100%;');
-    expect(desktopWindowSource).toContain("title: 'Nomo'");
     expect(desktopWindowSource).toContain('} - Nomo');
-    expect(desktopWindowSource).toContain('getNewWindowChromeOptions');
-    expect(desktopWindowSource).toContain("titleBarStyle: 'overlay'");
-    expect(desktopWindowSource).toContain('trafficLightPosition: new LogicalPosition(16, 24)');
-    expect(desktopWindowSource).toContain('hiddenTitle: true');
-    expect(desktopWindowSource).toContain(
-      'visible: !platformCapabilities.usesCustomWindowsTitlebar',
-    );
+    expect(desktopWindowSource).toContain("invoke('create_document_window', { windowLabel: windowId })");
+    expect(nativeWindowsSource).toContain('Title:           "Nomo"');
     expect(existsSync(resolve(__dirname, 'services/windowChrome.ts'))).toBe(false);
     expect(existsSync(resolve(__dirname, 'styles/window-chrome.css'))).toBe(false);
-    expect(
-      existsSync(resolve(__dirname, '../../src-tauri/src/window/os/windows/titlebar.rs')),
-    ).toBe(false);
-    expect(tauriWindowsSource).toMatch(/fn window_decorations\(\) -> bool \{\s*false\s*\}/);
-    expect(tauriWindowsSource).toContain('.set_decorations(window_decorations())');
-    expect(tauriWindowsSource).toContain('.set_shadow(true)');
-    expect(tauriWindowsSource).not.toContain('SetWindowSubclass');
-    expect(tauriWindowCommandsSource).not.toContain('get_window_chrome_metrics');
-    expect(tauriLibSource).not.toContain('get_window_chrome_metrics');
-    expect(desktopCapabilitySource).toContain('"core:window:allow-minimize"');
-    expect(tauriMacosSource).toContain('uses_overlay_titlebar(window.label())');
-    expect(tauriMacosSource).toContain('label != "window-settings"');
-    expect(tauriConfigSource).toContain('"y": 24');
+    expect(nativeWindowsSource).toContain('options.TitleBarStyle = mygo.TitleBarHidden');
+    expect(nativeWindowsSource).toContain('options.HideWindowButtons = true');
+    expect(nativeWindowsSource).toContain('options.TrafficLightPosition = &mygo.Point{X: 16, Y: 14}');
+    expect(nativeWindowsSource).not.toContain('get_window_chrome_metrics');
     expect(styles).toMatch(/\.titlebar\s*\{[\s\S]*?height:\s*42px;/);
     expect(styles).toMatch(/\.titlebar-row\.top-row\s*\{[\s\S]*?height:\s*42px;/);
     expect(styles).toMatch(
@@ -1149,13 +1048,9 @@ describe('App outline layout', () => {
       "requestedPreferences.themeMode === 'system'\n        ? await readEffectiveSystemScheme(desktopEnabled)",
     );
     expect(appSource).toContain('await syncSystemThemeFromDesktop({ writeBootSnapshot: true })');
-    expect(tauriLibSource).toContain('WindowEvent::ThemeChanged');
-    expect(tauriWindowCommandsSource).toContain('broadcast_system_theme_changed');
-    expect(tauriWindowCommandsSource).toContain('system_theme_event_payload');
-    expect(tauriWindowCommandsSource).toContain('crate::window::os::system_theme()');
-    expect(tauriWindowCommandsSource).toContain('run_on_main_thread');
-    expect(tauriMacosSource).toContain('NSUserDefaults');
-    expect(tauriMacosSource).not.toContain('Command::new("defaults")');
+    expect(desktopMainSource).toContain('mygo.Theme.OnUpdated(broadcastSystemThemeChanged)');
+    expect(nativeTraySource).toContain('func broadcastSystemThemeChanged()');
+    expect(nativeTraySource).toContain('func systemTheme() string');
     expect(settingsWindowSource).toContain('softwareUpdateUnsupportedMacos');
     expect(settingsWindowSource).toContain('HOMEBREW_SETUP_COMMAND');
     expect(releaseWorkflowSource).toContain('update-homebrew-cask');
@@ -1197,70 +1092,32 @@ describe('App outline layout', () => {
     expect(appSource).toContain('shortcutPreferences');
     expect(appSource).toContain('requestExitApp()');
 
-    expect(tauriImageAssetsSource).toContain('pub(crate) fn test_picgo_connection');
-    expect(tauriImageAssetsSource).toContain('create_picgo_core_command(command)');
-    expect(tauriWindowCommandsSource).toContain('pub(crate) fn register_markdown_file_association');
-    expect(tauriWindowCommandsSource).toContain('pub(crate) fn request_exit_app');
-    expect(tauriTraySource).toContain('emit_exit_request(app)');
-    expect(tauriMenuSource).toContain('emit_exit_request(window.app_handle())');
-    expect(tauriMenuSource).toContain('emit_exit_request(app)');
+    expect(nativeImageAssetsSource).toContain('register("test_picgo_connection"');
+    expect(nativeImageAssetsSource).toContain('func runPicgoCore(command string');
+    expect(nativeWindowsIntegrationSource).toContain('register("register_markdown_file_association"');
+    expect(nativeWindowsSource).toContain('register("request_exit_app"');
+    expect(nativeTraySource).toContain('go func() { _ = beginExit() }()');
+    expect(nativeMenuSource).toContain('go func() { _ = beginExit() }()');
   });
 
   it.skip('supports closing windows to the system tray when enabled', () => {
-    expect(tauriLibSource).toContain('crate::window::tray::install_app_tray');
-    expect(tauriLibSource).toContain('crate::window::commands::hide_window_to_tray');
-    expect(tauriLibSource).toContain(
-      'crate::window::tray::sync_tray_active_with_window_visibility',
-    );
-    expect(tauriLibSource).toContain('WindowEvent::CloseRequested');
-    expect(tauriTraySource).toContain('TrayIconBuilder::with_id');
-    expect(tauriTraySource).toContain('i18n::app_text(app, "tray_open")');
-    expect(tauriTraySource).toContain('nomo-tray-dark-active-48.png');
-    expect(tauriTraySource).toContain('nomo-tray-dark-inactive-48.png');
-    expect(tauriTraySource).toContain('nomo-tray-light-active-48.png');
-    expect(tauriTraySource).toContain('nomo-tray-light-inactive-48.png');
-    expect(tauriTraySource).toContain('set_tray_active');
-    expect(tauriTraySource).toContain('sync_tray_active_with_window_visibility');
-    expect(tauriTraySource).toContain('set_desktop_icon_theme');
-    expect(tauriTraySource).toContain('nomo/macos/nomo-app-light-1024.png');
-    expect(tauriTraySource).toContain('nomo/macos/nomo-app-dark-1024.png');
-    expect(tauriWindowCommandsSource).toContain('get_desktop_system_theme');
-    expect(tauriLibSource).toContain('crate::window::commands::get_desktop_system_theme');
-    expect(tauriTraySource).toContain('apply_window_icons');
-    expect(tauriTraySource).toContain('.set_icon(icon.clone())');
-    expect(tauriTraySource).toContain('apply_dock_icon(app, theme)');
-    expect(tauriTraySource).toContain('run_on_main_thread');
-    expect(tauriTraySource).toContain('setApplicationIconImage(Some(&icon))');
-    expect(tauriLibSource).toContain('crate::window::commands::set_desktop_icon_theme');
+    expect(desktopMainSource).toContain('installAppTray()');
+    expect(nativeWindowsSource).toContain('register("hide_window_to_tray"');
+    expect(nativeTraySource).toContain('tr("tray_open")');
+    expect(nativeTraySource).toContain('tr("tray_exit")');
+    expect(nativeTraySource).toContain('packaging/icons/nomo/tray/*-48.png');
+    expect(nativeTraySource).toContain('register("set_desktop_icon_theme"');
+    expect(nativeTraySource).toContain('register("get_desktop_system_theme"');
+    expect(nativeTraySource).toContain('mygo.App.Dock.SetIcon(icon)');
+    expect(nativeTraySource).toContain('trayWindowPrefix   = "tray-window:"');
+    expect(nativeTraySource).toContain('chooseLastActiveWindow(candidates)');
+    expect(nativeWindowsSource).toContain('recordLastActiveWindow(label)');
+    expect(nativeWindowsSource).toContain('register("report_window_title"');
     expect(desktopWindowSource).toContain("invoke('set_desktop_icon_theme'");
     expect(desktopWindowSource).toContain("invoke<'light' | 'dark'>('get_desktop_system_theme'");
     expect(appSource).toContain('getBrowserSystemScheme');
     expect(appSource).toContain('payload.effectiveScheme');
     expect(appSource).toContain('syncSystemThemeFromDesktop({ transition: true, systemScheme })');
-    expect(tauriTraySource).toContain('i18n::app_text(app, "tray_exit")');
-    expect(tauriTraySource).toContain('emit_exit_request(app)');
-    expect(tauriTraySource).toContain('TrayIconEvent::DoubleClick');
-    expect(tauriTraySource).toContain('closeWindowBehavior');
-    const showMainWindowStart = tauriTraySource.indexOf('pub(crate) fn show_main_window');
-    const showMainWindowEnd = tauriTraySource.indexOf(
-      'fn show_window_by_label',
-      showMainWindowStart,
-    );
-    const showMainWindowSource = tauriTraySource.slice(showMainWindowStart, showMainWindowEnd);
-    expect(tauriLibSource).toContain('WindowEvent::Focused(true)');
-    expect(tauriLibSource).toContain('record_last_active_window(window.app_handle(), label)');
-    expect(tauriLibSource).toContain('WindowEvent::Destroyed');
-    expect(tauriLibSource).toContain('forget_window(window.app_handle(), label)');
-    expect(tauriTraySource).toContain('static LAST_ACTIVE_WINDOW');
-    expect(tauriTraySource).toContain('static WINDOW_TITLES');
-    expect(tauriTraySource).toContain('const TRAY_WINDOW_PREFIX');
-    expect(tauriTraySource).toContain('choose_last_active_window(windows.iter().filter');
-    expect(tauriTraySource).toContain('tray-window:');
-    expect(tauriTraySource).toContain('show_window_by_label');
-    expect(tauriTraySource).toContain('window_display_title');
-    expect(showMainWindowSource).not.toContain('for (_label, window) in app.webview_windows()');
-    expect(tauriWindowCommandsSource).toContain('pub(crate) fn report_window_title');
-    expect(tauriLibSource).toContain('crate::window::commands::report_window_title');
     expect(desktopWindowSource).toContain("invoke('report_window_title'");
   });
 
@@ -1336,8 +1193,6 @@ describe('App outline layout', () => {
     expect(appSource).toContain(
       'const requestedWindowLabel = event.payload?.windowLabel ?? event.payload?.window_label;',
     );
-    expect(tauriLibSource).toContain('请求前端确认关闭');
-    expect(tauriLibSource).not.toContain('窗口隐藏到托盘：{label}');
   });
 
   it('only skips close confirmation for clean preview tabs', () => {
@@ -1351,14 +1206,16 @@ describe('App outline layout', () => {
   });
 
   it('bundles and opens the first-run sample document through the normal document flow', () => {
-    const tauriConfig = JSON.parse(tauriConfigSource);
-
-    expect(tauriConfig.bundle.resources).toEqual({
-      '../sample.md': 'samples/sample.md',
-      '../assets/128x128.png': 'samples/assets/128x128.png',
-    });
-    expect(tauriLibSource).toContain('crate::file_system::install_sample_document');
-    expect(tauriStorageSource).toContain(
+    const prepareResourcesSource = readFileSync(
+      resolve(__dirname, '../../scripts/prepare-desktop-resources.mjs'),
+      'utf-8',
+    );
+    expect(mygoConfigSource).toContain("resources: ['target/desktop-resources/samples']");
+    expect(prepareResourcesSource).toContain("join(samples, 'sample.md')");
+    expect(prepareResourcesSource).toContain("join(samples, 'assets', '128x128.png')");
+    expect(nativeFileCommandsSource).toContain('const sampleDocumentResource = "samples/sample.md"');
+    expect(nativeFileCommandsSource).toContain('register("install_sample_document"');
+    expect(desktopStorageSource).toContain(
       "invoke<NativeDocumentPayload>('install_sample_document')",
     );
     expect(appSource).toContain('maybeOpenFirstRunSample');
@@ -1547,11 +1404,10 @@ describe('App outline layout', () => {
     expect(appSource).not.toContain("updateAppSetting('workspaceDir'");
     expect(appSource).not.toContain("settings.find((s) => s.key === 'workspaceDir')");
     expect(appSource).not.toContain('getDefaultWorkspaceDir');
-    expect(tauriStorageSource).not.toContain('getDefaultWorkspaceDir');
-    expect(tauriStorageSource).not.toContain('get_default_workspace_dir');
-    expect(tauriLibSource).not.toContain('get_default_workspace_dir');
-    expect(tauriFileSystemSource).not.toContain('get_default_workspace_dir');
-    expect(tauriConfigCommandsSource).not.toContain('workspaceDir');
+    expect(desktopStorageSource).not.toContain('getDefaultWorkspaceDir');
+    expect(desktopStorageSource).not.toContain('get_default_workspace_dir');
+    expect(nativeFileCommandsSource).not.toContain('get_default_workspace_dir');
+    expect(nativeConfigCommandsSource).not.toContain('workspaceDir');
   });
 
   it.skip('keeps automatic local image cleanup behind an image setting toggle', () => {

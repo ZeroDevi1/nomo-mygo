@@ -3,7 +3,7 @@ import {
   updateAppSetting,
   updateAppSettings,
   type SettingRecord,
-} from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopStorage';
 import type { DiagramType } from '../../lib/editor-core/diagramTemplates';
 import { DEFAULT_QUICK_INSERT_TRIGGER, isQuickInsertTrigger } from '../../lib/editor-core/quickInsert';
 import { setTypographyOptions } from '../../lib/typography/options';

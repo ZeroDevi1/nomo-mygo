@@ -1,4 +1,4 @@
-import { isTauriRuntime } from '../../lib/desktop/tauriStorage';
+import { isDesktopRuntime } from '../../lib/desktop/desktopStorage';
 import {
   DEFAULT_IMAGE_HANDLING_SETTINGS,
   type ImageContext,
@@ -37,7 +37,7 @@ interface NativeImageRemovePayload {
 export function createDesktopImageLoader(): ImageLoader {
   return {
     async resolve(src: string, context: ImageContext): Promise<ImageResolveResult> {
-      if (isRemoteImageSrc(src) || !isTauriRuntime()) {
+      if (isRemoteImageSrc(src) || !isDesktopRuntime()) {
         return {
           src,
           displaySrc: src,
@@ -45,7 +45,7 @@ export function createDesktopImageLoader(): ImageLoader {
         };
       }
 
-      const { invoke, convertFileSrc } = await import('@tauri-apps/api/core');
+      const { invoke, convertFileSrc } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<NativeImageResolvePayload>('resolve_image_asset', {
         input: {
           document_path: context.documentPath ?? null,
@@ -72,7 +72,7 @@ export function createDesktopImageLoader(): ImageLoader {
         return uploadImage(input, context);
       }
 
-      if (!isTauriRuntime()) {
+      if (!isDesktopRuntime()) {
         return {
           markdownSrc: createFallbackMarkdownSrc(context.documentFileName ?? 'document.md', input.fileName),
         };
@@ -83,7 +83,7 @@ export function createDesktopImageLoader(): ImageLoader {
       }
 
       const bytes = await readImportBytes(input);
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<NativeImageAssetPayload>('import_image_asset', {
         input: {
           document_path: context.documentPath,
@@ -102,7 +102,7 @@ export function createDesktopImageLoader(): ImageLoader {
     },
 
     async remove(src: string, context: ImageContext) {
-      if (isRemoteImageSrc(src) || !isTauriRuntime()) {
+      if (isRemoteImageSrc(src) || !isDesktopRuntime()) {
         return {
           src,
           removed: false,
@@ -110,7 +110,7 @@ export function createDesktopImageLoader(): ImageLoader {
         };
       }
 
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../../lib/desktop/runtime/core');
       const result = await invoke<NativeImageRemovePayload>('delete_image_asset', {
         input: {
           document_path: context.documentPath ?? null,
@@ -132,7 +132,7 @@ async function uploadImage(
   input: ImageImportInput,
   context: ImageContext,
 ): Promise<ImageImportResult> {
-  if (!isTauriRuntime()) {
+  if (!isDesktopRuntime()) {
     throw new Error(t.imageUploadRequiresDesktop());
   }
 
@@ -141,7 +141,7 @@ async function uploadImage(
     ...context.settings,
   };
   const bytes = await readImportBytes(input);
-  const { invoke } = await import('@tauri-apps/api/core');
+  const { invoke } = await import('../../lib/desktop/runtime/core');
   const command =
     settings.uploadProvider === 'picgo'
       ? 'upload_image_via_picgo_server'

@@ -18,7 +18,7 @@ export async function resolveImagePath(
   }
 
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import('../../lib/desktop/runtime/core');
     const result = await invoke<{
       src: string;
       display_src: string;

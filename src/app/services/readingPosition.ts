@@ -1,4 +1,4 @@
-import { listAppSettings, updateAppSetting } from '../../lib/desktop/tauriStorage';
+import { listAppSettings, updateAppSetting } from '../../lib/desktop/desktopStorage';
 import type { OutlineScrollAnchor } from './outlineNavigation';
 
 const READING_POSITIONS_KEY = 'readingPositions';

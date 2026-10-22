@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import type { NativeDocument } from '../../lib/desktop/tauriStorage';
+import type { NativeDocument } from '../../lib/desktop/desktopStorage';
 import type { MarkdownTabState, Tab } from '../types';
 import { createEmptyExternalFileChange } from '../types';
 import { createDocumentActionsController } from './documentActionsController';

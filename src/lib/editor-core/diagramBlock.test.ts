@@ -418,6 +418,7 @@ describe('Mermaid theme refresh', () => {
   // 模拟真实滚动可见性，检验屏幕外主题合并和导出补齐，而非依赖 jsdom 的布局。
   function setupDiagram() {
     let notify: IntersectionObserverCallback;
+    let observed: Element | undefined;
     const disconnect = vi.fn();
     vi.stubGlobal(
       'IntersectionObserver',
@@ -425,7 +426,10 @@ describe('Mermaid theme refresh', () => {
         constructor(callback: IntersectionObserverCallback) {
           notify = callback;
         }
-        observe() {}
+        observe(element: Element) {
+          observed = element;
+        }
+        unobserve() {}
         disconnect = disconnect;
       },
     );
@@ -452,7 +456,7 @@ describe('Mermaid theme refresh', () => {
       disconnect,
       visible(value: boolean) {
         notify!(
-          [{ isIntersecting: value } as IntersectionObserverEntry],
+          [{ target: observed!, isIntersecting: value } as IntersectionObserverEntry],
           {} as IntersectionObserver,
         );
       },

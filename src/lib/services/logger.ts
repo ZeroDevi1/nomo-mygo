@@ -41,15 +41,16 @@ function persistEnabled(enabled: boolean): void {
   syncNativeLoggerEnabled(enabled);
 }
 
-function isTauriRuntime(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+function isDesktopRuntime(): boolean {
+  // MyGo 在页面脚本执行前注入 globalThis.mygo；普通浏览器中不存在。
+  return typeof globalThis === 'object' && (globalThis as { mygo?: unknown }).mygo !== undefined;
 }
 
 function syncNativeLoggerEnabled(enabled: boolean): void {
-  if (!isTauriRuntime()) {
+  if (!isDesktopRuntime()) {
     return;
   }
-  import('@tauri-apps/api/core')
+  import('../desktop/runtime/core')
     .then(({ invoke }) => {
       void invoke('set_logger_enabled', { enabled });
     })
@@ -93,12 +94,12 @@ function writeDevTools(entry: LogEntry): void {
 }
 
 function writeNative(entry: LogEntry): void {
-  if (!isTauriRuntime()) {
+  if (!isDesktopRuntime()) {
     return;
   }
 
   const data = serializeData(entry.data);
-  import('@tauri-apps/api/core')
+  import('../desktop/runtime/core')
     .then(({ invoke }) => {
       void invoke('log_message', {
         level: entry.level.toUpperCase(),

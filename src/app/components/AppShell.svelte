@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { RecentEntry } from '../../lib/desktop/tauriStorage';
-  import type { SoftwareUpdateSnapshot } from '../../lib/desktop/tauriUpdater';
+  import type { RecentEntry } from '../../lib/desktop/desktopStorage';
+  import type { SoftwareUpdateSnapshot } from '../../lib/desktop/desktopUpdater';
   import type {
     EditorCommand,
     EditorThemeOptions,

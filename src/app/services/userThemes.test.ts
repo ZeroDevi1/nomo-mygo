@@ -3,7 +3,7 @@ import {
   deleteUserThemeFile,
   listUserThemeFiles,
   saveUserThemeFile,
-} from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopStorage';
 import { isRegisteredThemeId, themeRegistry } from './themeRegistry';
 import {
   deleteUserTheme,
@@ -12,7 +12,7 @@ import {
   reloadUserThemes,
 } from './userThemes';
 
-vi.mock('../../lib/desktop/tauriStorage', () => ({
+vi.mock('../../lib/desktop/desktopStorage', () => ({
   listUserThemeFiles: vi.fn(),
   saveUserThemeFile: vi.fn().mockResolvedValue(undefined),
   deleteUserThemeFile: vi.fn().mockResolvedValue(undefined),

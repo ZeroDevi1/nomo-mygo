@@ -10,7 +10,7 @@ import {
   type ReadingPosition,
 } from './readingPosition';
 
-vi.mock('../../lib/desktop/tauriStorage', () => ({
+vi.mock('../../lib/desktop/desktopStorage', () => ({
   listAppSettings: vi.fn().mockResolvedValue([]),
   updateAppSetting: vi.fn().mockResolvedValue(undefined),
 }));
@@ -65,7 +65,7 @@ describe('readingPosition', () => {
   });
 
   it('加载新结构持久化记录到内存', async () => {
-    const { listAppSettings } = await import('../../lib/desktop/tauriStorage');
+    const { listAppSettings } = await import('../../lib/desktop/desktopStorage');
     const positions: Record<string, ReadingPosition> = {
       'C:/DOCS/A.md': {
         anchor: semanticAnchor,
@@ -84,7 +84,7 @@ describe('readingPosition', () => {
   });
 
   it('旧结构按目标模式优先迁移为统一锚点', async () => {
-    const { listAppSettings } = await import('../../lib/desktop/tauriStorage');
+    const { listAppSettings } = await import('../../lib/desktop/desktopStorage');
     vi.mocked(listAppSettings).mockResolvedValueOnce([
       {
         key: 'readingPositions',
@@ -109,7 +109,7 @@ describe('readingPosition', () => {
   });
 
   it('旧结构缺少目标模式锚点时回退另一模式', async () => {
-    const { listAppSettings } = await import('../../lib/desktop/tauriStorage');
+    const { listAppSettings } = await import('../../lib/desktop/desktopStorage');
     vi.mocked(listAppSettings).mockResolvedValueOnce([
       {
         key: 'readingPositions',
@@ -134,7 +134,7 @@ describe('readingPosition', () => {
   });
 
   it('flush 时按 updatedAt 合并，避免旧状态覆盖新状态', async () => {
-    const { listAppSettings, updateAppSetting } = await import('../../lib/desktop/tauriStorage');
+    const { listAppSettings, updateAppSetting } = await import('../../lib/desktop/desktopStorage');
     vi.mocked(listAppSettings).mockResolvedValueOnce([
       {
         key: 'readingPositions',
@@ -165,7 +165,7 @@ describe('readingPosition', () => {
 
   it('防抖写入并限制最近 300 个文件', async () => {
     vi.useFakeTimers();
-    const { updateAppSetting } = await import('../../lib/desktop/tauriStorage');
+    const { updateAppSetting } = await import('../../lib/desktop/desktopStorage');
 
     for (let i = 0; i < 301; i += 1) {
       saveReadingPositionToMemory(`/docs/${i}.md`, 'semantic', {

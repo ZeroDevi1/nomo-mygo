@@ -9,8 +9,8 @@ import {
   type DownloadedSoftwareUpdate,
   type SoftwareUpdateCandidate,
   type SoftwareUpdateSnapshot,
-} from '../../lib/desktop/tauriUpdater';
-import { isTauriRuntime } from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopUpdater';
+import { isDesktopRuntime } from '../../lib/desktop/desktopStorage';
 
 const INITIAL_SOFTWARE_UPDATE_STATE: SoftwareUpdateSnapshot = {
   status: 'idle',
@@ -26,7 +26,7 @@ let initializePromise: Promise<void> | null = null;
 let stateUnlisten: (() => void) | null = null;
 
 export async function initializeSoftwareUpdateCoordinator(): Promise<void> {
-  if (!isTauriRuntime()) {
+  if (!isDesktopRuntime()) {
     softwareUpdateState.set({
       ...INITIAL_SOFTWARE_UPDATE_STATE,
       status: 'unsupported',

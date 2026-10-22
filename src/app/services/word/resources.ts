@@ -1,4 +1,4 @@
-import { readFileAsBase64 } from '../../../lib/desktop/tauriStorage';
+import { readFileAsBase64 } from '../../../lib/desktop/desktopStorage';
 import { t } from '../../i18n';
 import { resolveImagePath } from '../exportImagePath';
 import { assertWordCanvasSize, WORD_CONTENT_WIDTH_PX, WORD_MEDIA_BUDGET, WordBudgetError, type WordMedia, type WordNode } from './protocol';

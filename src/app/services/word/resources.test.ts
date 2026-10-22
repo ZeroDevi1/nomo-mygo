@@ -3,7 +3,7 @@ import { createWordResources, readWordImage, withWordAbort } from './resources';
 import { assertWordCanvasSize, WORD_MEDIA_BUDGET, WordBudgetError } from './protocol';
 
 const read = vi.hoisted(() => vi.fn());
-vi.mock('../../../lib/desktop/tauriStorage', () => ({ readFileAsBase64: read }));
+vi.mock('../../../lib/desktop/desktopStorage', () => ({ readFileAsBase64: read }));
 vi.mock('../exportImagePath', () => ({ resolveImagePath: vi.fn(async (path) => ({ absolutePath: path })) }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); read.mockReset(); });
 

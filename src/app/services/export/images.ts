@@ -1,4 +1,4 @@
-import { readFileAsBase64 } from '../../../lib/desktop/tauriStorage';
+import { readFileAsBase64 } from '../../../lib/desktop/desktopStorage';
 import { resolveImagePath } from '../exportImagePath';
 import { awaitExport, throwIfExportAborted, type ExportTaskOptions } from './types';
 

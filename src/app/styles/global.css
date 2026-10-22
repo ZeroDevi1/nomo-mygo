@@ -94,3 +94,17 @@ select,
   -webkit-user-select: text;
   user-select: text;
 }
+
+/*
+ * 桌面窗口拖动区域：MyGo 在 mousedown 时读取目标元素计算后的 --app-region，
+ * 为 drag 时交给系统移动窗口，双击交给系统标题栏行为（最大化 / 缩放）。
+ * 自定义属性会继承，因此拖动区域内的菜单与按钮组需显式恢复为 no-drag；
+ * 原生交互元素（按钮、输入框、链接等）由 MyGo 自行排除。
+ */
+[data-drag-region] {
+  --app-region: drag;
+}
+
+[data-drag-region] :is(.titlebar-right, .titlebar-menu, .dropdown-menu) {
+  --app-region: no-drag;
+}

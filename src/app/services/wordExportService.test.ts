@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exportWord } from './wordExportService';
 
 const mocks = vi.hoisted(() => ({ save: vi.fn(), write: vi.fn(), model: vi.fn(), dispose: vi.fn(), resolve: vi.fn() }));
-vi.mock('@tauri-apps/plugin-dialog', () => ({ save: mocks.save }));
-vi.mock('../../lib/desktop/tauriStorage', () => ({ exportWordFile: mocks.write }));
+vi.mock('../../lib/desktop/runtime/dialog', () => ({ save: mocks.save }));
+vi.mock('../../lib/desktop/desktopStorage', () => ({ exportWordFile: mocks.write }));
 vi.mock('./word/model', () => ({ createWordModel: mocks.model }));
 vi.mock('./word/resources', () => ({ createWordResources: () => ({ media: [], resolve: mocks.resolve, dispose: mocks.dispose }) }));
 

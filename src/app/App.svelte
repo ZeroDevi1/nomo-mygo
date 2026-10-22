@@ -8,7 +8,7 @@
     listenDesktopMenuCommands,
     listenDesktopOpenDocuments,
     listenDesktopOpenFolder,
-    isTauriRuntime,
+    isDesktopRuntime,
     listAppSettings,
     installSampleDocument,
     openExternalLink,
@@ -28,7 +28,7 @@
     type RecentEntryType,
     clearRecentEntries,
     removeRecentEntryByPath,
-  } from '../lib/desktop/tauriStorage';
+  } from '../lib/desktop/desktopStorage';
   import {
     createEditorCore,
     getImageLoader,
@@ -169,13 +169,13 @@
   import SoftwareUpdateDialog from './components/SoftwareUpdateDialog.svelte';
   import SoftwareUpdateSuccessDialog from './components/SoftwareUpdateSuccessDialog.svelte';
   import SoftwareUpdateNotice from './components/SoftwareUpdateNotice.svelte';
-  import type { SoftwareUpdateSnapshot } from '../lib/desktop/tauriUpdater';
+  import type { SoftwareUpdateSnapshot } from '../lib/desktop/desktopUpdater';
   import {
     claimInstalledReleaseNotes,
     confirmInstalledReleaseNotesShown,
     releaseInstalledReleaseNotes,
     type InstalledReleaseNotes,
-  } from '../lib/desktop/tauriUpdater';
+  } from '../lib/desktop/desktopUpdater';
   import type {
     ContextMenuOpenEvent,
     ContextMenuItem,
@@ -279,7 +279,7 @@
     type ImageHandlingSettings,
   } from '../lib/services/render';
   import { disableLogger, enableLogger, logError, logInfo } from '../lib/services/logger';
-  import { createTauriSegmentedDocumentPort } from '../lib/text-editor/tauriPort';
+  import { createTauriSegmentedDocumentPort } from '../lib/text-editor/desktopPort';
   import type {
     OpenSegmentedDocumentResult,
     SegmentedExternalChangeResult,
@@ -623,7 +623,7 @@
   async function openWindowsInstalledAppsForLegacyNomo() {
     legacyInstallerPromptOpen = false;
     if (!desktopEnabled) return;
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import('../lib/desktop/runtime/core');
     await invoke('open_windows_installed_apps').catch(() => undefined);
   }
 
@@ -2770,19 +2770,19 @@
 
   async function requestExitApp() {
     if (!desktopEnabled || workspaceInteractionDisabled) return;
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import('../lib/desktop/runtime/core');
     await invoke('request_exit_app').catch(error => showVisibleError(error, t.exitSaveFailed()));
   }
 
   async function prepareWorkspaceExit(requestId: number) {
     if (exitRequestId !== null) return;
     if (workspaceInteractionDisabled) {
-      const { invoke } = await import('@tauri-apps/api/core');
+      const { invoke } = await import('../lib/desktop/runtime/core');
       await invoke('acknowledge_workspace_exit', { requestId, approved: false });
       return;
     }
     exitRequestId = requestId;
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import('../lib/desktop/runtime/core');
     try {
       if (!(await requestMarkdownMiniReturn({ showExternalChange: false }))) {
         await invoke('acknowledge_workspace_exit', { requestId, approved: false });
@@ -2826,7 +2826,7 @@
   async function approveSoftwareUpdateInstall(requestId: string) {
     const approved = await confirmSoftwareUpdateInstall();
 
-    const { emit } = await import('@tauri-apps/api/event');
+    const { emit } = await import('../lib/desktop/runtime/event');
     await emit('nomo://update-install-decision', { requestId, approved });
   }
 
@@ -4239,7 +4239,7 @@
     const targetWindowLabel = transferredOpenTargetWindowLabel;
     if (!targetWindowLabel) return;
     const forwarding = (async () => {
-      const { emitTo } = await import('@tauri-apps/api/event');
+      const { emitTo } = await import('../lib/desktop/runtime/event');
       while (deferredOpenTargets.length) {
         const target = deferredOpenTargets[0];
         // 空源窗口关闭前转交请求，并沿用原生打开的待处理记录。
@@ -5594,7 +5594,7 @@
     const requiresSaveAs = saveAs || activeTab.diskReadonly;
     let targetPath: string | undefined;
     if (requiresSaveAs) {
-      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { save } = await import('../lib/desktop/runtime/dialog');
       const selected = await save({
         defaultPath: activeTab.fileName,
         filters: [
@@ -6205,10 +6205,10 @@
       finalName += '.md';
     }
 
-    const { join } = await import('@tauri-apps/api/path');
+    const { join } = await import('../lib/desktop/runtime/path');
     let targetPath = await join(parentPath, finalName);
 
-    const { statMarkdownFile } = await import('../lib/desktop/tauriStorage');
+    const { statMarkdownFile } = await import('../lib/desktop/desktopStorage');
     let suffix = 1;
     let currentName = finalName;
     while (true) {
@@ -6225,14 +6225,14 @@
     }
 
     if (type === 'folder') {
-      const { createFolder } = await import('../lib/desktop/tauriStorage');
+      const { createFolder } = await import('../lib/desktop/desktopStorage');
       await createFolder(targetPath).catch((err) => {
         statusMessage = t.createFolderFailed({ error: err });
       });
       await refreshExplorerFolders();
       await expandAncestors(targetPath, currentFolderPath);
     } else {
-      const { saveMarkdownNative } = await import('../lib/desktop/tauriStorage');
+      const { saveMarkdownNative } = await import('../lib/desktop/desktopStorage');
       const defaultContent = `# ${currentName.replace(/\.md$/i, '')}\n\n`;
       const result = await saveMarkdownNative(targetPath, defaultContent, currentName);
       if (result) {
@@ -6248,7 +6248,7 @@
     let finalName = newName.replace(/[<>:"/\\|?*]/g, '');
     if (!finalName) return;
 
-    const { dirname, join } = await import('@tauri-apps/api/path');
+    const { dirname, join } = await import('../lib/desktop/runtime/path');
     const parentDir = await dirname(path);
     const targetPath = await join(parentDir, finalName);
 
@@ -6260,7 +6260,7 @@
       return;
     }
 
-    const { renameFile } = await import('../lib/desktop/tauriStorage');
+    const { renameFile } = await import('../lib/desktop/desktopStorage');
     pendingExplorerRenames.add(path);
     try {
       await renameFile(path, targetPath);
@@ -6683,7 +6683,7 @@
     appearanceRuntimeActive = true;
     appBootState = 'restoring-workspace';
     try {
-      desktopEnabled = isTauriRuntime();
+      desktopEnabled = isDesktopRuntime();
       window.addEventListener('wheel', handleGlobalWheel, { capture: true, passive: false });
       let persistedEditorMode: EditorViewMode | null = null;
       let settings: Awaited<ReturnType<typeof listAppSettings>> = [];
@@ -6691,9 +6691,9 @@
       let hasPendingFolder = false;
 
       if (desktopEnabled) {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const { getCurrentWindow } = await import('../lib/desktop/runtime/window');
         windowLabel = getCurrentWindow().label;
-        const { invoke } = await import('@tauri-apps/api/core');
+        const { invoke } = await import('../lib/desktop/runtime/core');
         await invoke('refresh_window_menu').catch(() => undefined);
         await setupCriticalDesktopEvents();
         await setupWorkspaceTransferEvents();
@@ -7450,7 +7450,7 @@
       return;
     }
 
-    const { listen } = await import('@tauri-apps/api/event');
+    const { listen } = await import('../lib/desktop/runtime/event');
     desktopUnlisteners.push(
       await listen('nomo://installed-release-notes-available', () => {
         if (!installedReleaseNotes && appearanceRuntimeActive) installedReleaseNotesAttempted = false;
@@ -7553,7 +7553,7 @@
       return;
     }
 
-    const { listen } = await import('@tauri-apps/api/event');
+    const { listen } = await import('../lib/desktop/runtime/event');
     const [
       menuUnlisten,
       dropUnlisten,

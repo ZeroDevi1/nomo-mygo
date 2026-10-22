@@ -223,7 +223,7 @@ function isWindowsWebViewRuntime(): boolean {
   const platform =
     userAgentNavigator.userAgentData?.platform ?? navigator.platform ?? navigator.userAgent;
   const userAgent = navigator.userAgent ?? '';
-  const hasTauriInternals =
-    typeof window !== 'undefined' && '__TAURI_INTERNALS__' in (window as Window & object);
-  return /win/i.test(platform) && (hasTauriInternals || /webview2/i.test(userAgent));
+  const isDesktopShell =
+    typeof globalThis === 'object' && (globalThis as { mygo?: unknown }).mygo !== undefined;
+  return /win/i.test(platform) && (isDesktopShell || /webview2/i.test(userAgent));
 }

@@ -35,7 +35,7 @@ const port = vi.hoisted(() => ({
   listenTaskProgress: vi.fn(),
 }));
 
-vi.mock('../../lib/text-editor/tauriPort', () => ({
+vi.mock('../../lib/text-editor/desktopPort', () => ({
   createTauriSegmentedDocumentPort: () => port as unknown as SegmentedDocumentPort,
 }));
 

@@ -62,9 +62,11 @@ function mountCodeBlock(code: string) {
 it('defers offscreen highlighting but completes it for an export snapshot', async () => {
   const disconnect = vi.fn();
   let notify: IntersectionObserverCallback;
+  let observed: Element | undefined;
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { notify = callback; }
-    observe() {}
+    observe(element: Element) { observed = element; }
+    unobserve() {}
     disconnect = disconnect;
   });
   const tokenize = vi.fn(async () => ({ tokens: [{ tokens: [{ content: 'const a = 1;', color: '#123456' }] }] }));
@@ -76,7 +78,7 @@ it('defers offscreen highlighting but completes it for an export snapshot', asyn
     expect(block.card.textContent).toContain('const a = 1;');
     const exportReady = CodeBlockNodeView.flushHighlights(block.target);
     // 导出强制补齐不应被稍后到达的屏幕外通知取消。
-    notify!([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+    notify!([{ target: observed!, isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
     await exportReady;
     expect(tokenize).toHaveBeenCalledTimes(1);
     expect(block.card.querySelector('code')?.innerHTML).toContain('#123456');

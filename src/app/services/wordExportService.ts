@@ -1,5 +1,5 @@
 import type { ExportResult } from './exportService';
-import { exportWordFile } from '../../lib/desktop/tauriStorage';
+import { exportWordFile } from '../../lib/desktop/desktopStorage';
 import { t } from '../i18n';
 import { createWordModel } from './word/model';
 import { createWordResources } from './word/resources';
@@ -39,7 +39,7 @@ export async function exportWord(input: WordExportInput, options: { signal?: Abo
   const resources = createWordResources(input.documentPath, signal, warnings);
   try {
     signal.throwIfAborted();
-    const { save } = await import('@tauri-apps/plugin-dialog');
+    const { save } = await import('../../lib/desktop/runtime/dialog');
     const filePath = await save({ defaultPath: `${input.suggestedFileName || 'Untitled'}.docx`, filters: [{ name: 'Word', extensions: ['docx'] }] });
     if (!filePath) return { success: false, cancelled: true };
     signal.throwIfAborted();

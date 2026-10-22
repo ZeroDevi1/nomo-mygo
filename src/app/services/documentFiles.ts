@@ -12,7 +12,7 @@ import {
   type NativeDocument,
   type RecentEntry,
   type SnapshotRecord,
-} from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopStorage';
 import {
   createEmptyExternalFileChange,
   type ExternalFileChangeState,
@@ -221,7 +221,7 @@ export async function loadFolderTree(path: string) {
 }
 
 export async function loadFolderChildren(path: string, rootPath: string) {
-  const { invoke } = await import('@tauri-apps/api/core');
+  const { invoke } = await import('../../lib/desktop/runtime/core');
   return invoke<FileTreeNode[]>('list_folder_children', { path, rootPath }).catch((error) => ({
     error: error instanceof Error ? error.message : t.loadFolderTreeFailed(),
     tree: [],

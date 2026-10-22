@@ -4,7 +4,7 @@ import {
   deleteUserThemeFile,
   listUserThemeFiles,
   saveUserThemeFile,
-} from '../../lib/desktop/tauriStorage';
+} from '../../lib/desktop/desktopStorage';
 import { themeRegistry } from './themeRegistry';
 import { parseUserTheme } from './userThemeDefinition';
 

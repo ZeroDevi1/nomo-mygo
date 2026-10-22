@@ -8,16 +8,13 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const icons = join(root, 'src-tauri', 'icons');
+const icons = join(root, 'desktop', 'packaging', 'icons');
 const source = join(icons, 'nomo', 'source');
-const require = createRequire(import.meta.url);
-const tauriCli = require.resolve('@tauri-apps/cli/tauri.js');
 const options = process.argv.slice(2);
 if (options.some((option) => option !== '--macos-only')) {
   throw new Error('用法：node scripts/generate-icons.mjs [--macos-only]');
@@ -46,9 +43,10 @@ function render(svg, name, sizes) {
     svg.replace(/\bwidth="\d+" height="\d+"/, `width="${resolution}" height="${resolution}"`),
     'utf8',
   );
-  const args = [tauriCli, 'icon', input, '--output', output];
+  // 栅格化与 ico/icns 打包沿用 Tauri CLI 的 icon 子命令；它不再是项目依赖，按需经 pnpm dlx 运行。
+  const args = ['dlx', '@tauri-apps/cli@2.11.2', 'icon', input, '--output', output];
   for (const size of sizes ?? []) args.push('--png', String(size));
-  const result = spawnSync(process.execPath, args, {
+  const result = spawnSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args, {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,

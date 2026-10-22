@@ -14,7 +14,7 @@
     SegmentedTaskType,
   } from '../../lib/text-editor/protocol';
   import { segmentedSessionRegistry } from '../../lib/text-editor/sessionRegistry';
-  import { createTauriSegmentedDocumentPort } from '../../lib/text-editor/tauriPort';
+  import { createTauriSegmentedDocumentPort } from '../../lib/text-editor/desktopPort';
   import {
     SEGMENTED_FULL_WINDOW_BYTES,
     SEGMENTED_PREVIEW_THROTTLE_MS,

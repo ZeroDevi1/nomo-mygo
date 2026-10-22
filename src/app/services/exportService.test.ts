@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanEditorArtifacts, createExportHtmlDocument, exportHtml, exportPdf, inlineLocalImages, resolveImagePath } from './exportService';
 import { captureExportAppearance } from './export/snapshot';
-import { exportHtmlFile, exportPdfFromHtml } from '../../lib/desktop/tauriStorage';
-import { save } from '@tauri-apps/plugin-dialog';
+import { exportHtmlFile, exportPdfFromHtml } from '../../lib/desktop/desktopStorage';
+import { save } from '../../lib/desktop/runtime/dialog';
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn().mockResolvedValue(null) }));
+vi.mock('../../lib/desktop/runtime/dialog', () => ({ save: vi.fn().mockResolvedValue(null) }));
 
-// 模拟 tauriStorage 的 readFileAsBase64，避免在单元测试中调用 Tauri。
-vi.mock('../../lib/desktop/tauriStorage', () => ({
+// 模拟 desktopStorage 的 readFileAsBase64，避免在单元测试中调用 Tauri。
+vi.mock('../../lib/desktop/desktopStorage', () => ({
   exportHtmlFile: vi.fn(),
   exportPdfFromHtml: vi.fn(),
   readFileAsBase64: vi.fn().mockResolvedValue({

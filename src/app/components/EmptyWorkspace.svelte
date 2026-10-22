@@ -2,7 +2,7 @@
   import { FilePlus2, FileText, FolderOpen } from '@lucide/svelte';
   import { t } from '../i18n';
   import RecentOpenPopover from './RecentOpenPopover.svelte';
-  import type { RecentEntry } from '../../lib/desktop/tauriStorage';
+  import type { RecentEntry } from '../../lib/desktop/desktopStorage';
   export let recentFiles: RecentEntry[];
   export let missingRecentPaths: Set<string>;
   export let openRecentEntry: (path: string, type: 'file' | 'folder') => void;

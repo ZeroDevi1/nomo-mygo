@@ -20,19 +20,19 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 前端入口挂载 | `src/main.ts` | `src/app/services/themeManager.ts`, `src/app/App.svelte`, `src/app/components/SettingsWindow.svelte` | 添加新入口视图、主题启动快照或全局样式加载 |
-| Windows 自绘窗口 chrome | `src/app/components/WindowsCaptionControls.svelte` | `src/app/components/AppTitleBar.svelte`, `src/app/components/SettingsWindow.svelte`, `src/app/services/platform.ts`, `src-tauri/tauri.windows.conf.json`, `src-tauri/src/window/os/windows.rs` | 修改 Windows 自绘按钮、无边框窗口或标题栏布局 |
+| Windows 自绘窗口 chrome | `src/app/components/WindowsCaptionControls.svelte` | `src/app/components/AppTitleBar.svelte`, `src/app/components/SettingsWindow.svelte`, `src/app/services/platform.ts`, `mygo.config.ts`, `desktop/windows.go` | 修改 Windows 自绘按钮、无边框窗口或标题栏布局 |
 | 应用装配中心 | `src/app/App.svelte` | 所有 service、editor-core、组件 | 标签页/文件系统/编辑器之间的协调逻辑变更 |
-| 桌面窗口生命周期 | `src/app/services/desktopWindow.ts` | `src-tauri/src/window/` | 窗口事件、关闭行为、托盘交互变更 |
-| Rust 后端入口 | `src-tauri/src/lib.rs` | `src-tauri/src/main.rs` | 新增 IPC 命令、插件、窗口事件 |
+| 桌面窗口生命周期 | `src/app/services/desktopWindow.ts` | `desktop/` | 窗口事件、关闭行为、托盘交互变更 |
+| Go 桌面外壳入口 | `desktop/main.go` | `desktop/app.go` | 新增 IPC 命令、插件、窗口事件 |
 | 自定义标题栏菜单 | `src/app/components/AppTitleBar.svelte` | `src/app/App.svelte`, `src/app/services/appCommands.ts` | 添加/移除菜单项、修改菜单文案 |
 | 工作区与选中标签联合轮廓 | `src/app/components/WorkspaceSurface.svelte` | `src/app/components/AppShell.svelte`, `src/app/components/DocumentTabs.svelte`, `src/app/actions/motion.ts`, `src/app/styles/app-chrome.css` | 修改连续外轮廓、主题描边、柔和投影或活动标签几何同步 |
 | Markdown 工具栏显示与响应式布局 | `src/app/components/EditorToolbar.svelte` | `src/app/components/AppShell.svelte`, `src/app/actions/motion.ts`, `src/app/styles/app-chrome.css`, `src/app/styles/app-responsive.css`, `src/app/services/settings.ts` | 修改工具栏收展、窄宽度隐藏优先级或内容宽度控件 |
-| 窗口状态持久化 | `src-tauri/src/window/state.rs` | `src-tauri/src/lib.rs`, `src-tauri/src/models.rs` | 窗口位置/尺寸/最大化状态恢复逻辑变更 |
-| Markdown 文档小窗 | `src/app/App.svelte` | `src/app/components/AppShell.svelte`, `src/app/components/AppTitleBar.svelte`, `src/app/components/MarkdownMiniLargePreview.svelte`, `src/app/styles/markdown-mini.css`, `src/app/services/markdownMiniTransition.ts`, `src/app/services/desktopWindow.ts`, `src-tauri/src/window/state.rs` | 修改小窗进入/返回、置顶、只读降级、快捷键、过渡就绪与阅读位置恢复或原生窗口几何切换 |
+| 窗口状态持久化 | `desktop/window_state.go` | `desktop/main.go`, `desktop/internal/config/config.go` | 窗口位置/尺寸/最大化状态恢复逻辑变更 |
+| Markdown 文档小窗 | `src/app/App.svelte` | `src/app/components/AppShell.svelte`, `src/app/components/AppTitleBar.svelte`, `src/app/components/MarkdownMiniLargePreview.svelte`, `src/app/styles/markdown-mini.css`, `src/app/services/markdownMiniTransition.ts`, `src/app/services/desktopWindow.ts`, `desktop/window_state.go` | 修改小窗进入/返回、置顶、只读降级、快捷键、过渡就绪与阅读位置恢复或原生窗口几何切换 |
 | 全局滚动条显隐 | `src/app/services/scrollbarVisibility.ts` | `src/main.ts`, `src/app/styles/global.css`, `src/app/styles/app-layout.css`, `src/app/styles/editor-segmented.css` | 修改滚动时显示、边缘触发、延时隐藏或局部滚动容器覆盖 |
-| 外部打开路由 | `src-tauri/src/window/external_open.rs` | `src-tauri/src/lib.rs` | 单实例/启动参数/macOS open 事件、连续请求短暂合并、追加暂存及按窗口原子消费 |
-| 跨窗口打开目标去重 | `src-tauri/src/window/open_targets.rs` | `src/app/services/openTargetRouting.ts`, `src/app/App.svelte`, `src/app/services/desktopWindow.ts`, `src-tauri/src/window/external_open.rs` | 修改文件/文件夹打开优先级、空窗口复用、窗口聚焦或目标预留 |
-| 系统文件与文件夹拖放打开 | `src/app/App.svelte`, `src-tauri/src/window/open_targets.rs` | `src/app/services/desktopWindow.ts`, `src/lib/desktop/tauriStorage.ts`, `src/app/services/openTargetRouting.ts` | 修改元数据识别、按首个有效目标类型选择单目录或整批文档、文档固定在拖入窗口打开并保留文件去重、延迟打开或目录复用现有打开方式与未保存确认 |
+| 外部打开路由 | `desktop/external_open.go` | `desktop/main.go` | 单实例/启动参数/macOS open 事件、连续请求短暂合并、追加暂存及按窗口原子消费 |
+| 跨窗口打开目标去重 | `desktop/open_targets.go` | `src/app/services/openTargetRouting.ts`, `src/app/App.svelte`, `src/app/services/desktopWindow.ts`, `desktop/external_open.go` | 修改文件/文件夹打开优先级、空窗口复用、窗口聚焦或目标预留 |
+| 系统文件与文件夹拖放打开 | `src/app/App.svelte`, `desktop/open_targets.go` | `src/app/services/desktopWindow.ts`, `src/lib/desktop/desktopStorage.ts`, `src/app/services/openTargetRouting.ts` | 修改元数据识别、按首个有效目标类型选择单目录或整批文档、文档固定在拖入窗口打开并保留文件去重、延迟打开或目录复用现有打开方式与未保存确认 |
 
 ### 编辑器核心（ProseMirror）
 
@@ -99,7 +99,7 @@
 | 编辑器上下文菜单插件 | `src/lib/editor-core/plugins/contextMenu.ts` | `src/app/App.svelte`, `src/app/components/ContextMenu.svelte` | 语义编辑区目标命中、选区定位与右键菜单事件分发 |
 | 快捷插入菜单 | `src/lib/editor-core/plugins/quickInsert.ts` | `src/lib/editor-core/quickInsert.ts`, `editorCommands.ts`, `src/app/styles/editor-quick-insert.css` | 行首/空格后触发、类别/样式键盘导航、浮层定位与生命周期，无搜索 |
 | Emoji 短代码建议 | `src/lib/editor-core/plugins/emojiSuggestions.ts`, `src/lib/emoji/sourceSuggestions.ts` | `src/lib/emoji/suggestions.ts`, `sourceContext.ts`, `ProseMirrorEditorCore.ts`, `MarkdownSourceEditor.svelte` | 语义/源码的冒号补全、代码与公式排除、组字保护、确认与撤销、浮层生命周期 |
-| Emoji 搜索与联网缓存 | `src/app/services/emojiCatalog.ts`, `src-tauri/src/emoji_catalog.rs` | `src/lib/emoji/catalog.ts`, `src/app/i18n.emoji.ts` | 固定版本元数据、双语搜索索引、三源错峰获取、SHA-256 校验、4 MiB 原子缓存与共享加载 |
+| Emoji 搜索与联网缓存 | `src/app/services/emojiCatalog.ts`, `desktop/emoji.go` | `src/lib/emoji/catalog.ts`, `src/app/i18n.emoji.ts` | 固定版本元数据、双语搜索索引、三源错峰获取、SHA-256 校验、4 MiB 原子缓存与共享加载 |
 | Emoji 选择器与插入目标 | `src/app/components/EmojiPicker.svelte`, `src/app/services/emojiInsertion.ts` | `src/app/App.svelte`, `EditorToolbar.svelte`, `src/app/styles/editor-emoji.css` | 九类分类/虚拟网格、键盘选择、双栏/组合标签目标、修订校验与纯文本插入 |
 | 行内代码语法高亮装饰 | `src/lib/editor-core/plugins/codeHighlightDecorationPlugin.ts` | `InlineSourceCodec.ts`, `plugins/inlineCodeSelectionBridge.ts` | 派生代码范围的 token 着色与选区背景 |
 | 正文与行内对象选区背景 | `src/lib/editor-core/plugins/inlineCodeSelectionBridge.ts` | `src/lib/typography/selectionPaint.ts`, `src/app/styles/editor-document.css`, `plugins/typography.ts` | 修改正文/行内代码选区背景、原子对象及其外边距背景包裹；桥接样式与行绘制共享浏览器选区有效性，保留工具栏所需的模型选区 |
@@ -112,32 +112,32 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 文档操作控制器 | `src/app/services/documentActionsController.ts` | `src/app/services/documentFiles.ts`, `tabs.ts`, `recoveryDraft.ts` | 打开/保存/另存/自动保存/外部变更 |
-| 编辑器链接目标解析 | `src/app/services/documentLinkNavigation.ts` | `src/app/App.svelte`, `src-tauri/src/external_link.rs` | 相对路径、标题锚点、应用内文档与本地附件导航规则变更 |
+| 编辑器链接目标解析 | `src/app/services/documentLinkNavigation.ts` | `src/app/App.svelte`, `desktop/commands_files.go` | 相对路径、标题锚点、应用内文档与本地附件导航规则变更 |
 | 标签页状态管理 | `src/app/services/tabs.ts` | `src/app/types.ts` | 标签页创建/复用/状态写入 |
 | 组合标签模型 | `src/app/services/workspaceItems.ts` | `src/app/types.ts`, `src/app/App.svelte`, `src/app/components/DocumentTabs.svelte` | 两篇 Markdown 的归属、成组、拆组、交换与损坏元数据降级 |
 | 双文档运行时与分栏 | `src/app/components/ComparisonWorkspace.svelte`, `ComparisonPane.svelte` | `src/app/services/markdownDocumentRuntime.ts`, `src/app/App.svelte`, `EditorWorkspace.svelte` | 组合共享模式、成员焦点、独立编辑 / 滚动和宽度恢复 |
-| 标签跨窗口移交 | `src/app/services/workspaceTransferController.ts` | `src/app/services/tabTransfer.ts`, `src-tauri/src/window/tab_transfer.rs`, `src-tauri/src/window/open_targets.rs` | prepare / target-ready / commit / cancel、文档原子归属、异常恢复和空源窗口关闭 |
-| Windows 标签屏幕拖动 | `src-tauri/src/window/tab_drag.rs` | `src/app/components/DocumentTabs.svelte`, `src/app/App.svelte`, `src/app/services/tabTransfer.ts` | Pointer 转原生鼠标追踪、DPI / 屏幕落点和拖动取消 |
-| 标签标题拖影 | `src/app/components/TabDragGhost.svelte` | `src/app/App.svelte`, `src/app/components/DocumentTabs.svelte`, `src/app/components/ComparisonPane.svelte`, `src-tauri/src/window/tab_drag.rs` | 窗口内跟随原生鼠标逻辑坐标的普通 / 组合 / 成员标题预览及结束清理 |
-| 启动工作区与统一退出 | `src-tauri/src/window/workspace_lifecycle.rs` | `src/app/App.svelte`, `src-tauri/src/window/commands.rs`, `src-tauri/src/lib.rs` | 最后实际关闭窗口快照、跨窗口退出确认、保存失败与超时取消 |
-| 最近打开与空白页入口 | `src/app/components/RecentOpenPopover.svelte` | `src/app/components/EmptyWorkspace.svelte`, `src/app/components/AppTitleBar.svelte`, `src-tauri/src/config/commands.rs` | 最近记录浮层、原子删除、跨窗口同步与主动打开排序 |
-| 工作区持久化 | `src/app/services/workspacePersistence.ts` | `src/app/App.svelte`, `src/lib/desktop/tauriStorage.ts` | 工作区 v4 元数据、组合项、草稿引用、v3/v2/旧 workspaceTabs 迁移 |
+| 标签跨窗口移交 | `src/app/services/workspaceTransferController.ts` | `src/app/services/tabTransfer.ts`, `desktop/tab_transfer.go`, `desktop/open_targets.go` | prepare / target-ready / commit / cancel、文档原子归属、异常恢复和空源窗口关闭 |
+| Windows 标签屏幕拖动 | `desktop/tab_drag.go` | `src/app/components/DocumentTabs.svelte`, `src/app/App.svelte`, `src/app/services/tabTransfer.ts` | Pointer 转原生鼠标追踪、DPI / 屏幕落点和拖动取消 |
+| 标签标题拖影 | `src/app/components/TabDragGhost.svelte` | `src/app/App.svelte`, `src/app/components/DocumentTabs.svelte`, `src/app/components/ComparisonPane.svelte`, `desktop/tab_drag.go` | 窗口内跟随原生鼠标逻辑坐标的普通 / 组合 / 成员标题预览及结束清理 |
+| 启动工作区与统一退出 | `desktop/lifecycle.go` | `src/app/App.svelte`, `desktop/windows.go`, `desktop/main.go` | 最后实际关闭窗口快照、跨窗口退出确认、保存失败与超时取消 |
+| 最近打开与空白页入口 | `src/app/components/RecentOpenPopover.svelte` | `src/app/components/EmptyWorkspace.svelte`, `src/app/components/AppTitleBar.svelte`, `desktop/commands_config.go` | 最近记录浮层、原子删除、跨窗口同步与主动打开排序 |
+| 工作区持久化 | `src/app/services/workspacePersistence.ts` | `src/app/App.svelte`, `src/lib/desktop/desktopStorage.ts` | 工作区 v4 元数据、组合项、草稿引用、v3/v2/旧 workspaceTabs 迁移 |
 | 阅读位置持久化 | `src/app/services/readingPosition.ts` | `src/app/App.svelte`, `src/app/services/outlineNavigation.ts` | Markdown 文件按路径保存/恢复统一阅读语义锚点 |
 | 恢复草稿 | `src/app/services/recoveryDraft.ts` | `src/app/services/documentActionsController.ts` | 异常退出后草稿写入/恢复 |
 | Markdown 桥接 | `src/lib/markdown/MarkdownBridge.ts` | `src/lib/markdown/frontMatter.ts` | front matter 与正文分离/合并规则变更 |
 | 图片插入协调 | `src/app/services/imageInsertion.ts` | `src/app/services/imageMarkdown.ts`, `src/lib/editor-core/renderers.ts` | 粘贴/拖放图片导入、策略选择、源码插入 |
-| 剪贴板协调 | `src/app/services/clipboard.ts` | `src/app/App.svelte`, `@tauri-apps/plugin-clipboard-manager`, `src-tauri/src/file_clipboard.rs` | 文本/安全 HTML/图片的 Web Clipboard 与 Tauri 读写、降级和 RGBA 转 PNG，以及原生文件复制 IPC |
-| 原生文件剪贴板 | `src-tauri/src/file_clipboard.rs` | `src/app/services/clipboard.ts`, `src-tauri/src/lib.rs`, `arboard` | 校验已保存文件路径、写入系统文件列表并保持剪贴板实例存活 |
+| 剪贴板协调 | `src/app/services/clipboard.ts` | `src/app/App.svelte`, `src/lib/desktop/runtime/clipboard.ts`, `desktop/commands_files.go` | 文本/安全 HTML/图片的 Web Clipboard 与 MyGo 读写、降级和 RGBA 转 PNG，以及原生文件复制 IPC |
+| 原生文件剪贴板 | `desktop/commands_files.go` | `src/app/services/clipboard.ts`, `desktop/main.go`, `arboard` | 校验已保存文件路径、写入系统文件列表并保持剪贴板实例存活 |
 | 图片 Markdown 路径 | `src/app/services/imageMarkdown.ts` | `src/app/services/imageInsertion.ts` | 图片文件过滤、路径/Markdown 语法生成 |
-| 文件存储与文档仓库接口 | `src/lib/services/storage.ts` | `src/lib/desktop/tauriStorage.ts` | FileStorage、DocumentRepository、Markdown 源编码契约变更 |
+| 文件存储与文档仓库接口 | `src/lib/services/storage.ts` | `src/lib/desktop/desktopStorage.ts` | FileStorage、DocumentRepository、Markdown 源编码契约变更 |
 | 渲染服务类型接口 | `src/lib/services/render.ts` | `src/lib/services/shikiCodeTokenizer.ts`, `katexMathRenderer.ts`, `mermaidDiagramRenderer.ts` | ImageLoader、CodeTokenizer、MathRenderer、DiagramRenderer 接口变更 |
-| 文档文件 IO | `src/app/services/documentFiles.ts` | `src/lib/desktop/tauriStorage.ts` | 文件选择框多选、串行批次打开失败收集及文件读取/保存/最近文件/目录树前端调用 |
+| 文档文件 IO | `src/app/services/documentFiles.ts` | `src/lib/desktop/desktopStorage.ts` | 文件选择框多选、串行批次打开失败收集及文件读取/保存/最近文件/目录树前端调用 |
 | 文件夹资源管理 | `src/app/services/folderExplorerController.ts` | `src/app/services/folderTree.ts`, `explorerRows.ts` | 目录树按需加载/展开/串行刷新已加载目录 |
 | 目录树纯函数 | `src/app/services/folderTree.ts` | — | 树的归一化/查找/更新 |
 | 资源管理器展示 | `src/app/services/explorerRows.ts` | — | 树形拍平为可渲染行 |
 | 资源管理器重命名规则 | `src/app/services/explorerRename.ts` | — | 行内重命名输入框选区范围 |
-| Rust 文件系统 | `src-tauri/src/file_system.rs` | `src-tauri/src/models.rs` | 后端文件读写、Markdown 编码转换/保持、短句柄目录快照与按需枚举 |
-| 图片资源后端 | `src-tauri/src/file_system/image_assets.rs` | — | 图片导入/解析/PicGo 上传/删除 |
+| Go 文件系统 | `desktop/internal/docfs/docfs.go` | `desktop/internal/config/config.go` | 后端文件读写、Markdown 编码转换/保持、短句柄目录快照与按需枚举 |
+| 图片资源后端 | `desktop/image_assets.go` | — | 图片导入/解析/PicGo 上传/删除 |
 
 ### 大文件 TXT/JSON 分段编辑
 
@@ -146,7 +146,7 @@
 | 分段编辑工作区与全文滚动 | `src/app/components/SegmentedTextEditorWorkspace.svelte` | `src/app/styles/editor-segmented.css`, `src/lib/text-editor/virtualScroll.ts` | 修改 TXT/JSON 视口、全文滚动、快速定位、加载提示或任务 UI |
 | CodeMirror 分段核心 | `src/lib/text-editor/SegmentedTextEditorCore.ts` | `positionMapping.ts`, `editBatch.ts`, `jsonLexer.ts` | 修改局部窗口编辑、全局选区/锚点映射、临时只读或历史门禁 |
 | 窗口读取、缓存与预取 | `src/lib/text-editor/viewportController.ts` | `chunkCache.ts`, `protocol.ts` | 修改主读取乱序保护、窗口大小、LRU、预览扩展或前后预取 |
-| 分段文件后端会话 | `src-tauri/src/text_document/session.rs` | `src-tauri/src/text_document/mod.rs`, `line_index.rs`, `task_runner.rs` | 修改首窗口、窗口读取上限、revision、编辑日志或后台索引/任务 |
+| 分段文件后端会话 | `desktop/internal/textdoc/session.go` | `desktop/internal/textdoc/types.go`, `lineindex.go`, `tasks.go` | 修改首窗口、窗口读取上限、revision、编辑日志或后台索引/任务 |
 
 ### 大纲与导航
 
@@ -179,17 +179,17 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 设置模型与持久化 | `src/app/services/settings.ts` | `src/lib/desktop/tauriStorage.ts` | AppPreferences 定义/默认值/加载/保存 |
+| 设置模型与持久化 | `src/app/services/settings.ts` | `src/lib/desktop/desktopStorage.ts` | AppPreferences 定义/默认值/加载/保存 |
 | 主题公共契约 | `src/lib/theme/types.ts` | `src/app/services/themeRegistry.ts`, `src/app/services/themeManager.ts`, 编辑器渲染器 | 颜色/样式令牌、样式档案、文档样式或渲染配置契约变更 |
 | 主题注册表 | `src/app/services/themeRegistry.ts` | `src/lib/theme/types.ts` | 内置配色、样式档案、文档样式、令牌映射或主题校验变更 |
 | 主题运行时 | `src/app/services/themeManager.ts` | `src/app/services/themeRegistry.ts`, `src/lib/editor-core/EditorCore.ts` | 主题解析、根颜色/样式令牌、启动快照、系统同步或运行时刷新变更 |
-| 用户自定义主题 | `src/app/services/userThemes.ts`, `src/app/services/userThemeDefinition.ts` | `src/app/services/themeRegistry.ts`, `src/app/services/themeManager.ts`, `src/app/services/settings.ts`, `src-tauri/src/config/themes.rs`, `src/app/components/SettingsWindow.svelte`, `src/quicklook/preview.ts` | 主题 JSON 格式与校验、按基础主题补齐令牌、目录加载与跨窗口重载、导入/删除/导出模板、启动快照内嵌与 Quick Look 读取 |
+| 用户自定义主题 | `src/app/services/userThemes.ts`, `src/app/services/userThemeDefinition.ts` | `src/app/services/themeRegistry.ts`, `src/app/services/themeManager.ts`, `src/app/services/settings.ts`, `desktop/internal/config/themes.go`, `src/app/components/SettingsWindow.svelte`, `src/quicklook/preview.ts` | 主题 JSON 格式与校验、按基础主题补齐令牌、目录加载与跨窗口重载、导入/删除/导出模板、启动快照内嵌与 Quick Look 读取 |
 | 自定义字体覆盖 | `src/lib/theme/fonts.ts` | `src/app/services/themeManager.ts`, `src/app/services/settings.ts`, `src/app/services/fontAvailability.ts`, `src/app/components/SettingsWindow.svelte` | 界面/正文/代码字体名校验、叠加到主题字体令牌、设置页本地字体探测与候选 |
 | 编辑器设置应用 | `src/app/services/editorSettingsController.ts` | `src/app/services/settings.ts` | 字体、行高和内容宽度同步到编辑器 |
-| 设置窗口 UI | `src/app/components/SettingsWindow.svelte` | `src/app/services/settings.ts`, `src/app/services/themeManager.ts`, `src/lib/desktop/tauriUpdater.ts` | 设置界面/主题预览/更新/文件关联/图片配置 |
+| 设置窗口 UI | `src/app/components/SettingsWindow.svelte` | `src/app/services/settings.ts`, `src/app/services/themeManager.ts`, `src/lib/desktop/desktopUpdater.ts` | 设置界面/主题预览/更新/文件关联/图片配置 |
 | Markdown 格式检查 | `src/app/services/markdownLintController.ts`, `src/app/workers/markdownLint.worker.ts` | `src/lib/markdown-lint/`, `src/app/components/StatusBar.svelte`, `src/app/App.svelte`, `vite.config.ts` | 修改检查调度、Worker 依赖解析、规则集、诊断状态、结果本地化或状态栏详情 |
-| Rust 配置管理 | `src-tauri/src/config/mod.rs` | `src-tauri/src/models.rs` | 应用配置 JSON 持久化、设置读写、启动前读取 |
-| 用户主题文件存储 | `src-tauri/src/config/themes.rs` | `src/lib/desktop/tauriStorage.ts` | `themes/<id>.json` 列出/保存/删除、外部主题读取与模板写出、ID/大小/数量上限 |
+| Go 配置管理 | `desktop/internal/config/config.go` | `desktop/internal/config/config.go` | 应用配置 JSON 持久化、设置读写、启动前读取 |
+| 用户主题文件存储 | `desktop/internal/config/themes.go` | `src/lib/desktop/desktopStorage.ts` | `themes/<id>.json` 列出/保存/删除、外部主题读取与模板写出、ID/大小/数量上限 |
 
 ### 搜索与替换
 
@@ -207,7 +207,7 @@
 | 通用确认对话框 | `src/app/components/ConfirmDialog.svelte` | `src/app/services/confirmAction.ts` | 确认/放弃/保存按钮 UI 变更 |
 | 未保存确认对话框 | `src/app/components/UnsavedConfirmDialog.svelte` | `src/app/services/confirmAction.ts` | 未保存文档丢弃确认 UI |
 | 外部变更对话框 | `src/app/components/ExternalChangeDialog.svelte` | `src/app/services/documentActionsController.ts` | 外部文件修改/删除提示 UI |
-| 关闭窗口行为对话框 | `src/app/components/CloseWindowBehaviorDialog.svelte` | `src-tauri/src/window/tray.rs` | 关闭窗口 vs 关闭到托盘选择 UI |
+| 关闭窗口行为对话框 | `src/app/components/CloseWindowBehaviorDialog.svelte` | `desktop/tray.go` | 关闭窗口 vs 关闭到托盘选择 UI |
 
 ### 平台与首次运行
 
@@ -221,20 +221,20 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 前端日志工具 | `src/lib/services/logger.ts` | `src-tauri/src/app_logger.rs` | 日志级别/缓冲区/性能计时/DevTools 输出 |
-| 后端日志系统 | `src-tauri/src/app_logger.rs` | `src/lib/services/logger.ts` | 日志文件落盘/轮转/终端输出 |
-| HTML 导出后端 | `src-tauri/src/export.rs` | `src/app/services/exportService.ts` | HTML 文件写入/Base64 读取 |
-| Windows PDF 导出 | `src-tauri/src/export_windows.rs` | `src-tauri/src/export.rs`, `src/lib/typography/exportRuntime.ts` | WebView2 PrintToPdf、目标版心和排版就绪检查 |
-| macOS PDF 导出 | `src-tauri/src/export_macos.rs` | `src-tauri/src/export.rs`, `src/lib/typography/exportRuntime.ts` | WKWebView 模态打印、目标版心和排版就绪检查 |
+| 前端日志工具 | `src/lib/services/logger.ts` | `desktop/internal/applog/applog.go` | 日志级别/缓冲区/性能计时/DevTools 输出 |
+| 后端日志系统 | `desktop/internal/applog/applog.go` | `src/lib/services/logger.ts` | 日志文件落盘/轮转/终端输出 |
+| HTML 导出后端 | `desktop/export.go` | `src/app/services/exportService.ts` | HTML 文件写入/Base64 读取 |
+| Windows PDF 导出 | `desktop/export.go` | `desktop/export.go`, `src/lib/typography/exportRuntime.ts` | WebView2 PrintToPdf、目标版心和排版就绪检查 |
+| macOS PDF 导出 | `desktop/export.go` | `desktop/export.go`, `src/lib/typography/exportRuntime.ts` | WKWebView 模态打印、目标版心和排版就绪检查 |
 
 ### 导出
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| HTML/PDF 导出 | `src/app/services/exportService.ts` | `src/app/services/export/`, `src/lib/desktop/tauriStorage.ts`, `src/app/styles/document-content.css`, `src/app/styles/export-document.css` | 冻结文档与外观、独立只读渲染、资源内嵌、HTML 模板或 PDF 打印变更 |
+| HTML/PDF 导出 | `src/app/services/exportService.ts` | `src/app/services/export/`, `src/lib/desktop/desktopStorage.ts`, `src/app/styles/document-content.css`, `src/app/styles/export-document.css` | 冻结文档与外观、独立只读渲染、资源内嵌、HTML 模板或 PDF 打印变更 |
 | 导出快照与只读正文 | `src/app/services/export/snapshot.ts`, `src/app/services/export/render.ts` | `export/types.ts`, `export/images.ts`, `src/lib/editor-core/codeLanguages.ts`, `src/lib/editor-core/callout/calloutIcons.ts` | IME/图片插入等待、文档隔离、主题快照、无挂载视图的代码/公式/图表/目录渲染、资源预算与取消 |
 | 共用正文样式与打印准备 | `src/app/styles/document-content.css`, `src/lib/typography/exportPrint.ts` | `editor-document.css`, `export-document.css`, `src/lib/typography/exportRuntime.ts` | 编辑器与导出共用展示样式（含内嵌徽章及链接布局）、目标版心、跨页分类、安全表头提升及媒体尺寸约束 |
-| Word 导出 | `src/app/services/wordExportService.ts` | `src/app/services/word/`, `src/app/App.svelte`, `src/lib/desktop/tauriStorage.ts`, `src-tauri/src/export.rs` | Markdown 快照、DOCX 内容、资源预算、Worker 打包与二进制原子保存 |
+| Word 导出 | `src/app/services/wordExportService.ts` | `src/app/services/word/`, `src/app/App.svelte`, `src/lib/desktop/desktopStorage.ts`, `desktop/export.go` | Markdown 快照、DOCX 内容、资源预算、Worker 打包与二进制原子保存 |
 | 导出图片路径解析 | `src/app/services/exportImagePath.ts` | `exportService.ts`, `word/resources.ts` | HTML/PDF/Word 共用本地图片绝对路径与相对路径解析 |
 
 ### 本地化
@@ -242,7 +242,7 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 前端本地化 | `src/app/i18n.ts` | `src/app/i18n.ja.ts`, `src/paraglide/` | 界面文案/语言切换 |
-| 后端本地化 | `src-tauri/src/i18n.rs` | — | 菜单/托盘/系统集成文案 |
+| 后端本地化 | `desktop/internal/i18n/i18n.go` | — | 菜单/托盘/系统集成文案 |
 | Inlang 生成物 | `src/paraglide/messages*.js` | `project.inlang/messages/*.json` | 运行时语言消息（自动生成，不要手改） |
 
 ### Quick Look 预览（macOS）
@@ -252,40 +252,40 @@
 | Quick Look 渲染入口 | `src/quicklook/preview-entry.ts` | `src/quicklook/preview.ts` | 读取 payload 并渲染 |
 | Quick Look Markdown 渲染 | `src/quicklook/preview.ts` | `src/lib/editor-core/callout/calloutParser.ts`, `src/lib/editor-core/link.ts` | markdown-it 渲染/Callout/公式/图片/链接安全 |
 | Quick Look 样式 | `src/quicklook/preview.css` | — | 预览页面样式 |
-| macOS 扩展入口 | `src-tauri/macos/NomoQuickLookPreview/PreviewViewController.swift` | `src/quicklook/` | Swift 扩展加载前端并注入 payload |
+| macOS 扩展入口 | `desktop/packaging/macos/NomoQuickLookPreview/PreviewViewController.swift` | `src/quicklook/` | Swift 扩展加载前端并注入 payload |
 
 ### 软件更新
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 更新共享协调 | `src/app/services/softwareUpdate.ts` | `src/app/App.svelte`, `src/app/components/SettingsWindow.svelte`, `src/lib/desktop/tauriUpdater.ts` | 跨窗口状态订阅、强制检查、下载或安装入口变更 |
+| 更新共享协调 | `src/app/services/softwareUpdate.ts` | `src/app/App.svelte`, `src/app/components/SettingsWindow.svelte`, `src/lib/desktop/desktopUpdater.ts` | 跨窗口状态订阅、强制检查、下载或安装入口变更 |
 | 更新日志安全渲染 | `src/app/services/softwareUpdateReleaseNotes.ts` | `src/app/components/SoftwareUpdateDialog.svelte`, `src/app/components/SoftwareUpdateNotice.svelte` | Release Markdown 过滤、清理、摘要逻辑变更 |
 | 更新提醒界面 | `src/app/components/SoftwareUpdateNotice.svelte`, `src/app/components/SoftwareUpdateDialog.svelte` | `src/app/App.svelte`, `src/app/components/AppTitleBar.svelte` | 启动通知、更新日志弹窗、下载状态展示变更 |
-| 更新前端 IPC 适配 | `src/lib/desktop/tauriUpdater.ts` | `src/app/services/softwareUpdate.ts` | 检查/下载/安装/共享快照 IPC 契约变更 |
-| 更新后端 | `src-tauri/src/software_update.rs` | `src-tauri/src/window/tray.rs` | GitHub Release、安装形态、共享状态、下载/校验/安装器 |
-| 升级后首次启动日志 | `src-tauri/src/software_update.rs`, `src/app/components/SoftwareUpdateSuccessDialog.svelte` | `src-tauri/src/lib.rs`, `src/app/App.svelte`, `src/lib/desktop/tauriUpdater.ts` | 内置日志、最高版本与待展示记录、跨窗口领取、实际挂载确认及启动时序 |
+| 更新前端 IPC 适配 | `src/lib/desktop/desktopUpdater.ts` | `src/app/services/softwareUpdate.ts` | 检查/下载/安装/共享快照 IPC 契约变更 |
+| 更新后端 | `desktop/software_update.go` | `desktop/tray.go` | GitHub Release、安装形态、共享状态、下载/校验/安装器 |
+| 升级后首次启动日志 | `desktop/software_update.go`, `src/app/components/SoftwareUpdateSuccessDialog.svelte` | `desktop/main.go`, `src/app/App.svelte`, `src/lib/desktop/desktopUpdater.ts` | 内置日志、最高版本与待展示记录、跨窗口领取、实际挂载确认及启动时序 |
 | 版本发布与 Pages 同步 | `.github/workflows/release.yml` | `.github/workflows/backfill-linux-release.yml`, `.github/workflows/sync-pages-notes.yml`, `.github/release-notes/` | 安装包发布、已有稳定版的 Linux 补发、MD5 生成、发布说明维护、Cloudflare/GitHub Pages 重建与线上校验 |
 
 ### 原生系统集成
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 原生菜单 | `src-tauri/src/window/menu.rs` | `src-tauri/src/i18n.rs` | 菜单构建/快捷键/事件处理 |
-| 系统托盘与平台图标 | `src-tauri/src/window/tray.rs` | `src-tauri/src/window/commands.rs` | 托盘安装/刷新/关闭到托盘；仅 macOS 随主题替换窗口和 Dock 图标，其他平台保留打包图标 |
-| 外部打开路由 | `src-tauri/src/window/external_open.rs` | `src-tauri/src/lib.rs` | 单实例/启动参数/macOS open 事件、连续请求短暂合并、追加暂存及按窗口原子消费 |
-| Windows 文件关联 | `src-tauri/src/window/file_association.rs` | — | 注册/注销默认打开方式和右键菜单 |
-| 平台适配 | `src-tauri/src/window/os/macos.rs`, `os/windows.rs` | `src-tauri/src/window/os/mod.rs`, `src-tauri/src/lib.rs` | macOS/Windows 窗口行为差异、Windows 无边框/阴影设置与应用窗口浏览器默认快捷键禁用 |
-| 外部链接与附件安全 | `src-tauri/src/external_link.rs` | `src/lib/desktop/tauriStorage.ts` | 打开外部链接、白名单本地附件或文件管理器定位 |
-| 配置命令 IPC | `src-tauri/src/config/commands.rs` | `src-tauri/src/config/mod.rs` | 设置读写/最近文件/快照/应用设置 IPC |
-| 窗口命令 IPC | `src-tauri/src/window/commands.rs` | `src-tauri/src/window/menu.rs`, `src-tauri/src/window/tray.rs` | 窗口状态保存/设置窗口/菜单安装/强制关闭 IPC |
+| 原生菜单 | `desktop/menu.go` | `desktop/internal/i18n/i18n.go` | 菜单构建/快捷键/事件处理 |
+| 系统托盘与平台图标 | `desktop/tray.go` | `desktop/windows.go` | 托盘安装/刷新/关闭到托盘；仅 macOS 随主题替换窗口和 Dock 图标，其他平台保留打包图标 |
+| 外部打开路由 | `desktop/external_open.go` | `desktop/main.go` | 单实例/启动参数/macOS open 事件、连续请求短暂合并、追加暂存及按窗口原子消费 |
+| Windows 文件关联 | `desktop/windows_integration.go` | — | 注册/注销默认打开方式和右键菜单 |
+| 平台适配 | `desktop/windows.go` | `desktop/windows.go`, `desktop/main.go` | macOS/Windows 窗口行为差异、Windows 无边框/阴影设置与应用窗口浏览器默认快捷键禁用 |
+| 外部链接与附件安全 | `desktop/commands_files.go` | `src/lib/desktop/desktopStorage.ts` | 打开外部链接、白名单本地附件或文件管理器定位 |
+| 配置命令 IPC | `desktop/commands_config.go` | `desktop/internal/config/config.go` | 设置读写/最近文件/快照/应用设置 IPC |
+| 窗口命令 IPC | `desktop/windows.go` | `desktop/menu.go`, `desktop/tray.go` | 窗口状态保存/设置窗口/菜单安装/强制关闭 IPC |
 
 ### 发布与打包
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| Linux 本地构建与安装 | `scripts/build-linux.sh` | `src-tauri/tauri.conf.json` | 修改 DEB/RPM 构建、产物定位或安装；DEB 优先通过 apt-get 解析依赖，失败时保留错误 |
-| SVG 图标与平台资源生成 | `scripts/generate-icons.mjs` | `src-tauri/icons/nomo/source/nomo-app-light.svg`, `scripts/compile-macos-appicon.sh`, `src-tauri/src/window/tray.rs` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 和移动端保持母版造型 |
-| Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `src-tauri/msix/`, `src-tauri/tauri.conf.json` | 修改 Store 包身份、版本映射、生产前端嵌入校验、图标 PRI 生成、Shell 扩展封装或上传产物 |
+| Linux 本地构建与安装 | `scripts/build-linux.sh` | `mygo.config.ts` | 修改 DEB/RPM 构建、产物定位或安装；DEB 优先通过 apt-get 解析依赖，失败时保留错误 |
+| SVG 图标与平台资源生成 | `scripts/generate-icons.mjs` | `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, `scripts/compile-macos-appicon.sh`, `desktop/tray.go` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 和移动端保持母版造型 |
+| Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.config.ts` | 修改 Store 包身份、版本映射、生产前端嵌入校验、图标 PRI 生成、Shell 扩展封装或上传产物 |
 
 ### UI 通用组件
 
@@ -377,7 +377,7 @@
 **Kind:** component / app shell
 
 **Owns:**
-- 应用核心装配：连接 Tauri、编辑器核心、文件系统、设置、标签页
+- 应用核心装配：连接 MyGo、编辑器核心、文件系统、设置、标签页
 - 初始化渲染服务（Shiki、KaTeX、Mermaid、图片加载器）
 - 按文档 ID 创建、挂起和恢复 `EditorCore` 运行时，保留窗口内编辑历史和阅读位置
 - 新建空白标签在对应运行时挂载后聚焦正文一次，切换文档取消过期聚焦
@@ -493,11 +493,11 @@
 
 **Does not own:**
 - 不拥有设置持久化后端逻辑（通过 settings.ts）
-- 不拥有软件更新共享状态和后端（通过 softwareUpdate.ts / tauriUpdater.ts）
+- 不拥有软件更新共享状态和后端（通过 softwareUpdate.ts / desktopUpdater.ts）
 
 **Called by:** `src/main.ts`（当 `view=settings` 时）
 
-**Depends on:** `src/app/services/settings.ts`, `src/app/services/themeManager.ts`, `src/app/services/softwareUpdate.ts`, `src/lib/desktop/tauriStorage.ts`, `src/app/i18n.ts`, `WindowsCaptionControls.svelte`
+**Depends on:** `src/app/services/settings.ts`, `src/app/services/themeManager.ts`, `src/app/services/softwareUpdate.ts`, `src/lib/desktop/desktopStorage.ts`, `src/app/i18n.ts`, `WindowsCaptionControls.svelte`
 
 **Change this when:**
 - 添加新的设置项 UI
@@ -506,7 +506,7 @@
 
 **Do not change this when:**
 - 修改设置模型结构（在 settings.ts 中）
-- 修改后端配置结构（在 config/mod.rs 中）
+- 修改后端配置结构（在 desktop/internal/config/config.go 中）
 
 **Related tests:** —
 
@@ -540,11 +540,11 @@
 - 升级后的当前版本日志弹窗、开始使用/关闭、焦点约束及恢复
 - 实际挂载后的展示确认回调；不提供下载或安装动作
 
-**Does not own:** 版本记录与跨窗口领取（在 software_update.rs）、Markdown 安全策略（在 softwareUpdateReleaseNotes.ts）
+**Does not own:** 版本记录与跨窗口领取（在 desktop/software_update.go）、Markdown 安全策略（在 softwareUpdateReleaseNotes.ts）
 
 **Called by:** `src/app/App.svelte`（启动恢复完成且已有确认弹窗关闭后）
 
-**Depends on:** `src/app/services/softwareUpdateReleaseNotes.ts`, `src/lib/desktop/tauriStorage.ts`, `src/app/i18n.ts`
+**Depends on:** `src/app/services/softwareUpdateReleaseNotes.ts`, `src/lib/desktop/desktopStorage.ts`, `src/app/i18n.ts`
 
 **Change this when:** 修改升级完成页的布局、关闭行为或实际展示回调
 
@@ -564,7 +564,7 @@
 
 **Called by:** `src/app/App.svelte`, `src/app/components/SettingsWindow.svelte`
 
-**Depends on:** `src/app/services/softwareUpdateReleaseNotes.ts`, `src/lib/desktop/tauriStorage.ts`, `src/app/i18n.ts`
+**Depends on:** `src/app/services/softwareUpdateReleaseNotes.ts`, `src/lib/desktop/desktopStorage.ts`, `src/app/i18n.ts`
 
 **Change this when:** 修改更新弹窗布局或状态动作
 
@@ -622,8 +622,8 @@
 
 **Does not own：**
 - 不拥有具体业务逻辑（由 App.svelte 通过 props 注入）。
-- 不拥有 macOS 原生菜单（在 Rust `window/menu.rs` 中）。
-- 不拥有 Windows 无边框窗口、阴影与缩放边界（由 Tauri/Tao 及 `os/windows.rs` 负责）。
+- 不拥有 macOS 原生菜单（在 Go `desktop/menu.go` 中）。
+- 不拥有 Windows 无边框窗口、阴影与缩放边界（由 MyGo 及 `desktop/windows.go` 负责）。
 
 **Called by:** `src/app/components/AppShell.svelte`
 
@@ -658,7 +658,7 @@
 
 **Called by:** `AppTitleBar.svelte`, `SettingsWindow.svelte`
 
-**Depends on:** `@tauri-apps/api/window`, `src/app/i18n.ts`, `src/lib/services/logger.ts`
+**Depends on:** `src/lib/desktop/runtime/window`, `src/app/i18n.ts`, `src/lib/services/logger.ts`
 
 **Change this when:** 修改 Windows 窗口按钮行为、图标、状态同步或交互样式。
 
@@ -926,7 +926,7 @@
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `@tauri-apps/api/path`, `src/app/services/tabs.ts`, `src/app/types.ts`
+**Depends on:** `src/lib/desktop/runtime/path`, `src/app/services/tabs.ts`, `src/app/types.ts`
 
 **Change this when:**
 - 修改相对路径解析、支持的本地链接类型或 fragment 分类规则
@@ -1035,7 +1035,7 @@
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `src/app/services/documentFiles.ts`, `src/app/services/folderTree.ts`, `src/lib/desktop/tauriStorage.ts`
+**Depends on:** `src/app/services/documentFiles.ts`, `src/app/services/folderTree.ts`, `src/lib/desktop/desktopStorage.ts`
 
 **Change this when：**
 - 修改文件夹加载逻辑
@@ -1094,11 +1094,11 @@
 
 **Does not own：**
 - 不拥有设置 UI（在 SettingsWindow.svelte 中）
-- 不拥有后端配置存储直接操作（通过 tauriStorage.ts）
+- 不拥有后端配置存储直接操作（通过 desktopStorage.ts）
 
 **Called by:** `src/app/App.svelte`, `src/app/components/SettingsWindow.svelte`, `src/app/services/editorSettingsController.ts`
 
-**Depends on:** `src/app/services/themeRegistry.ts`, `src/lib/desktop/tauriStorage.ts`, `src/lib/editor-core/quickInsert.ts`
+**Depends on:** `src/app/services/themeRegistry.ts`, `src/lib/desktop/desktopStorage.ts`, `src/lib/editor-core/quickInsert.ts`
 
 **Change this when：**
 - 添加新的设置项
@@ -1108,7 +1108,7 @@
 
 **Do not change this when：**
 - 修改设置 UI 展示方式
-- 修改后端配置结构（在 config/mod.rs 中）
+- 修改后端配置结构（在 desktop/internal/config/config.go 中）
 
 **Related tests:** `src/app/services/settings.test.ts`
 
@@ -1204,7 +1204,7 @@
 
 **Called by:** `src/app/App.svelte`, `src/app/components/SettingsWindow.svelte`
 
-**Depends on:** `src/lib/desktop/tauriUpdater.ts`
+**Depends on:** `src/lib/desktop/desktopUpdater.ts`
 
 **Change this when:** 修改前端共享更新状态或命令协调流程
 
@@ -1273,13 +1273,13 @@
 - 文件保存对话框调用（pickSavePath）
 
 **Does not own：**
-- 不拥有文件系统写入（通过 tauriStorage.ts 的 invoke 调用）
-- 不拥有 PDF 渲染（通过 tauriStorage.ts 的 exportPdfFromHtml）
+- 不拥有文件系统写入（通过 desktopStorage.ts 的 invoke 调用）
+- 不拥有 PDF 渲染（通过 desktopStorage.ts 的 exportPdfFromHtml）
 - 不拥有导出 UI 触发（在 AppShell.svelte / AppTitleBar.svelte 中）
 
 **Called by:** `src/app/App.svelte`（通过菜单/快捷键触发导出）
 
-**Depends on:** `src/app/services/export/`, `src/lib/desktop/tauriStorage.ts`, `src/app/styles/export-document.css`
+**Depends on:** `src/app/services/export/`, `src/lib/desktop/desktopStorage.ts`, `src/app/styles/export-document.css`
 
 **Change this when：**
 - 修改图片内嵌策略（新增/移除图片来源类型支持）
@@ -1306,7 +1306,7 @@
 
 **Called by:** `src/app/App.svelte` 的 `docx` 导出分支；菜单命令为 `export-word`。
 
-**Related tests:** `word/document.test.ts`, `word/resources.test.ts`, `word/snapshot.test.ts`, `wordExportService.test.ts`；原生写入覆盖 `export.rs` 的 `word_export_tests`。
+**Related tests:** `word/document.test.ts`, `word/resources.test.ts`, `word/snapshot.test.ts`, `wordExportService.test.ts`；原生写入见 `desktop/export.go`。
 
 **Confidence:** high
 
@@ -1322,7 +1322,7 @@
 
 **Does not own：**
 - 不拥有编辑器命令具体实现（在 editorCommands.ts 中）
-- 不拥有菜单 UI 构建（在 Rust 后端 menu.rs 中）
+- 不拥有菜单 UI 构建（在 Go 外壳 `desktop/menu.go` 中）
 
 **Called by:** `src/app/App.svelte`
 
@@ -1859,21 +1859,21 @@
 
 ---
 
-### `src/lib/desktop/tauriStorage.ts`
+### `src/lib/desktop/desktopStorage.ts`
 
 **Kind:** service
 
 **Owns：**
-- 封装配置存储、文件系统、图片资源、窗口设置等 Tauri `invoke` 调用
+- 封装配置存储、文件系统、图片资源、窗口设置等 MyGo `invoke` 调用
 - 封装工作区草稿、快照正文文件相关 IPC 调用
 - 为浏览器环境提供 fallback
 
 **Does not own：**
-- 不拥有后端具体实现（在 Rust 中）
+- 不拥有后端具体实现（在 Go 外壳 `desktop/` 中）
 
 **Called by:** `src/app/services/settings.ts`, `src/app/services/documentFiles.ts`, `src/app/services/folderExplorerController.ts`, `src/app/services/workspacePersistence.ts`, `src/app/App.svelte`
 
-**Depends on:** `@tauri-apps/api`
+**Depends on:** `src/lib/desktop/runtime/`
 
 **Change this when：**
 - 新增/修改前端 IPC 调用封装
@@ -1882,7 +1882,7 @@
 **Do not change this when：**
 - 修改后端 IPC 命令实现
 
-**Related tests:** `src/lib/desktop/tauriStorage.test.ts`
+**Related tests:** `src/lib/desktop/desktopStorage.test.ts`
 
 **Confidence:** high
 
@@ -1918,12 +1918,12 @@
 
 ---
 
-### `src-tauri/src/lib.rs`
+### `desktop/main.go`
 
 **Kind:** entry
 
 **Owns：**
-- Tauri 后端装配：初始化日志、插件、配置管理器、窗口、菜单、托盘
+- MyGo 后端装配：初始化日志、插件、配置管理器、窗口、菜单、托盘
 - 渲染模式检测（启动前从 config.json 读取 software render 设置）
 - 外部打开路由
 - 关闭拦截（`WindowEvent::CloseRequested`）
@@ -1932,9 +1932,9 @@
 **Does not own：**
 - 不拥有具体业务模块实现（委派给 config/、file_system/、window/ 等子模块）
 
-**Called by:** `src-tauri/src/main.rs`
+**Called by:** `desktop/app.go`
 
-**Depends on:** `src-tauri/src/config/`, `src-tauri/src/file_system/`, `src-tauri/src/window/`, `src-tauri/src/software_update.rs`, `src-tauri/src/external_link.rs`, `src-tauri/src/app_logger.rs`, `src-tauri/src/i18n.rs`, `src-tauri/src/export.rs`
+**Depends on:** `desktop/internal/config/`, `desktop/internal/docfs/`, `desktop/`, `desktop/software_update.go`, `desktop/commands_files.go`, `desktop/internal/applog/applog.go`, `desktop/internal/i18n/i18n.go`, `desktop/export.go`
 
 **Change this when：**
 - 新增 IPC 命令
@@ -1951,7 +1951,7 @@
 
 ---
 
-### `src-tauri/src/models.rs`
+### `desktop/internal/config/config.go`
 
 **Kind:** model
 
@@ -1980,7 +1980,7 @@
 
 ---
 
-### `src-tauri/src/config/mod.rs`
+### `desktop/internal/config/config.go`
 
 **Kind:** service / data store
 
@@ -1994,12 +1994,12 @@
 - 启动前设置读取：在 `AppHandle` 可用前从磁盘读取配置（渲染模式、开发者模式）
 
 **Does not own：**
-- 不拥有具体 IPC 命令实现（在 `config/commands.rs` 中）
+- 不拥有具体 IPC 命令实现（在 `desktop/commands_config.go` 中）
 - 不拥有前端设置模型与归一化（在 `settings.ts` 中）
 
-**Called by:** `src-tauri/src/lib.rs`（setup 中初始化）, `src-tauri/src/config/commands.rs`, 启动流程
+**Called by:** `desktop/main.go`（setup 中初始化）, `desktop/commands_config.go`, 启动流程
 
-**Depends on:** `src-tauri/src/models.rs`, `src-tauri/src/app_logger.rs`, Tauri path API
+**Depends on:** `desktop/internal/config/config.go`, `desktop/internal/applog/applog.go`, MyGo path API
 
 **Change this when：**
 - 新增/修改 AppConfig section 或字段
@@ -2012,13 +2012,13 @@
 - 修改前端设置 UI
 - 修改具体业务逻辑
 
-**Related tests:** `src-tauri/src/config/mod.rs` 模块内测试
+**Related tests:** `desktop/internal/config/config.go` 模块内测试
 
 **Confidence:** high
 
 ---
 
-### `src-tauri/src/file_system.rs`
+### `desktop/internal/docfs/docfs.go`
 
 **Kind:** service
 
@@ -2033,9 +2033,9 @@
 **Does not own：**
 - 不拥有图片资源处理（在 file_system/image_assets.rs 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）, 前端 `documentFiles.ts`
+**Called by:** `desktop/main.go`（注册为 IPC）, 前端 `documentFiles.ts`
 
-**Depends on:** `src-tauri/src/models.rs`, `encoding_rs`
+**Depends on:** `desktop/internal/config/config.go`, `encoding_rs`
 
 **Change this when：**
 - 修改文件读写逻辑
@@ -2045,13 +2045,13 @@
 **Do not change this when：**
 - 修改前端文件操作封装
 
-**Related tests:** `src-tauri/src/file_system.rs` 内联测试
+**Related tests:** `desktop/internal/docfs/docfs.go` 内联测试
 
 **Confidence:** high
 
 ---
 
-### `src-tauri/src/file_system/image_assets.rs`
+### `desktop/image_assets.go`
 
 **Kind:** service
 
@@ -2064,9 +2064,9 @@
 **Does not own：**
 - 不拥有前端图片插入流程（在 imageInsertion.ts 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）
+**Called by:** `desktop/main.go`（注册为 IPC）
 
-**Depends on:** `src-tauri/src/models.rs`
+**Depends on:** `desktop/internal/config/config.go`
 
 **Change this when：**
 - 修改图片导入策略
@@ -2082,7 +2082,7 @@
 
 ---
 
-### `src-tauri/src/software_update.rs`
+### `desktop/software_update.go`
 
 **Kind:** service
 
@@ -2098,7 +2098,7 @@
 **Does not own：**
 - 不拥有前端更新 UI（在 SoftwareUpdateNotice / SoftwareUpdateDialog / SoftwareUpdateSuccessDialog 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）
+**Called by:** `desktop/main.go`（注册为 IPC）
 
 **Depends on:** `reqwest`, `semver`, `sha2`, `md5`
 
@@ -2116,7 +2116,7 @@
 
 ---
 
-### `src-tauri/src/window/menu.rs`
+### `desktop/menu.go`
 
 **Kind:** service
 
@@ -2129,9 +2129,9 @@
 - 不拥有菜单命令前端处理（在 appCommands.ts 中）
 - 不拥有后端特殊处理（quit、open-settings 在 lib.rs / commands.rs 中）
 
-**Called by:** `src-tauri/src/lib.rs`, `src-tauri/src/window/commands.rs`
+**Called by:** `desktop/main.go`, `desktop/windows.go`
 
-**Depends on:** `src-tauri/src/i18n.rs`, `src-tauri/src/config/commands.rs`, Tauri menu API
+**Depends on:** `desktop/internal/i18n/i18n.go`, `desktop/commands_config.go`, MyGo menu API
 
 **Change this when：**
 - 添加/修改菜单项
@@ -2147,7 +2147,7 @@
 
 ---
 
-### `src-tauri/src/window/tray.rs`
+### `desktop/tray.go`
 
 **Kind:** service
 
@@ -2161,9 +2161,9 @@
 **Does not own：**
 - 不拥有窗口关闭逻辑（在 lib.rs 的 WindowEvent::CloseRequested 中）
 
-**Called by:** `src-tauri/src/lib.rs`, `src-tauri/src/window/commands.rs`
+**Called by:** `desktop/main.go`, `desktop/windows.go`
 
-**Depends on:** `src-tauri/src/config/commands.rs`, `src-tauri/src/i18n.rs`
+**Depends on:** `desktop/commands_config.go`, `desktop/internal/i18n/i18n.go`
 
 **Change this when：**
 - 修改托盘菜单项
@@ -2199,7 +2199,7 @@
 
 ---
 
-### `src-tauri/src/window/open_targets.rs`
+### `desktop/open_targets.go`
 
 **Kind:** service / registry
 
@@ -2214,20 +2214,20 @@
 - 不拥有具体文件、文件夹加载与标签定位逻辑（在 `src/app/App.svelte` 中）
 - 不拥有启动参数和单实例事件解析（在 `external_open.rs` 中）
 
-**Called by:** `src/app/services/desktopWindow.ts`, `src-tauri/src/lib.rs`, `src-tauri/src/window/commands.rs`
+**Called by:** `src/app/services/desktopWindow.ts`, `desktop/main.go`, `desktop/windows.go`
 
-**Depends on:** `src-tauri/src/window/external_open.rs`, `src-tauri/src/config/commands.rs`, Tauri 窗口与事件系统
+**Depends on:** `desktop/external_open.go`, `desktop/commands_config.go`, MyGo 窗口与事件系统
 
 **Change this when:**
 - 修改跨窗口目标匹配、预留超时、已有窗口激活或新窗口标签规则
 
-**Related tests:** 同文件 Rust 测试（文件优先、直接父目录匹配、批次目标划分和拖放路径识别）
+**Related tests:** 无独立 Go 单测；目标解析行为由前端 `openTargetRouting` 测试与手动验证覆盖
 
 **Confidence:** high
 
 ---
 
-### `src-tauri/src/window/external_open.rs`
+### `desktop/external_open.go`
 
 **Kind:** service
 
@@ -2240,9 +2240,9 @@
 **Does not own：**
 - 不拥有前端打开处理（在 App.svelte 中）
 
-**Called by:** `src-tauri/src/lib.rs`（单实例插件、setup、RunEvent）
+**Called by:** `desktop/main.go`（单实例插件、setup、RunEvent）
 
-**Depends on:** `src-tauri/src/config/commands.rs`, Tauri 事件系统
+**Depends on:** `desktop/commands_config.go`, MyGo 事件系统
 
 **Change this when：**
 - 修改启动参数解析逻辑
@@ -2299,12 +2299,12 @@
 
 **Does not own:**
 - 不拥有启动时磁盘文件读取与冲突 UI 决策（在 `App.svelte` 中协调）
-- 不拥有草稿文件后端路径安全与实际读写（通过 `tauriStorage.ts` 调用 Rust IPC）
+- 不拥有草稿文件后端路径安全与实际读写（通过 `desktopStorage.ts` 调用 桌面 IPC）
 - 不拥有异常退出恢复草稿 localStorage 逻辑（在 `recoveryDraft.ts` 中）
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `src/app/types.ts`, `src/lib/desktop/tauriStorage.ts`
+**Depends on:** `src/app/types.ts`, `src/lib/desktop/desktopStorage.ts`
 
 **Change this when:**
 - 修改工作区配置版本、标签元数据字段或迁移策略
@@ -2407,7 +2407,7 @@
 
 **Called by:** `src/app/App.svelte`, `workspaceTransferController.ts`, `desktopWindow.ts`, `DocumentTabs.svelte`
 
-**Depends on:** `@tauri-apps/api/core`, `@tauri-apps/api/event`, `src/app/types.ts`
+**Depends on:** `src/lib/desktop/runtime/core`, `src/lib/desktop/runtime/event`, `src/app/types.ts`
 
 **Change this when:** 修改移交命令、事件契约或旧异步快照失效规则。
 
@@ -2417,7 +2417,7 @@
 
 ---
 
-### `src-tauri/src/window/tab_transfer.rs`
+### `desktop/tab_transfer.go`
 
 **Kind:** transaction / command service
 
@@ -2425,7 +2425,7 @@
 
 **Does not own:** Win32 拖动命中、文档编辑器历史或普通窗口关闭 UI。
 
-**Called by:** `src-tauri/src/lib.rs` 命令注册、`config/commands.rs` 写入门禁、`window/open_targets.rs`、`window/commands.rs`
+**Called by:** `desktop/main.go` 命令注册、`desktop/commands_config.go` 写入门禁、`window/open_targets.rs`、`window/commands.rs`
 
 **Depends on:** `config`, `window/open_targets.rs`, `window/tab_drag.rs`, `window/workspace_lifecycle.rs`, `window/state.rs`
 
@@ -2437,7 +2437,7 @@
 
 ---
 
-### `src-tauri/src/window/tab_drag.rs`
+### `desktop/tab_drag.go`
 
 **Kind:** Windows input / command service
 
@@ -2445,7 +2445,7 @@
 
 **Does not own:** WebView 原生文件拖入、标签成员校验或跨窗口提交。
 
-**Called by:** `src-tauri/src/lib.rs` 命令注册、`window/tab_transfer.rs`、`window/commands.rs`
+**Called by:** `desktop/main.go` 命令注册、`window/tab_transfer.rs`、`window/commands.rs`
 
 **Depends on:** `windows-sys`, `tauri`, `window/tab_transfer.rs`, `window/external_open.rs`, `window/state.rs`
 
@@ -2475,7 +2475,7 @@
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `src/lib/desktop/tauriStorage.ts`, `src/app/services/outlineNavigation.ts`
+**Depends on:** `src/lib/desktop/desktopStorage.ts`, `src/app/services/outlineNavigation.ts`
 
 **Change this when:**
 - 修改阅读位置持久化结构
@@ -2613,9 +2613,9 @@
 
 **Owns:**
 - 语义编辑器剪贴板文本、安全 HTML 与图片读写协调
-- 优先使用激活上下文中的 Web Clipboard API，并在桌面端降级到 Tauri 官方剪贴板插件
+- 优先使用激活上下文中的 Web Clipboard API，并在桌面端降级到 MyGo 官方剪贴板插件
 - 为普通粘贴和纯文本粘贴提供富内容优先/文本优先读取策略
-- 将 Tauri RGBA 图片编码为 PNG `File`，交回既有图片导入流程
+- 将 MyGo RGBA 图片编码为 PNG `File`，交回既有图片导入流程
 
 **Does not own:**
 - 不拥有 ProseMirror 选区序列化和粘贴解析（在 `ProseMirrorEditorCore.ts` 中）
@@ -2623,7 +2623,7 @@
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `@tauri-apps/plugin-clipboard-manager`, Web Clipboard API
+**Depends on:** `src/lib/desktop/runtime/clipboard.ts`, Web Clipboard API
 
 **Change this when:**
 - 修改桌面/浏览器剪贴板优先级、权限降级或图片编码桥接
@@ -2694,11 +2694,11 @@
 - `shouldOpenFirstRunSample` / `hasHandledFirstRunSample` 纯函数
 
 **Does not own:**
-- 不拥有样本文件复制（在 Rust 后端 file_system.rs 中）
+- 不拥有样本文件复制（在 Go 外壳 `desktop/commands_files.go` 中）
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `src/lib/desktop/tauriStorage.ts`
+**Depends on:** `src/lib/desktop/desktopStorage.ts`
 
 **Change this when:**
 - 修改首次运行判断条件
@@ -3563,9 +3563,9 @@
 - Markdown 源编码类型、默认值和兼容归一化规则
 
 **Does not own:**
-- 不拥有具体实现（在 tauriStorage.ts 和 Rust 后端中）
+- 不拥有具体实现（在 desktopStorage.ts 和 Go 外壳中）
 
-**Called by:** `src/lib/desktop/tauriStorage.ts`
+**Called by:** `src/lib/desktop/desktopStorage.ts`
 
 **Depends on:** —
 
@@ -3610,7 +3610,7 @@
 
 **Owns:**
 - 前端全局日志工具：debug/info/warn/error 级别
-- DevTools 输出和 Tauri 原生日志转发
+- DevTools 输出和 MyGo 原生日志转发
 - 日志缓冲区（最大 500 条）
 - 性能计时器（`createPerfTimer`、`perf`、`perfAsync`）
 - `window.NomoLogger` 控制台控制接口
@@ -3620,7 +3620,7 @@
 
 **Called by:** 前端各模块（通过 `logInfo`/`logError` 等）
 
-**Depends on:** `@tauri-apps/api/core`（可选）
+**Depends on:** `src/lib/desktop/runtime/core`（可选）
 
 **Change this when:**
 - 修改日志输出策略
@@ -3657,7 +3657,7 @@
 
 ---
 
-### `src-tauri/src/export.rs`
+### `desktop/export.go`
 
 **Kind:** service
 
@@ -3669,9 +3669,9 @@
 **Does not own:**
 - 不拥有 PDF 生成（在 export_windows.rs 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）, `src-tauri/src/export_windows.rs`
+**Called by:** `desktop/main.go`（注册为 IPC）, `desktop/export.go`
 
-**Depends on:** `src-tauri/src/models.rs`, `src-tauri/src/app_logger.rs`
+**Depends on:** `desktop/internal/config/config.go`, `desktop/internal/applog/applog.go`
 
 **Change this when:**
 - 修改 HTML 导出逻辑
@@ -3683,7 +3683,7 @@
 
 ---
 
-### `src-tauri/src/export_windows.rs`
+### `desktop/export.go`
 
 **Kind:** service
 
@@ -3694,9 +3694,9 @@
 **Does not own:**
 - 不拥有 HTML 临时文件写入（在 export.rs 中）
 
-**Called by:** `src-tauri/src/export.rs`（在原生 PDF 任务中调用）
+**Called by:** `desktop/export.go`（在原生 PDF 任务中调用）
 
-**Depends on:** `src-tauri/src/export.rs`, `src-tauri/src/models.rs`
+**Depends on:** `desktop/export.go`, `desktop/internal/config/config.go`
 
 **Change this when:**
 - 修改 PDF 生成方式
@@ -3708,7 +3708,7 @@
 
 ---
 
-### `src-tauri/src/app_logger.rs`
+### `desktop/internal/applog/applog.go`
 
 **Kind:** service
 
@@ -3720,9 +3720,9 @@
 **Does not own:**
 - 不拥有前端日志生成（在 logger.ts 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）, 后端各模块（通过 `info`/`debug`/`error` 等）
+**Called by:** `desktop/main.go`（注册为 IPC）, 后端各模块（通过 `info`/`debug`/`error` 等）
 
-**Depends on:** `chrono`, `src-tauri/src/config/mod.rs`
+**Depends on:** `chrono`, `desktop/internal/config/config.go`
 
 **Change this when:**
 - 修改日志文件策略
@@ -3734,7 +3734,7 @@
 
 ---
 
-### `src-tauri/src/config/commands.rs`
+### `desktop/commands_config.go`
 
 **Kind:** service
 
@@ -3747,23 +3747,23 @@
 - 内部工具：`query_recent_entries`、`get_setting_value`、正文文件读写、设置路由到 AppConfig section
 
 **Does not own:**
-- 不拥有配置存储/结构定义（在 config/mod.rs 中）
+- 不拥有配置存储/结构定义（在 desktop/internal/config/config.go 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）
+**Called by:** `desktop/main.go`（注册为 IPC）
 
-**Depends on:** `src-tauri/src/config/mod.rs`, `src-tauri/src/models.rs`, `src-tauri/src/file_system.rs`
+**Depends on:** `desktop/internal/config/config.go`, `desktop/internal/docfs/docfs.go`
 
 **Change this when:**
 - 新增数据操作 IPC 命令
 - 修改最近打开/快照/草稿/设置的查询逻辑
 
-**Related tests:** `src-tauri/src/config/commands.rs` 模块内测试
+**Related tests:** `desktop/commands_config.go` 模块内测试
 
 **Confidence:** high
 
 ---
 
-### `src-tauri/src/window/commands.rs`
+### `desktop/windows.go`
 
 **Kind:** service
 
@@ -3775,9 +3775,9 @@
 - 不拥有窗口状态持久化逻辑（在 window/state.rs 中）
 - 不拥有菜单构建（在 window/menu.rs 中）
 
-**Called by:** `src-tauri/src/lib.rs`（注册为 IPC）
+**Called by:** `desktop/main.go`（注册为 IPC）
 
-**Depends on:** `src-tauri/src/window/state.rs`, `src-tauri/src/window/menu.rs`, `src-tauri/src/window/os/mod.rs`, `src-tauri/src/window/tray.rs`, `src-tauri/src/config/commands.rs`
+**Depends on:** `desktop/window_state.go`, `desktop/menu.go`, `desktop/windows.go`, `desktop/tray.go`, `desktop/commands_config.go`
 
 **Change this when:**
 - 新增窗口相关 IPC 命令
@@ -3804,7 +3804,7 @@
 
 ---
 
-### `src-tauri/src/window/state.rs`
+### `desktop/window_state.go`
 
 **Kind:** window state service
 
@@ -3818,9 +3818,9 @@
 - 不拥有前端小窗内容和标题栏 UI
 - 不拥有 IPC 命令注册
 
-**Called by:** `src-tauri/src/lib.rs`, `src-tauri/src/window/commands.rs`
+**Called by:** `desktop/main.go`, `desktop/windows.go`
 
-**Depends on:** Tauri window and monitor APIs, `src-tauri/src/window/os/windows.rs`, `src-tauri/src/models.rs`, `src-tauri/src/config/mod.rs`
+**Depends on:** MyGo window and monitor APIs, `desktop/windows.go`, `desktop/internal/config/config.go`
 
 **Change this when:**
 - 修改窗口几何保存/恢复、小窗定位、置顶或模式切换的原生行为
@@ -3831,7 +3831,7 @@
 
 ---
 
-### `src-tauri/src/window/os/windows.rs`
+### `desktop/windows.go`
 
 **Kind:** Windows platform adapter
 
@@ -3845,9 +3845,9 @@
 - 不拥有前端自绘按钮、标题栏布局或关闭业务。
 - 不复制 Tao 已负责的缩放命中、最大化工作区和普通 Snap 行为。
 
-**Called by:** `src-tauri/src/window/os/mod.rs`, `src-tauri/src/lib.rs`（注册 Windows 浏览器快捷键插件）
+**Called by:** `desktop/windows.go`, `desktop/main.go`（注册 Windows 浏览器快捷键插件）
 
-**Depends on:** `src-tauri/tauri.windows.conf.json`、Tauri window/plugin API、WebView2 COM、Windows Registry 与 WindowsAndMessaging API
+**Depends on:** `mygo.config.ts`、MyGo window/plugin API、WebView2 COM、Windows Registry 与 WindowsAndMessaging API
 
 **Change this when:**
 - 修改 Windows 无边框、阴影、系统主题、窗口前置或浏览器默认快捷键行为。
@@ -3858,7 +3858,7 @@
 
 ---
 
-### `src-tauri/src/window/mod.rs`
+### `desktop/windows.go`
 
 **Kind:** entry
 
@@ -3868,7 +3868,7 @@
 **Does not own:**
 - 不拥有具体业务逻辑
 
-**Called by:** `src-tauri/src/lib.rs`
+**Called by:** `desktop/main.go`
 
 **Depends on:** —
 
@@ -3893,12 +3893,12 @@
 - Markdown 小窗进入、返回和置顶 IPC 的前端适配
 
 **Does not own:**
-- 不拥有窗口状态持久化（在 Rust window/state.rs 中）
-- 不拥有关闭到托盘逻辑（在 Rust window/tray.rs 中）
+- 不拥有窗口状态持久化（在 Go `desktop/window_state.go` 中）
+- 不拥有关闭到托盘逻辑（在 Go `desktop/tray.go` 中）
 
 **Called by:** `src/app/App.svelte`, `src/app/components/AppShell.svelte`
 
-**Depends on:** `@tauri-apps/api/window`, `@tauri-apps/api/dpi`, `@tauri-apps/api/core`, `src/app/services/platform.ts`
+**Depends on:** `src/lib/desktop/runtime/window`, `src/lib/desktop/runtime/dpi`, `src/lib/desktop/runtime/core`, `src/app/services/platform.ts`
 
 **Change this when:**
 - 修改窗口操作行为
@@ -3943,15 +3943,15 @@
 
 **Owns:**
 - 桌面图片加载器实现：resolve/import/remove
-- 通过 Tauri IPC 调用后端图片资源处理
+- 通过 MyGo IPC 调用后端图片资源处理
 
 **Does not own:**
-- 不拥有图片后端处理逻辑（在 Rust file_system/image_assets.rs 中）
+- 不拥有图片后端处理逻辑（在 Go `desktop/image_assets.go` 中）
 - 不拥有图片 NodeView 展示（在 ImageNodeView.ts 中）
 
 **Called by:** `src/app/App.svelte`（注册到 renderers.ts）
 
-**Depends on:** `src/lib/desktop/tauriStorage.ts`, `src/lib/services/render.ts`
+**Depends on:** `src/lib/desktop/desktopStorage.ts`, `src/lib/services/render.ts`
 
 **Change this when:**
 - 修改图片 resolve/import/remove 前端调用
@@ -4030,7 +4030,7 @@
 **Does not own:**
 - 不拥有 CodeMirror 局部文档状态（在 `SegmentedTextEditorCore.ts`）
 - 不拥有字节与滚动位置的纯映射算法（在 `virtualScroll.ts`）
-- 不拥有 Rust 文件读取和索引任务
+- 不拥有 Go 文件读取和索引任务（`desktop/internal/textdoc/`）
 
 **Called by:** `src/app/App.svelte`
 
@@ -4218,15 +4218,15 @@
 | `src/lib/outline/` | 大纲服务 |
 | `src/lib/toc/` | TOC 服务 |
 | `src/lib/services/` | 渲染服务接口与实现（Shiki、KaTeX、Mermaid） |
-| `src/lib/desktop/` | Tauri IPC 适配（tauriStorage、tauriUpdater） |
+| `src/lib/desktop/` | MyGo IPC 适配（tauriStorage、tauriUpdater） |
 | `src/lib/text-editor/` | TXT/JSON 大文件分段编辑、窗口缓存与全文虚拟滚动 |
 | `src/quicklook/` | macOS Quick Look 预览 |
 | `src/paraglide/` | Inlang/Paraglide 生成的本地化代码（**不要手改**） |
-| `src-tauri/src/` | Rust 后端 |
-| `src-tauri/src/config/` | JSON 配置管理（ConfigManager、commands）：设置、最近打开、快照索引、工作区状态/草稿正文仓库、窗口状态 |
-| `src-tauri/src/file_system/` | 文件系统与图片资源 |
-| `src-tauri/src/text_document/` | TXT/JSON 分段文档会话、字节索引、编辑日志与后台任务 |
-| `src-tauri/src/window/` | 窗口、菜单、托盘、外部打开、文件关联 |
+| `desktop/` | Go 桌面外壳（MyGo） |
+| `desktop/internal/config/` | JSON 配置管理（ConfigManager、commands）：设置、最近打开、快照索引、工作区状态/草稿正文仓库、窗口状态 |
+| `desktop/internal/docfs/` | 文件系统与图片资源 |
+| `desktop/internal/textdoc/` | TXT/JSON 分段文档会话、字节索引、编辑日志与后台任务 |
+| `desktop/` | 窗口、菜单、托盘、外部打开、文件关联 |
 | `project.inlang/` | Inlang 本地化文案源文件（**修改这里而非 paraglide/**） |
 
 ---
@@ -4236,6 +4236,6 @@
 - **high**: 基于代码扫描确认的职责划分。
 - `src/app/App.svelte` 和 `src/app/components/SettingsWindow.svelte` 体积偏大，未来拆分后可能需要更新相关条目。
 - `src/lib/editor-core/markdown.ts` 和 `editorCommands.ts` 体积极大，未来拆分为子模块后需要更新条目。
-- `src-tauri/src/file_system.rs` 未来拆分后需要更新条目。
-- `src-tauri/src/config/mod.rs` 承担了原 SQLite 数据库的全部职责（最近打开、快照、设置），未来若拆分需更新条目。
+- `desktop/internal/docfs/docfs.go` 未来拆分后需要更新条目。
+- `desktop/internal/config/config.go` 承担了原 SQLite 数据库的全部职责（最近打开、快照、设置），未来若拆分需更新条目。
 - `src/app/i18n.ts` 和 `src/app/i18n.ja.ts` 未单独建条目（已在 Feature Index 本地化节覆盖）。

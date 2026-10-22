@@ -8,9 +8,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIGHT="$ROOT/src-tauri/icons/nomo/macos/nomo-app-light-catalog-1024.png"
-DARK="$ROOT/src-tauri/icons/nomo/macos/nomo-app-dark-catalog-1024.png"
-OUT_DIR="$ROOT/src-tauri/target/appicon"
+LIGHT="$ROOT/desktop/packaging/icons/nomo/macos/nomo-app-light-catalog-1024.png"
+DARK="$ROOT/desktop/packaging/icons/nomo/macos/nomo-app-dark-catalog-1024.png"
+OUT_DIR="$ROOT/target/appicon"
 
 if [[ ! -f "$LIGHT" || ! -f "$DARK" ]]; then
   echo "缺少 macOS 1024px 图标，请先执行 pnpm icons:generate: $LIGHT / $DARK" >&2

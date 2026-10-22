@@ -1,11 +1,11 @@
 <script lang="ts">
   import { X } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import type { InstalledReleaseNotes } from '../../lib/desktop/tauriUpdater';
-  import { openExternalLink } from '../../lib/desktop/tauriStorage';
+  import type { InstalledReleaseNotes } from '../../lib/desktop/desktopUpdater';
+  import { openExternalLink } from '../../lib/desktop/desktopStorage';
   import { logError } from '../../lib/services/logger';
-  import nomoLogoLight from '../../../src-tauri/icons/nomo/source/nomo-app-light.svg?url';
-  import nomoLogoDark from '../../../src-tauri/icons/nomo/source/nomo-app-dark.svg?url';
+  import nomoLogoLight from '../../../desktop/packaging/icons/nomo/source/nomo-app-light.svg?url';
+  import nomoLogoDark from '../../../desktop/packaging/icons/nomo/source/nomo-app-dark.svg?url';
   import { t } from '../i18n';
   import { renderSoftwareUpdateReleaseNotes } from '../services/softwareUpdateReleaseNotes';
 

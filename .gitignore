@@ -6,12 +6,15 @@ dist/
 build/
 .svelte-kit/
 .vite/
-.tauri/
-src-tauri/target/
-src-tauri/gen
-src-tauri/windows-shell-extension/bin/
-src-tauri/windows-shell-extension/obj/
-src-tauri/windows-shell-extension/obj-tests/
+/target/
+# mygo dev 的开发版构建目录
+/.mygo/
+# 旧 Tauri 外壳的本地构建缓存
+/src-tauri/
+src/lib/desktop/runtime/bindings.gen.ts
+desktop/packaging/windows-shell-extension/bin/
+desktop/packaging/windows-shell-extension/obj/
+desktop/packaging/windows-shell-extension/obj-tests/
 .artifacts/
 
 # Local environment

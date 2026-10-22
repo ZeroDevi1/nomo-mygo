@@ -1,4 +1,4 @@
-import type { SettingRecord } from '../../lib/desktop/tauriStorage';
+import type { SettingRecord } from '../../lib/desktop/desktopStorage';
 
 export const FIRST_RUN_SAMPLE_DOCUMENT_OPENED_KEY = 'firstRunSampleDocumentOpened';
 export const FIRST_RUN_SAMPLE_DOCUMENT_OPEN_ERROR_KEY = 'firstRunSampleDocumentOpenError';

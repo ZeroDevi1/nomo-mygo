@@ -18,7 +18,7 @@ import {
 const writeWorkspaceDraft = vi.hoisted(() => vi.fn());
 const deleteWorkspaceDraft = vi.hoisted(() => vi.fn());
 
-vi.mock('../../lib/desktop/tauriStorage', () => ({
+vi.mock('../../lib/desktop/desktopStorage', () => ({
   writeWorkspaceDraft,
   deleteWorkspaceDraft,
 }));

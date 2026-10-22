@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from '../../lib/emoji/catalog.fixture';
 const invoke = vi.hoisted(() => vi.fn());
-vi.mock('../../lib/desktop/tauriStorage', () => ({ isTauriRuntime: () => true }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke }));
+vi.mock('../../lib/desktop/desktopStorage', () => ({ isDesktopRuntime: () => true }));
+vi.mock('../../lib/desktop/runtime/core', () => ({ invoke }));
 beforeEach(() => {
   vi.resetModules();
   invoke.mockReset();

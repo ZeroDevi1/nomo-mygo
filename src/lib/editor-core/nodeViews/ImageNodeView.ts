@@ -643,8 +643,8 @@ export class ImageNodeView {
       if (resolvedSrc.startsWith('http://') || resolvedSrc.startsWith('https://')) {
         return;
       }
-      // 尝试使用 Tauri 命令在文件管理器中定位
-      const { invoke } = await import('@tauri-apps/api/core');
+      // 在系统文件管理器中定位
+      const { invoke } = await import('../../desktop/runtime/core');
       await invoke('reveal_in_explorer', { path: resolvedSrc });
     } catch {
       // 静默失败
@@ -657,8 +657,8 @@ export class ImageNodeView {
       const response = await fetch(resolvedSrc);
       const blob = await response.blob();
       try {
-        const { writeImage } = await import('@tauri-apps/plugin-clipboard-manager');
-        await writeImage(new Uint8Array(await blob.arrayBuffer()));
+        const { writeClipboardImage } = await import('../../desktop/runtime/clipboard');
+        await writeClipboardImage(new Uint8Array(await blob.arrayBuffer()));
       } catch {
         await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
       }
@@ -671,8 +671,8 @@ export class ImageNodeView {
   private async copyImagePath(src: string): Promise<void> {
     try {
       try {
-        const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
-        await writeText(src);
+        const { writeClipboard } = await import('../../desktop/runtime/clipboard');
+        await writeClipboard(src);
       } catch {
         await navigator.clipboard.writeText(src);
       }

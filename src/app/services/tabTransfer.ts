@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke } from '../../lib/desktop/runtime/core';
+import { listen, type UnlistenFn } from '../../lib/desktop/runtime/event';
 import type { MarkdownTabState, PersistedWorkspaceState, WorkspaceItem } from '../types';
 import type { WindowOpenTargetsSnapshot } from './desktopWindow';
 
