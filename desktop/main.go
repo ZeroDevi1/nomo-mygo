@@ -60,6 +60,10 @@ func main() {
 	if err := initializeInstalledReleaseNotes(); err != nil {
 		applog.Warn("Update", "初始化更新日志版本记录失败："+err.Error())
 	}
+	if nativeShellRequested(os.Args[1:]) {
+		runNativeShell(os.Args[1:])
+		return
+	}
 
 	mygo.Bind(Bridge{})
 	if err := mygo.Protocol.Handle("asset", http.HandlerFunc(serveAssetFile)); err != nil {

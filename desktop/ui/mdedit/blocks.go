@@ -1,0 +1,465 @@
+package mdedit
+
+import (
+	"encoding/binary"
+	"fmt"
+	"hash/maphash"
+	"math"
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
+)
+
+// 块组件版式，取自原版 document-content.css / editor-document.css 的默认值。
+const (
+	listIndent    = 26 // 列表项内容相对列表的缩进
+	quoteIndent   = 20 // 引用条 4 + 内边距 16
+	quotePad      = 8  // 引用上下内边距
+	blockMargin   = 18 // 引用、提示块、代码块、表格的上下外边距
+	codePadX      = 14
+	codePadY      = 10
+	cellPadX      = 10
+	cellPadY      = 6
+	minCellW      = 90
+	calloutTitleH = 26
+	taskBox       = 18 // 任务复选框边长，约 1.15em
+)
+
+type rowKind uint8
+
+const (
+	rowText rowKind = iota // 叶子块的投影（段落、标题、表格单元格）
+	rowLine                // 原文的一行（代码块、HTML 块、公式块、front matter、分割线）
+)
+
+// rowRole 决定行的字体与默认颜色。
+type rowRole uint8
+
+const (
+	roleBody rowRole = iota
+	roleHeading
+	roleCode
+	roleHTML
+	roleMath
+	roleFront
+	roleRule
+	roleCellHead
+)
+
+// row 是块组件中的一个可布局片段。a、b 为相对所属顶层块起点的原文区间；
+// rel 为叶子块在解析器中相对顶层块的序号（顶层块内部结构不变时保持有效）。
+type row struct {
+	kind  rowKind
+	role  rowRole
+	level int // 标题级别
+	rel   int
+	a, b  int
+	// 几何：indent 为文字相对内容区左侧的缩进；表格单元格另有 col/ncol，
+	// 实际 x 与宽度在布局时按内容宽度计算。band 相同的行共享一条水平带（表格行）。
+	indent    float32
+	col, ncol int
+	align     ui.Align
+	band      int
+	before    float32 // 所在水平带之上的间距（取带内首行）
+	after     float32 // 所在水平带之下的间距（取带内末行）
+	padTop    float32 // 文字在行框内的上下留白（单元格、代码块首末行）
+	padBottom float32
+	callout   bool // 段落以 [!TYPE] 开头
+	quoteFg   bool // 位于引用内：使用引用文字色
+	tone      int  // 位于提示块内：提示类型序号，否则 -1
+	// 列表项标记，只在项的第一行设置：marker 为“•”或“3.”，task 为 0/1/2
+	// （无、未选、已选），taskAt 为“[ ]”中间字符相对顶层块的偏移。
+	marker string
+	task   parser.Task
+	taskAt int
+	// fence 为 true 表示代码块的围栏行（```lang / ```），只在光标位于代码块
+	// [blockA, blockB]（相对顶层块）内时显示，否则高度为 0，与原版只显示语言标签一致。
+	fence          bool
+	blockA, blockB int
+	// empty 为 true 表示空列表项或空引用的占位行（没有叶子块），编辑时按文本行处理。
+	empty bool
+
+	hash uint64 // 原文与几何的哈希，编辑后据此复用布局
+
+	proj     *projection
+	layout   *ui.TextLayout
+	gen      uint32
+	sig      uint64
+	height   float32 // 行框高度（含 padTop/padBottom）；measured 为 false 时是估算值
+	measured bool
+	bytes    int
+	used     uint64
+	y        float32 // 行框顶部相对块顶部的偏移，由 layoutRows 计算
+	bandH    float32
+}
+
+// frameKind 是跨多行的装饰。
+type frameKind uint8
+
+const (
+	frameQuote frameKind = iota
+	frameCallout
+	frameCode
+	frameTable
+	frameFront
+	frameRule
+)
+
+// frame 覆盖 rows[first..last]，indent 为其左边缘相对内容区的缩进。
+type frame struct {
+	kind        frameKind
+	first, last int
+	indent      float32
+	tone        int // 提示块类型
+	lang        string
+}
+
+// blockBuilder 把一个顶层块展开为行与装饰。
+type blockBuilder struct {
+	d      *Document
+	top    Block
+	src    string // 整篇原文，只在构建期间使用
+	seed   maphash.Seed
+	rows   []row
+	frames []frame
+	band   int
+	// pending 是下一行的额外上间距（容器开头的外边距与内边距）。
+	pending float32
+}
+
+// container 描述行所处的容器上下文。
+type container struct {
+	indent  float32
+	quote   bool
+	tone    int
+	tight   bool
+	inList  bool
+	nesting int // 列表嵌套层数，决定项目符号样式
+}
+
+func buildRows(d *Document, top Block, seed maphash.Seed) ([]row, []frame) {
+	bb := &blockBuilder{d: d, top: top, src: d.Source(), seed: seed}
+	if top.Kind == KindFrontMatter {
+		f := len(bb.rows)
+		bb.pending += codePadY
+		bb.lines(top.Start, top.End, roleFront, container{tone: -1}, codePadX)
+		bb.frames = append(bb.frames, frame{kind: frameFront, first: f, last: len(bb.rows) - 1})
+		bb.closePad(codePadY + blockMargin)
+	} else {
+		bb.block(top.Index, container{tone: -1})
+	}
+	for k := range bb.rows {
+		bb.rows[k].hash = bb.hash(&bb.rows[k])
+	}
+	return bb.rows, bb.frames
+}
+
+// hash 概括行的原文与几何；逐字段写入字节，避免每次按键为数千行做格式化分配。
+func (bb *blockBuilder) hash(r *row) uint64 {
+	var h maphash.Hash
+	h.SetSeed(bb.seed)
+	h.WriteString(bb.src[bb.top.Start+r.a : bb.top.Start+r.b])
+	var flags uint32
+	for i, on := range []bool{r.callout, r.quoteFg, r.fence, r.empty} {
+		if on {
+			flags |= 1 << i
+		}
+	}
+	b := [...]uint32{uint32(r.kind), uint32(r.role), uint32(r.level), math.Float32bits(r.indent), uint32(r.col), uint32(r.ncol),
+		uint32(r.align), uint32(int32(r.tone)), math.Float32bits(r.padTop), math.Float32bits(r.padBottom), flags}
+	var buf [4 * len(b)]byte
+	for i, v := range b {
+		binary.LittleEndian.PutUint32(buf[4*i:], v)
+	}
+	h.Write(buf[:])
+	return h.Sum64()
+}
+
+func (bb *blockBuilder) add(r row) int {
+	r.before += bb.pending
+	bb.pending = 0
+	r.band = bb.band
+	bb.band++
+	bb.rows = append(bb.rows, r)
+	return len(bb.rows) - 1
+}
+
+// closePad 把容器的下内边距加到最后一行之下。
+func (bb *blockBuilder) closePad(pad float32) {
+	if n := len(bb.rows); n > 0 {
+		bb.rows[n-1].after += pad
+	}
+}
+
+func (bb *blockBuilder) rel(abs int) int { return abs - bb.top.Start }
+
+// paraSpacing 是段落之间的间距：紧凑列表内 4，其余 12。
+func paraSpacing(c container) float32 {
+	if c.inList && c.tight {
+		return 4
+	}
+	return paraAfter
+}
+
+func (bb *blockBuilder) block(i int, c container) {
+	b := bb.d.md.Block(i)
+	base := row{rel: i - bb.top.Index, a: bb.rel(b.Start), b: bb.rel(b.End), indent: c.indent, quoteFg: c.quote, tone: c.tone}
+	switch b.Kind {
+	case parser.Paragraph:
+		base.callout = c.tone >= 0 && bb.isFirstInCallout(i)
+		base.after = paraSpacing(c)
+		bb.add(base)
+	case parser.Heading:
+		base.role, base.level = roleHeading, b.Level
+		base.before = headingBefore(b.Level)
+		base.after = headingAfter(b.Level)
+		bb.add(base)
+	case parser.ThematicBreak:
+		f := len(bb.rows)
+		bb.pending += 8
+		bb.lines(b.Start, b.End, roleRule, c, 0)
+		bb.frames = append(bb.frames, frame{kind: frameRule, first: f, last: len(bb.rows) - 1, indent: c.indent})
+		bb.closePad(8 + paraAfter)
+	case parser.CodeBlock, parser.HTMLBlock, parser.MathBlock:
+		role := map[parser.Kind]rowRole{parser.CodeBlock: roleCode, parser.HTMLBlock: roleHTML, parser.MathBlock: roleMath}[b.Kind]
+		f := len(bb.rows)
+		if b.Kind == parser.CodeBlock {
+			bb.pending += blockMargin - paraAfter + codePadY
+			bb.lines(b.Start, b.End, role, c, codePadX)
+			if b.Fenced {
+				for _, k := range []int{f, len(bb.rows) - 1} {
+					bb.rows[k].fence, bb.rows[k].blockA, bb.rows[k].blockB = true, bb.rel(b.Start), bb.rel(b.End)
+				}
+			}
+			bb.frames = append(bb.frames, frame{kind: frameCode, first: f, last: len(bb.rows) - 1, indent: c.indent, lang: b.Language()})
+			bb.closePad(codePadY + blockMargin)
+		} else {
+			bb.lines(b.Start, b.End, role, c, 0)
+			bb.closePad(paraSpacing(c))
+		}
+	case parser.Quote:
+		tone := -1
+		if first, ok := bb.firstChild(i); ok && bb.d.md.Block(first).Kind == parser.Paragraph {
+			tone = calloutType(bb.src[bb.d.md.Block(first).Start:])
+		}
+		inner := c
+		inner.indent += quoteIndent
+		inner.quote = tone < 0
+		inner.tone = tone
+		inner.inList, inner.tight = false, false
+		f := len(bb.rows)
+		bb.pending += blockMargin - paraAfter + quotePad
+		if tone >= 0 {
+			bb.pending += calloutTitleH
+		}
+		for ch := range bb.d.md.Children(i) {
+			bb.block(ch, inner)
+		}
+		if len(bb.rows) == f {
+			bb.emptyRow(b.End, inner)
+		}
+		if n := len(bb.rows); n > 0 {
+			bb.rows[n-1].after = 0
+		}
+		kind := frameQuote
+		if tone >= 0 {
+			kind = frameCallout
+		}
+		bb.frames = append(bb.frames, frame{kind: kind, first: f, last: len(bb.rows) - 1, indent: c.indent, tone: tone})
+		bb.closePad(quotePad + blockMargin)
+	case parser.List:
+		inner := c
+		inner.indent += listIndent
+		inner.inList, inner.tight = true, b.Tight
+		inner.nesting = c.nesting + 1
+		n := 0
+		for item := range bb.d.md.Children(i) {
+			bb.item(item, b, n, inner)
+			n++
+		}
+		if !c.inList {
+			bb.closePad(paraAfter - paraSpacing(inner))
+		}
+	case parser.Table:
+		bb.table(i, b, c)
+	case parser.FootnoteDefinition:
+		inner := c
+		inner.indent += listIndent
+		f := len(bb.rows)
+		for ch := range bb.d.md.Children(i) {
+			bb.block(ch, inner)
+		}
+		if len(bb.rows) > f {
+			bb.rows[f].marker = "[^" + b.Label() + "]"
+		}
+	default:
+		bb.lines(b.Start, b.End, roleBody, c, 0)
+	}
+}
+
+func (bb *blockBuilder) firstChild(i int) (int, bool) {
+	for ch := range bb.d.md.Children(i) {
+		return ch, true
+	}
+	return 0, false
+}
+
+// isFirstInCallout 报告段落 i 是否为所在引用的第一个子块（承载 [!TYPE]）。
+func (bb *blockBuilder) isFirstInCallout(i int) bool {
+	p := bb.d.md.Block(i).Parent
+	first, ok := bb.firstChild(p)
+	return ok && first == i && bb.d.md.Block(p).Kind == parser.Quote
+}
+
+func (bb *blockBuilder) item(i int, list *parser.Block, n int, c container) {
+	b := bb.d.md.Block(i)
+	f := len(bb.rows)
+	for ch := range bb.d.md.Children(i) {
+		bb.block(ch, c)
+	}
+	if len(bb.rows) == f {
+		// 空列表项（只有标记）：给一个空行承载光标。
+		bb.emptyRow(b.End, c)
+	}
+	r := &bb.rows[f]
+	if list.Ordered {
+		r.marker = fmt.Sprintf("%d%c", list.Number+n, list.Marker)
+	} else {
+		r.marker = [...]string{"•", "◦", "▪"}[(c.nesting-1)%3]
+	}
+	if b.Task != parser.NoTask {
+		r.task = b.Task
+		if k := strings.IndexByte(bb.src[b.Start:b.End], '['); k >= 0 {
+			r.taskAt = bb.rel(b.Start + k + 1)
+		}
+	}
+	if !c.tight {
+		bb.rows[len(bb.rows)-1].after = paraAfter
+	}
+}
+
+// emptyRow 为没有叶子块的列表项或引用生成占位行，承载光标；区间覆盖标记后的
+// 尾随空白，光标落在其中任一位置都属于这一行。
+func (bb *blockBuilder) emptyRow(at int, c container) {
+	z := trailingEnd(bb.src, at)
+	bb.add(row{kind: rowLine, empty: true, a: bb.rel(z), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone, after: paraSpacing(c)})
+}
+
+// lines 为 [start, end) 的每一行生成原样行，去掉行首属于外层容器的前缀。
+func (bb *blockBuilder) lines(start, end int, role rowRole, c container, padX float32) {
+	s := bb.src[start:end]
+	for a := 0; a <= len(s); {
+		z := strings.IndexByte(s[a:], '\n')
+		if z < 0 {
+			z = len(s)
+		} else {
+			z += a
+		}
+		skip := a
+		if a > 0 {
+			skip = a + prefixLen(s[a:z], c)
+		}
+		bb.add(row{kind: rowLine, role: role, a: bb.rel(start + skip), b: bb.rel(start + z), indent: c.indent + padX, quoteFg: c.quote, tone: c.tone})
+		a = z + 1
+	}
+}
+
+// prefixLen 返回续行开头属于容器的前缀长度：引用的“>”（含其后一个空格）与列表缩进。
+func prefixLen(line string, c container) int {
+	n := 0
+	for n < len(line) {
+		switch {
+		case line[n] == '>' && (c.quote || c.tone >= 0):
+			n++
+			if n < len(line) && line[n] == ' ' {
+				n++
+			}
+		case line[n] == ' ' && n < int(c.indent/listIndent)*4+4:
+			n++
+		default:
+			return n
+		}
+	}
+	return n
+}
+
+func (bb *blockBuilder) table(i int, t *parser.Block, c container) {
+	ncol := max(1, len(t.Align))
+	f := len(bb.rows)
+	bb.pending += blockMargin - paraAfter
+	for tr := range bb.d.md.Children(i) {
+		row0 := len(bb.rows)
+		header := bb.d.md.Block(tr).Header
+		col := 0
+		for cell := range bb.d.md.Children(tr) {
+			cb := bb.d.md.Block(cell)
+			r := row{rel: cell - bb.top.Index, a: bb.rel(cb.Start), b: bb.rel(cb.End), indent: c.indent, col: col, ncol: ncol, tone: -1, padTop: cellPadY, padBottom: cellPadY}
+			if header {
+				r.role = roleCellHead
+			}
+			if col < len(t.Align) {
+				r.align = map[parser.Align]ui.Align{parser.AlignCenter: ui.Center, parser.AlignRight: ui.End}[t.Align[col]]
+			}
+			r.before = bb.pending
+			r.band = bb.band
+			bb.rows = append(bb.rows, r)
+			col++
+		}
+		bb.pending = 0
+		if len(bb.rows) > row0 {
+			bb.band++
+		}
+	}
+	if len(bb.rows) > f {
+		bb.frames = append(bb.frames, frame{kind: frameTable, first: f, last: len(bb.rows) - 1, indent: c.indent})
+		bb.closePad(blockMargin)
+	}
+}
+
+func headingBefore(level int) float32 {
+	switch level {
+	case 1:
+		return 4
+	case 2:
+		return 30 - paraAfter
+	}
+	return 20 - paraAfter
+}
+
+func headingAfter(level int) float32 {
+	if level == 1 {
+		return 22
+	}
+	return paraAfter
+}
+
+// rowFont 返回行的字体，按编辑器字号缩放（scale = 正文字号 / 16 × 缩放比例），
+// 字体族取自 SetFonts（空串为系统字体与系统等宽字体）。
+func (e *Editor) rowFont(r *row) ui.Font {
+	var f ui.Font
+	switch r.role {
+	case roleHeading:
+		f = ui.Font{Family: e.fontBody, Size: headingSize(r.level), Weight: 700}
+	case roleCode, roleMath, roleFront, roleHTML:
+		f = ui.Font{Family: e.monoFont(), Size: 13}
+	case roleCellHead:
+		f = ui.Font{Family: e.fontBody, Size: bodySize, Weight: 600}
+	default:
+		f = ui.Font{Family: e.fontBody, Size: bodySize}
+	}
+	f.Size *= e.scale
+	return f
+}
+
+func (e *Editor) monoFont() string {
+	if e.fontMono != "" {
+		return e.fontMono
+	}
+	return monoFamily
+}
+
+// headingSize 取自原版：h1 32、h2 26，其余按比例递减。
+func headingSize(level int) float32 {
+	return [...]float32{bodySize, 32, 26, 21, 18, 16, 15}[clamp(level, 0, 6)]
+}

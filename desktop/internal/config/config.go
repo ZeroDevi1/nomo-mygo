@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,6 +204,37 @@ func (m *Manager) Setting(key string) (value string, ok bool) {
 	return record.ValueJSON, ok
 }
 
+// PutSetting 写一条设置（调用方已持有 Update 回调），时间戳取当前时间。
+func PutSetting(c *AppConfig, key, valueJSON string) { PutSettingAt(c, key, valueJSON, NowTS()) }
+
+// PutSettingAt 写一条设置：记录到 App.Settings，并按键路由一份到窗口、工作区或编辑器分区，
+// 供按分区读取的旧逻辑使用。WebView 外壳与原生外壳共用此规则。
+func PutSettingAt(c *AppConfig, key, valueJSON string, now int64) {
+	value := jsontext.Value(valueJSON)
+	if !value.IsValid() {
+		value = jsontext.Value("null")
+	}
+	switch {
+	case strings.HasPrefix(key, "windowState:"):
+		c.Window.Settings[strings.TrimPrefix(key, "windowState:")] = value
+	case strings.HasPrefix(key, "workspaceTabs:"):
+		c.Workspace.Settings[strings.TrimPrefix(key, "workspaceTabs:")] = value
+	case strings.HasPrefix(key, "pendingFolder:"), strings.HasPrefix(key, "pendingExternalOpen:"):
+		c.Window.Settings[key] = value
+	case isEditorSettingKey(key):
+		c.Editor.Settings[key] = value
+	}
+	c.App.Settings[key] = SettingRecord{Key: key, ValueJSON: valueJSON, UpdatedAt: now}
+}
+
+func isEditorSettingKey(key string) bool {
+	switch key {
+	case "fontSize", "lineHeight", "contentWidthPercent", "blockStyle", "editorMode", "autoSave", "sourceCodeFontSize", "sourceCodeLineHeight":
+		return true
+	}
+	return false
+}
+
 func (m *Manager) save(config *AppConfig) error {
 	content, err := json.Marshal(config, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
@@ -330,7 +362,7 @@ func IsDeveloperMode(dataDir string) bool {
 	return ok && value == "true"
 }
 
-// IsSoftwareRenderMode 报告磁盘配置是否显式选择了软件渲染（仅 Windows WebView2 使用）。
+// IsSoftwareRenderMode 报告磁盘配置是否显式选择了软件渲染：WebView 版用于 Windows WebView2，原生版用于 MyGo 的 CPU 渲染。
 func IsSoftwareRenderMode(dataDir string) bool {
 	value, ok := ReadSettingFromDisk(dataDir, "renderMode")
 	return ok && value == `"software"`

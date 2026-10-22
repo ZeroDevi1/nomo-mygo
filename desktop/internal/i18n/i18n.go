@@ -15,6 +15,11 @@ const (
 	JaJP
 )
 
+// Tag 返回 BCP 47 语言标签（与前端 localizedNames 的键一致）。
+func (l Locale) Tag() string {
+	return [...]string{ZhCN: "zh-CN", ZhTW: "zh-TW", EnUS: "en-US", JaJP: "ja-JP"}[l]
+}
+
 // ResolvePreference 把设置中的 interfaceLanguage 映射为外壳语言。
 // 原生外壳只翻译了四种语言，其他前端支持的语言回退到英文；"system" 等未知值跟随系统语言。
 func ResolvePreference(preference, systemLocale string) Locale {

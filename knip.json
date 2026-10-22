@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["src/quicklook/preview-entry.ts"],
   "ignoreDependencies": ["@inlang/plugin-message-format"],
-  "ignoreBinaries": ["pwsh"],
+  "ignoreBinaries": ["pwsh", "gofmt"],
   "ignoreExportsUsedInFile": {
     "interface": true,
     "type": true

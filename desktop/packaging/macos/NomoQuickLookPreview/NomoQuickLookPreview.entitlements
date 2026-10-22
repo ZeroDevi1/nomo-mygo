@@ -13,8 +13,5 @@
   <array>
     <string>/Library/Application Support/com.nomo.desktop/</string>
   </array>
-  <!-- WKWebView 即使只渲染本地 HTML，也会启动受网络沙盒约束的 GPU/Network/WebContent 子进程。 -->
-  <key>com.apple.security.network.client</key>
-  <true/>
 </dict>
 </plist>

@@ -59,6 +59,46 @@
 | 链接安全与规范化 | `src/lib/editor-core/link.ts` | `src/lib/editor-core/plugins/linkInteraction.ts`, `src/quicklook/preview.ts` | 链接协议白名单/序列化规则变更 |
 | 编辑器类型定义 | `src/lib/editor-core/types.ts` | 所有使用 EditorCore 的模块 | EditorCommand、EditorMode、SetMarkdownOptions 等类型变更 |
 
+### 原生语义编辑器原型（Go，P0）
+
+| Responsibility | Primary code | Related code | Change when |
+|---|---|---|---|
+| 原文、块索引、选区与撤销 | `desktop/ui/mdedit/document.go` | `edit.go`, `history.go`, `text.go` | 修改增量块索引、UTF-16/字节换算、组字与撤销合并规则 |
+| 原文到显示的投影 | `desktop/ui/mdedit/projection.go` | `view.go` | 修改行内标记就地展开/隐藏、行内 HTML 标签样式、实体解码、提示块标记、显示与原文偏移映射 |
+| 块组件（列表、任务、引用、提示块、表格、代码块、分割线、front matter） | `desktop/ui/mdedit/blocks.go` | `draw.go`, `view.go`, `document.go` | 修改块展开为行的规则、容器前缀、缩进与间距、装饰范围 |
+| 可见区布局与缓存 | `desktop/ui/mdedit/view.go` | `blocks.go`, `input.go` | 修改行虚拟化、阅读锚点、布局缓存预算与淘汰、命中测试、主题配色 |
+| 绘制 | `desktop/ui/mdedit/draw.go` | `view.go` | 修改装饰（引用条、提示块标题、代码卡片、表格网格）、列表符号与任务框绘制 |
+| 输入法、键盘与命令 | `desktop/ui/mdedit/input.go` | `view.go`, `edit.go`, `structure.go` | 修改 TextInputClient、光标移动、删除、剪贴板与加粗等命令 |
+| 结构编辑 | `desktop/ui/mdedit/structure.go` | `input.go`, `blocks.go` | 修改列表/引用内回车与退出、行首退格提出容器、Tab 缩进与表格单元格切换、任务勾选 |
+| 编辑器对外接口（格式命令、查找、大纲、统计、源码同步） | `desktop/ui/mdedit/api.go` | `structure.go`, `edit.go` | 修改工具栏/菜单命令的原文事务、查找匹配、大纲与写作统计 |
+
+### 原生外壳（Go，P2，`nomo --native` 或 `NOMO_NATIVE=1`）
+
+| Responsibility | Primary code | Related code | Change when |
+|---|---|---|---|
+| 入口、外部打开与退出 | `desktop/native.go` | `desktop/main.go`, `desktop/external_open.go` | 修改原生模式的启动条件、第二实例与 macOS 打开文件事件、退出 |
+| 外壳状态、偏好、文件操作 | `desktop/ui/shell/shell.go` | `tab.go`, `desktop/internal/config`, `desktop/internal/docfs` | 修改新建/打开/保存/关闭确认、最近打开、外部修改检测、偏好持久化 |
+| 文档标签与源码模式同步 | `desktop/ui/shell/tab.go` | `desktop/ui/mdedit` | 修改语义/源码模式的原文同步、未保存判定、统计与大纲缓存 |
+| 布局（标题栏、侧栏、标签、工具栏、查找栏、大纲、状态栏、空白工作区、确认框） | `desktop/ui/shell/view.go` | `explorer.go`, `menu.go` | 修改外壳布局与外观 |
+| 菜单与快捷键 | `desktop/ui/shell/menu.go` | `view.go` | 增删菜单命令或快捷键（标题栏菜单、macOS 菜单栏共用一张表） |
+| 平台原生风格（macOS / Windows 11 / Linux 的布局结构、材质、配色） | `desktop/ui/shell/platform.go` | `view.go`, `settings.go` | 修改各平台主题、vibrancy / Mica、外壳配色 |
+| 偏好（与原版 AppPreferences 同键、同默认、同取值范围） | `desktop/ui/shell/prefs.go` | `settings.go`, `shell.go` | 新增设置项或修改默认值、规范化规则 |
+| 设置窗口 | `desktop/ui/shell/settings.go` | `prefs.go`, `platform.go` | 增删设置分类与设置项 |
+| 资源管理器与标签的文件操作 | `desktop/ui/shell/fileops.go` | `explorer.go`, `view.go` | 修改新建、重命名、复制路径、在文件夹中显示 |
+| 资源管理器目录树 | `desktop/ui/shell/explorer.go` | `desktop/internal/docfs/tree.go` | 修改目录懒加载、刷新与点击打开 |
+| 颜色主题、字体与用户主题导入导出 | `desktop/ui/shell/appearance.go` | `desktop/ui/themes`, `settings.go` | 修改主题到编辑器配色的映射、字体应用、用户主题文件读写 |
+| 快捷插入菜单 | `desktop/ui/shell/quickinsert.go` | `desktop/ui/mdedit/api.go`（`CaretRect`、`Delete`、`Intercept`） | 修改触发条件、菜单项与键盘操作 |
+| 图片粘贴、拖放与插入 | `desktop/ui/shell/images.go` | `desktop/internal/imageasset`, `mdedit` `PasteData` | 修改图片导入策略、PicGo 上传、插入的 Markdown / HTML |
+| Markdown 格式检查（状态栏与问题列表） | `desktop/ui/shell/lint.go` | `desktop/ui/mdlint` | 修改检查调度、防抖、问题弹层与跳转 |
+| 导出 HTML / PDF | `desktop/ui/shell/export.go` | `desktop/ui/themes/export.go`, `desktop/native.go`（`exportNativePDF`）, `desktop/export.go` | 修改导出文档结构、图片内联、PDF 书签标记 |
+| 界面文案与图标（生成） | `scripts/generate-native-messages.mjs`, `scripts/generate-native-icons.mjs` | `desktop/ui/shell/messages_gen.go`, `desktop/ui/icons/icons_gen.go`, `i18n.go` | 前端文案、检查规则标题或所用图标变化后重新生成 |
+| 应用与界面图标 | `desktop/ui/icons/icons.go` | `desktop/appicon.go`, `desktop/native.go` | 修改文件类型图标、提示块图标、应用图标（窗口 / Dock / 关于页） |
+| 内置主题、导出样式与 Quick Look 主题表（生成） | `scripts/generate-native-themes.mjs` | `desktop/ui/themes/builtin_gen.go`, `export_document.css`, `desktop/packaging/macos/NomoQuickLookPreview/BuiltinThemes.swift` | 前端主题注册表或导出样式变化后重新生成 |
+| 主题解析、校验与导出 | `desktop/ui/themes/themes.go` | `export.go` | 修改用户主题 JSON 规则（与 userThemeDefinition.ts 一致）、颜色解析、导出 CSS 变量 |
+| Markdown 检查规则（markdownlint 子集） | `desktop/ui/mdlint/mdlint.go` | `mdlint_test.go`（`MDLINT_DUMP` 与 markdownlint 对照） | 新增规则或调整宽松规则集 |
+| 图片资源导入与图床上传 | `desktop/internal/imageasset/imageasset.go` | `desktop/image_assets.go`（WebView IPC） | 修改资源目录策略、同内容复用、PicGo 上传与连接测试 |
+| 保存前快照 | `desktop/internal/config/snapshot.go` | `desktop/commands_config.go`, `desktop/ui/shell/shell.go` | 修改快照存储与保留数量（两个外壳共用） |
+
 ### NodeView 渲染
 
 | Responsibility | Primary code | Related code | Change when |
@@ -249,10 +289,11 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| Quick Look 渲染入口 | `src/quicklook/preview-entry.ts` | `src/quicklook/preview.ts` | 读取 payload 并渲染 |
+| Quick Look 渲染入口（旧 WebView 版，扩展已不再使用） | `src/quicklook/preview-entry.ts` | `src/quicklook/preview.ts` | 读取 payload 并渲染 |
 | Quick Look Markdown 渲染 | `src/quicklook/preview.ts` | `src/lib/editor-core/callout/calloutParser.ts`, `src/lib/editor-core/link.ts` | markdown-it 渲染/Callout/公式/图片/链接安全 |
 | Quick Look 样式 | `src/quicklook/preview.css` | — | 预览页面样式 |
-| macOS 扩展入口 | `desktop/packaging/macos/NomoQuickLookPreview/PreviewViewController.swift` | `src/quicklook/` | Swift 扩展加载前端并注入 payload |
+| macOS 扩展入口 | `desktop/packaging/macos/NomoQuickLookPreview/PreviewViewController.swift` | `MarkdownRenderer.swift`, `BuiltinThemes.swift` | 读取文件、Nomo 设置与用户主题，用 NSTextView 显示原生渲染结果 |
+| Quick Look 原生 Markdown 渲染 | `desktop/packaging/macos/NomoQuickLookPreview/MarkdownRenderer.swift` | `PreviewViewController.swift` | 修改 PresentationIntent 到富文本的映射（标题、列表、引用 / 提示块、代码、表格、图片） |
 
 ### 软件更新
 
@@ -310,6 +351,37 @@
 ---
 
 ## Code Unit Entries
+
+### `desktop/ui/mdedit`
+
+**Kind:** package
+
+**Owns:**
+- 以 Markdown 原文为唯一事实源的语义编辑器原型（迁移计划 P0）：`Document` 持有原文、顶层块索引、选区、组字区间与完整撤销历史，不持有视图对象
+- 块组件：顶层块展开为行（叶子段落、原文行、表格单元格）与跨行装饰，对齐原版 WebView 的列表、任务、引用、五类提示块、表格、代码块、分割线与 front matter 显示；行内 HTML 标签、实体与注释按原版渲染
+- `Editor` 视图：只布局可见行，块级阅读锚点，按估算字节的 LRU 布局缓存；`ReleaseLayouts` 供后台标签释放
+- `TextInputClient` 实现（原文 UTF-16 坐标）、键盘导航、删除/回车、剪贴板、加粗/斜体/删除线命令与结构编辑（列表/引用续写与退出、Tab 缩进、表格单元格切换、任务勾选）
+
+**Does not own:**
+- 图片、公式、Mermaid、脚注引用的渲染（P3，按计划 D3 走按需渲染服务）
+- 精细排版与行高（P0 第 3 项）、表格按内容自动列宽、代码高亮
+- 文件读写（由调用方经 `desktop/internal/docfs` 完成）
+
+**Called by:** `desktop/ui/shell`
+
+**Depends on:** `github.com/egoist/mygo/ui`, `github.com/egoist/mygo/ui/markdown/parser`
+
+**Change this when:**
+- 调整原生语义编辑的投影、输入、布局或缓存策略
+
+**Do not change this when:**
+- 修改现版本 ProseMirror 编辑器行为
+
+**Related tests:** `desktop/ui/mdedit/*_test.go`（`NOMO_PERF=1` 运行延迟测量，`NOMO_SNAPSHOT=<png>` 输出首屏截图）
+
+**Confidence:** high
+
+---
 
 ### `src/main.ts`
 

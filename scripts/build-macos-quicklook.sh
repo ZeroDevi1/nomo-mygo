@@ -11,23 +11,18 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTENSION_SRC_DIR="$ROOT_DIR/desktop/packaging/macos/NomoQuickLookPreview"
-RENDERER_DIR="$ROOT_DIR/target/quicklook-renderer"
 OUTPUT_DIR="$ROOT_DIR/target/quicklook/NomoQuickLookPreview.appex"
 CONTENTS_DIR="$OUTPUT_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 BUILD_DIR="$ROOT_DIR/target/quicklook/build"
 
-PNPM_BIN="${PNPM_BIN:-pnpm}"
-
 cd "$ROOT_DIR"
-"$PNPM_BIN" run build:quicklook-renderer
 
 rm -rf "$OUTPUT_DIR" "$BUILD_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$BUILD_DIR"
 
 cp "$EXTENSION_SRC_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
-cp -R "$RENDERER_DIR" "$RESOURCES_DIR/quicklook-renderer"
 
 # MyGo 以 package.json 版本同时写入主应用的 CFBundleShortVersionString 与 CFBundleVersion；
 # 扩展构建版本须与主应用一致，覆盖同一营销版本时 PlugInKit 才会刷新扩展。
@@ -59,8 +54,12 @@ for SWIFT_TARGET_ARCH in "${SWIFT_TARGET_ARCHS[@]}"; do
   SLICE="$BUILD_DIR/NomoQuickLookPreview-$SWIFT_TARGET_ARCH"
   # Xcode 的 App Extension target 会自动把入口设为 _NSExtensionMain；
   # 直接调用 swiftc 时必须显式设置，否则生成的进程会启动后立即退出，导致 PlugInKit XPC Code=4097。
+  # 预览为原生 AppKit 渲染（MarkdownRenderer.swift），不依赖 WebKit；BuiltinThemes.swift 由
+  # scripts/generate-native-themes.mjs 生成。
   xcrun swiftc \
     "$EXTENSION_SRC_DIR/PreviewViewController.swift" \
+    "$EXTENSION_SRC_DIR/MarkdownRenderer.swift" \
+    "$EXTENSION_SRC_DIR/BuiltinThemes.swift" \
     -emit-executable \
     -parse-as-library \
     -module-name NomoQuickLookPreview \
@@ -75,8 +74,7 @@ for SWIFT_TARGET_ARCH in "${SWIFT_TARGET_ARCHS[@]}"; do
     -o "$SLICE" \
     -framework Cocoa \
     -framework QuickLook \
-    -framework QuickLookUI \
-    -framework WebKit
+    -framework QuickLookUI
   SLICES+=("$SLICE")
 done
 

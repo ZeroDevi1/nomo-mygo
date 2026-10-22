@@ -2,216 +2,166 @@ import Cocoa
 import Darwin
 import OSLog
 import QuickLookUI
-import WebKit
 
 private let appearanceLogger = Logger(
     subsystem: "com.nomo.desktop.quicklook",
     category: "appearance"
 )
 
-/// 使用内嵌 WebKit 渲染器展示 Markdown 文件的 Quick Look 预览控制器。
+/// 用原生 AppKit 文本视图展示 Markdown 文件的 Quick Look 预览控制器（渲染见 MarkdownRenderer）。
 ///
-/// 控制器由系统扩展进程通过 `NSExtensionPrincipalClass` 创建；渲染期间只读取传入文件，
-/// 不写入源文件或扩展 bundle。无法生成预览时会在面板内显示错误页，而不是让扩展进程退出。
+/// 控制器由系统扩展进程通过 `NSExtensionPrincipalClass` 创建；渲染期间只读取传入文件与 Nomo 的
+/// 配置、用户主题，不写入任何文件，也不启动 WebKit 进程。无法生成预览时在面板内显示错误文字，
+/// 而不是让扩展进程退出。
 @objc(PreviewViewController)
-final class PreviewViewController: NSViewController, QLPreviewingController, WKNavigationDelegate {
-    /// 承载预览页面的非持久化 WebView；在 `loadView()` 中初始化，并随控制器视图生命周期释放。
-    private var webView: WKWebView!
+final class PreviewViewController: NSViewController, QLPreviewingController {
+    /// 正文的只读文本视图（TextKit 1：`NSTextBlock` / `NSTextTable` 需要它）；在 `loadView()` 中创建。
+    private var textView: NSTextView!
+    private var scrollView: NSScrollView!
 
-    /// 等待静态渲染页接收的结构化预览数据；页面提交后立即清空，避免跨文档保留完整正文。
-    private var pendingPayload: [String: Any]?
+    /// 正文最大宽度（pt）：面板更宽时左右留白居中，接近主应用的阅读宽度。
+    private let maxContentWidth: CGFloat = 820
 
-    /// 创建铺满 Quick Look 面板的非持久化 WebView 视图层级。
-    ///
-    /// 该方法由 AppKit 在首次访问 `view` 时调用。它不执行文件 I/O，也不持久化 Cookie、缓存等网站数据。
+    /// 创建铺满 Quick Look 面板的滚动文本视图。由 AppKit 在首次访问 `view` 时调用，不做文件 I/O。
     override func loadView() {
-        let rootView = NSView()
-        rootView.wantsLayer = true
-        rootView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = true
+        scroll.borderType = .noBorder
 
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
+        let storage = NSTextStorage()
+        let layout = NSLayoutManager()
+        // 只排版可见区域附近的文字，长文档打开不必等全文排版完成。
+        layout.allowsNonContiguousLayout = true
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.addTextContainer(container)
 
-        let previewWebView = WKWebView(frame: .zero, configuration: configuration)
-        previewWebView.navigationDelegate = self
-        previewWebView.translatesAutoresizingMaskIntoConstraints = false
-        rootView.addSubview(previewWebView)
+        let tv = NSTextView(frame: .zero, textContainer: container)
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isRichText = true
+        tv.drawsBackground = true
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        tv.textContainerInset = NSSize(width: 32, height: 28)
+        scroll.documentView = tv
 
-        NSLayoutConstraint.activate([
-            previewWebView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
-            previewWebView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
-            previewWebView.topAnchor.constraint(equalTo: rootView.topAnchor),
-            previewWebView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
-        ])
+        textView = tv
+        scrollView = scroll
+        view = scroll
+    }
 
-        webView = previewWebView
-        view = rootView
+    /// 面板尺寸变化时按最大宽度重新计算左右留白，使正文居中。
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = scrollView.contentSize.width
+        let side = max(32, (width - maxContentWidth) / 2)
+        if abs(textView.textContainerInset.width - side) > 0.5 {
+            textView.textContainerInset = NSSize(width: side, height: 28)
+        }
     }
 
     /// 读取并渲染 Quick Look 提供的 Markdown 文件。
     ///
-    /// 该方法必须在主 actor 上操作 WebView。读取或编码失败时，会加载可见错误页并正常完成，
-    /// 避免系统因协议方法抛错而静默回退到其他预览器。
+    /// 读取或渲染失败时显示错误文字并正常完成，避免系统因协议方法抛错而静默回退到其他预览器。
     ///
     /// - Parameter url: 系统授予扩展只读权限的 Markdown 文件 URL；调用期间必须保持可访问。
-    /// - Throws: 为满足 `QLPreviewingController` 协议保留；当前实现会捕获渲染错误，不向系统抛出。
+    /// - Throws: 为满足 `QLPreviewingController` 协议保留；当前实现不向系统抛出。
     @MainActor
     func preparePreviewOfFile(at url: URL) async throws {
         do {
-            try loadMarkdownPreview(for: url)
-        } catch {
-            // 预览失败时给出可见错误页，而不是把异常抛给系统导致 Quick Look 静默降级
-            loadErrorPreview(error)
-        }
-    }
-
-    /// 加载 Markdown 文件并渲染预览。
-    ///
-    /// 渲染器是构建期内联好的单文件 HTML（见 vite.quicklook.config.ts）。静态页面直接从签名后的
-    /// bundle 加载，Markdown 则在导航完成后通过 WebKit 的结构化参数桥传入，避免把大正文和约 1.8 MB
-    /// 渲染器拼成一份 HTML 字符串而触发 `loadHTMLString` 的内存峰值或内容截断。
-    ///
-    /// - Parameter url: Quick Look 传入的待预览 Markdown 文件 URL（沙盒内只读）。
-    /// - Throws: 文件读取失败、渲染资源缺失或 WebKit 拒绝创建导航时抛出。
-    private func loadMarkdownPreview(for url: URL) throws {
-        let markdown = try String(contentsOf: url, encoding: .utf8)
-
-        guard
-            let rendererIndexUrl = Bundle.main.url(
-                forResource: "index",
-                withExtension: "html",
-                subdirectory: "quicklook-renderer/src/quicklook"
+            let markdown = try readMarkdown(url)
+            let options = previewOptions()
+            let dark = isDark(options.themeMode)
+            let palette = ThemePalette(themeID: options.colorThemeID, dark: dark, userThemeJSON: options.userTheme)
+            let renderer = MarkdownRenderer(
+                palette: palette, fontSize: options.fontSize, lineHeight: options.lineHeight,
+                bodyFamily: options.documentFont, monoFamily: options.monoFont,
+                classic: options.documentStyleID == "nomo-classic", baseURL: url.deletingLastPathComponent()
             )
-        else {
-            throw PreviewError.rendererMissing
-        }
-
-        pendingPayload = makePreviewPayload(markdown: markdown, fileUrl: url)
-        let rendererDirectory = rendererIndexUrl.deletingLastPathComponent()
-        guard webView.loadFileURL(rendererIndexUrl, allowingReadAccessTo: rendererDirectory) != nil else {
-            pendingPayload = nil
-            throw PreviewError.rendererNavigationFailed
+            // 解析与富文本构建不触碰视图，放到后台，避免大文档阻塞扩展主线程。
+            let rendered = await Task.detached(priority: .userInitiated) { RenderedText(renderer.render(markdown)) }.value.text
+            let background = palette.color("documentBackground")
+            scrollView.backgroundColor = background
+            textView.backgroundColor = background
+            textView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            textView.linkTextAttributes = [.foregroundColor: palette.color("link"), .cursor: NSCursor.pointingHand]
+            textView.selectedTextAttributes = [.backgroundColor: palette.color("selection")]
+            textView.textStorage?.setAttributedString(rendered)
+        } catch {
+            showError(error)
         }
     }
 
-    /// 组装要通过 WebKit 结构化参数桥传输的文档数据和文件上下文。
-    ///
-    /// - Parameters:
-    ///   - markdown: 完整 Markdown 源文；允许空字符串。
-    ///   - fileUrl: 当前文档 URL，用于提供文件名和父目录上下文，不会在此方法中读取文件。
-    /// - Returns: 只包含 Foundation/WebKit 可桥接值的字典；主题不可读时省略 `appearance`。
-    private func makePreviewPayload(markdown: String, fileUrl: URL) -> [String: Any] {
-        var payload: [String: Any] = [
-            "markdown": markdown,
-            "fileName": fileUrl.lastPathComponent,
-            "documentDirectory": fileUrl.deletingLastPathComponent().path,
-        ]
+    // MARK: - 读取
+
+    /// 按 UTF-8（含 BOM）、UTF-16 BOM、GB18030 的顺序解码，与主应用支持的编码一致。
+    private func readMarkdown(_ url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]), let s = String(data: data, encoding: .utf16) {
+            return s
+        }
+        if let s = String(data: data, encoding: .utf8) {
+            return s.hasPrefix("\u{FEFF}") ? String(s.dropFirst()) : s
+        }
+        let gb = CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
+        if let s = String(data: data, encoding: String.Encoding(rawValue: gb)) {
+            return s
+        }
+        throw PreviewError.unsupportedEncoding
+    }
+
+    /// 预览用到的设置，缺失或不可读时取主应用默认值。
+    private struct PreviewOptions {
+        var themeMode = "system"
+        var colorThemeID = defaultColorThemeID
+        var documentStyleID = "nomo-modern"
+        var documentFont = ""
+        var monoFont = ""
+        var fontSize: CGFloat = 16
+        var lineHeight: CGFloat = 1.75
+        var userTheme: String?
+    }
+
+    private func previewOptions() -> PreviewOptions {
+        var o = PreviewOptions()
         do {
             let settings = try readPreviewSettings()
-            payload["typography"] = [
-                "enabled": try readSetting(settings, "typographyEnabled") as? Bool ?? false,
-                "profile": "zh-CN",
-                "hanging": true,
-            ] as [String: Any]
-            payload["fontSize"] = try readSetting(settings, "fontSize") as? Double ?? 16
-            payload["lineHeight"] = try readSetting(settings, "lineHeight") as? Double ?? 1.75
-            if let appearance = try readAppearancePreferences(settings) {
-                payload["appearance"] = appearance
-                if let themeId = appearance["colorThemeId"],
-                   let userTheme = readUserThemeSource(themeId) {
-                    payload["userTheme"] = userTheme
-                }
-                appearanceLogger.info(
-                    "Loaded preferences: themeMode=\(appearance["themeMode"] ?? "<missing>", privacy: .public) colorThemeId=\(appearance["colorThemeId"] ?? "<missing>", privacy: .public) documentStyleId=\(appearance["documentStyleId"] ?? "<missing>", privacy: .public)"
-                )
-            } else {
-                appearanceLogger.notice("Found no usable appearance preferences")
-            }
-        } catch {
-            // 主题配置不可读不应阻断正文预览；保留系统明暗模式回退，并在统一日志中暴露原因。
-            appearanceLogger.error(
-                "Could not read appearance preferences: \(String(describing: error), privacy: .public)"
+            func string(_ key: String) -> String? { (try? readSetting(settings, key)) as? String }
+            func number(_ key: String) -> Double? { (try? readSetting(settings, key)) as? Double }
+            o.themeMode = string("themeMode") ?? o.themeMode
+            o.colorThemeID = string("colorThemeId") ?? o.colorThemeID
+            o.documentStyleID = string("documentStyleId") ?? o.documentStyleID
+            o.documentFont = string("documentFontFamily") ?? ""
+            o.monoFont = string("monoFontFamily") ?? ""
+            if let v = number("fontSize"), (12...32).contains(v) { o.fontSize = CGFloat(v) }
+            if let v = number("lineHeight"), (1...3).contains(v) { o.lineHeight = CGFloat(v) }
+            o.userTheme = readUserThemeSource(o.colorThemeID)
+            appearanceLogger.info(
+                "Loaded preferences: themeMode=\(o.themeMode, privacy: .public) colorThemeId=\(o.colorThemeID, privacy: .public) documentStyleId=\(o.documentStyleID, privacy: .public)"
             )
+        } catch {
+            // 配置不可读不应阻断正文预览；使用默认外观，并在统一日志中暴露原因。
+            appearanceLogger.error("Could not read preferences: \(String(describing: error), privacy: .public)")
         }
-
-        return payload
+        return o
     }
 
-    /// 在静态渲染页加载完成后，通过 WebKit 参数桥交付正文并触发前端渲染。
-    ///
-    /// - Parameters:
-    ///   - webView: 已完成主文档导航的 Quick Look WebView。
-    ///   - navigation: 本次完成的导航对象；仅作为 `WKNavigationDelegate` 回调上下文。
-    /// - Returns: 无返回值；交付成功或失败后都会清空待处理数据。
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard let payload = pendingPayload else { return }
-        pendingPayload = nil
-        webView.callAsyncJavaScript(
-            """
-            if (typeof window.__NOMO_RENDER_QUICKLOOK__ !== 'function') {
-              throw new Error('Quick Look renderer bridge is unavailable');
-            }
-            window.__NOMO_RENDER_QUICKLOOK__(payload);
-            return {
-              receivedAppearance: payload.appearance ?? null,
-              appliedAppearance: {
-                themeMode: document.documentElement.dataset.themePreference ?? null,
-                colorThemeId: document.documentElement.dataset.colorTheme ?? null,
-                documentStyleId: document.documentElement.dataset.documentStyle ?? null,
-                effectiveScheme: document.documentElement.dataset.theme ?? null,
-              },
-            };
-            """,
-            arguments: ["payload": payload],
-            in: nil,
-            in: .page,
-            completionHandler: { [weak self] result in
-                switch result {
-                case let .success(diagnostics):
-                    appearanceLogger.info(
-                        "Bridge diagnostics: \(String(describing: diagnostics), privacy: .public)"
-                    )
-                case let .failure(error):
-                    appearanceLogger.error(
-                        "Bridge failed: \(String(describing: error), privacy: .public)"
-                    )
-                    self?.loadErrorPreview(error)
-                }
-            }
-        )
+    /// themeMode 为 light / dark 时固定，system 时跟随面板当前外观。
+    private func isDark(_ mode: String) -> Bool {
+        switch mode {
+        case "dark": return true
+        case "light": return false
+        default: return view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        }
     }
 
-    /// 在静态渲染页导航失败时显示可见错误，并释放尚未交付的完整 Markdown 数据。
+    /// 读取 Nomo 原生配置中的设置记录。
     ///
-    /// - Parameters:
-    ///   - webView: 导航失败的 Quick Look WebView。
-    ///   - navigation: 失败的导航对象；可能为空。
-    ///   - error: WebKit 提供的具体导航错误。
-    /// - Returns: 无返回值；副作用是清空待处理数据并展示错误页。
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        pendingPayload = nil
-        loadErrorPreview(error)
-    }
-
-    /// 在静态渲染页提交前失败时显示可见错误，并释放尚未交付的完整 Markdown 数据。
-    ///
-    /// - Parameters:
-    ///   - webView: 临时导航失败的 Quick Look WebView。
-    ///   - navigation: 失败的导航对象；可能为空。
-    ///   - error: WebKit 提供的具体导航错误。
-    /// - Returns: 无返回值；副作用是清空待处理数据并展示错误页。
-    func webView(
-        _ webView: WKWebView,
-        didFailProvisionalNavigation navigation: WKNavigation!,
-        withError error: Error
-    ) {
-        pendingPayload = nil
-        loadErrorPreview(error)
-    }
-
-    /// 从 Nomo 原生配置中读取 Quick Look 所需的主题与排版配置。
-    ///
-    /// 颜色与样式 token 仍由内嵌前端的同一主题注册表解析。
     /// 精确的只读沙盒例外由扩展 entitlements 限定到 Nomo 的 Application Support 目录。
     ///
     /// - Returns: 应用配置中的设置记录。
@@ -238,34 +188,10 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         return try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
     }
 
-    private func readAppearancePreferences(_ settings: [String: Any]) throws -> [String: String]? {
-
-        var appearance: [String: String] = [:]
-        let keys = [
-            "themeMode", "colorThemeId", "documentStyleId",
-            "uiFontFamily", "documentFontFamily", "monoFontFamily",
-        ]
-        for key in keys {
-            guard
-                let record = settings[key] as? [String: Any],
-                let encodedValue = record["value_json"] as? String,
-                let encodedData = encodedValue.data(using: .utf8),
-                let value = try JSONSerialization.jsonObject(
-                    with: encodedData,
-                    options: .fragmentsAllowed
-                ) as? String
-            else {
-                continue
-            }
-            appearance[key] = value
-        }
-        return appearance.isEmpty ? nil : appearance
-    }
-
-    /// 读取当前用户主题的 JSON 源文，供内嵌渲染器注册后解析配色。
+    /// 读取当前用户主题的 JSON 源文。
     ///
     /// 只接受与主应用一致的 `user-` 主题 ID 形状，避免把配置值当作路径片段穿越目录；
-    /// 文件缺失、过大或不可读时返回 `nil`，渲染器随后回退默认主题。
+    /// 文件缺失、过大或不可读时返回 `nil`，随后回退内置主题。
     ///
     /// - Parameter themeId: 配置中的 `colorThemeId`。
     /// - Returns: UTF-8 源文；非用户主题或不可读时为 `nil`。
@@ -305,59 +231,42 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         return URL(fileURLWithPath: homePath, isDirectory: true)
     }
 
-    /// 在当前 WebView 中显示经过 HTML 转义的预览错误。
-    ///
-    /// - Parameter error: 要呈现给用户的错误；其文本会转义，不能注入 HTML。
-    /// - Returns: 无返回值；副作用是替换 WebView 当前页面。
-    private func loadErrorPreview(_ error: Error) {
-        let message = htmlEscape(String(describing: error))
-        webView.loadHTMLString(
-            """
-            <!doctype html>
-            <html lang="zh-CN">
-              <body style="margin:0;display:grid;min-height:100vh;place-items:center;font:14px -apple-system,BlinkMacSystemFont,sans-serif;color:#68707a;background:#fff;">
-                <main style="display:grid;gap:8px;text-align:center;padding:24px;">
-                  <strong style="color:#202428;font-size:16px;">无法生成 Nomo 预览</strong>
-                  <span>\(message)</span>
-                </main>
-              </body>
-            </html>
-            """,
-            baseURL: nil
-        )
+    /// 在文本视图中显示预览错误（纯文本，不解释任何标记）。
+    private func showError(_ error: Error) {
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        let text = NSMutableAttributedString(string: "无法生成 Nomo 预览\n", attributes: [
+            .font: NSFont.boldSystemFont(ofSize: 16), .foregroundColor: NSColor.labelColor, .paragraphStyle: para,
+        ])
+        text.append(NSAttributedString(string: String(describing: error), attributes: [
+            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: para,
+        ]))
+        textView.textStorage?.setAttributedString(text)
     }
+}
+
+/// 把后台新建的富文本交回主线程。富文本在后台任务内创建、只移交一次且之后不再被后台访问，
+/// 因此跨线程传递是安全的（`NSAttributedString` 本身未标注 Sendable）。
+private final class RenderedText: @unchecked Sendable {
+    let text: NSAttributedString
+    init(_ text: NSAttributedString) { self.text = text }
 }
 
 /// Quick Look 渲染准备阶段可向内部调用方报告的确定性错误。
 private enum PreviewError: Error, CustomStringConvertible {
-    case rendererMissing
-    case rendererNavigationFailed
+    case unsupportedEncoding
     case userHomeUnavailable
     case appearanceConfigurationMalformed
 
     /// 面向 Quick Look 用户的简短中文错误说明，不包含文件内容或路径等敏感信息。
     var description: String {
         switch self {
-        case .rendererMissing:
-            return "Quick Look 渲染资源缺失"
-        case .rendererNavigationFailed:
-            return "Quick Look 渲染页加载失败"
+        case .unsupportedEncoding:
+            return "无法识别文件编码"
         case .userHomeUnavailable:
             return "无法定位用户主目录"
         case .appearanceConfigurationMalformed:
             return "Nomo 外观配置格式无效"
         }
     }
-}
-
-/// 转义要插入 HTML 文本节点的错误字符串。
-///
-/// - Parameter value: 任意错误描述；允许空字符串和已有实体文本。
-/// - Returns: 转义 `&`、尖括号和双引号后的文本；空输入返回空字符串。
-private func htmlEscape(_ value: String) -> String {
-    value
-        .replacingOccurrences(of: "&", with: "&amp;")
-        .replacingOccurrences(of: "<", with: "&lt;")
-        .replacingOccurrences(of: ">", with: "&gt;")
-        .replacingOccurrences(of: "\"", with: "&quot;")
 }

@@ -23,6 +23,7 @@
     "build:win64:msix:store": "pwsh -NoProfile -File scripts/msix/Build-Msix.ps1 -Mode Store",
     "test:win64:shell-extension": "pwsh -NoProfile -File scripts/msix/Build-ShellExtension.ps1 -RunTests",
     "knip": "knip",
+    "generate:native": "node scripts/generate-native-messages.mjs && node scripts/generate-native-icons.mjs && node scripts/generate-native-themes.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

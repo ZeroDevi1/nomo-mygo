@@ -1,15 +1,11 @@
 package main
 
 import (
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io/fs"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
@@ -36,15 +32,6 @@ type snapshotInput struct {
 	Reason   string `json:"reason"`
 }
 
-type snapshotRecord struct {
-	ID           string `json:"id"`
-	DocumentPath string `json:"document_path"`
-	ContentHash  string `json:"content_hash"`
-	Markdown     string `json:"markdown"`
-	CreatedAt    int64  `json:"created_at"`
-	Reason       string `json:"reason"`
-}
-
 type workspaceDraftInput struct {
 	DraftID  *string `json:"draft_id"`
 	Markdown string  `json:"markdown"`
@@ -60,7 +47,6 @@ type workspaceDraftPayload struct {
 const (
 	recentListLimit = 20
 	recentMenuLimit = 8
-	snapshotLimit   = 20
 )
 
 func init() {
@@ -100,12 +86,12 @@ func init() {
 	register("create_document_snapshot", func(_ *commandCall, args struct {
 		Input snapshotInput `json:"input"`
 	}) (any, error) {
-		return nil, createDocumentSnapshot(args.Input)
+		return nil, app.config.CreateSnapshot(args.Input.Path, args.Input.Markdown, args.Input.Reason)
 	})
 	register("list_document_snapshots", func(_ *commandCall, args struct {
 		Path string `json:"path"`
-	}) ([]snapshotRecord, error) {
-		return listDocumentSnapshots(args.Path)
+	}) ([]config.SnapshotRecord, error) {
+		return app.config.ListSnapshots(args.Path)
 	})
 	register("write_workspace_draft", func(_ *commandCall, args struct {
 		Input workspaceDraftInput `json:"input"`
@@ -114,10 +100,10 @@ func init() {
 		if args.Input.DraftID != nil && config.ValidateContentID(*args.Input.DraftID) == nil {
 			draftID = *args.Input.DraftID
 		} else {
-			draftID = fmt.Sprintf("draft-%d-%s", config.NowTS(), hashText(args.Input.Markdown))
+			draftID = fmt.Sprintf("draft-%d-%s", config.NowTS(), config.HashText(args.Input.Markdown))
 		}
 		dir := contentStoreDir(config.DraftsDirName)
-		if err := writeMarkdownStoreFile(dir, draftID, args.Input.Markdown, "写入草稿失败"); err != nil {
+		if err := config.WriteMarkdownStoreFile(dir, draftID, args.Input.Markdown, "写入草稿失败"); err != nil {
 			return nil, err
 		}
 		return &workspaceDraftPayload{DraftID: draftID, UpdatedAt: markdownStoreUpdatedAt(dir, draftID)}, nil
@@ -126,7 +112,7 @@ func init() {
 		DraftID string `json:"draftId"`
 	}) (*workspaceDraftPayload, error) {
 		dir := contentStoreDir(config.DraftsDirName)
-		markdown, err := readMarkdownStoreFile(dir, args.DraftID, "读取草稿失败")
+		markdown, err := config.ReadMarkdownStoreFile(dir, args.DraftID, "读取草稿失败")
 		if err != nil {
 			return nil, err
 		}
@@ -262,48 +248,6 @@ func queryRecentEntries(limit int) []config.RecentEntry {
 	return entries
 }
 
-func createDocumentSnapshot(input snapshotInput) error {
-	now := config.NowTS()
-	contentHash := hashText(input.Markdown)
-	if err := writeMarkdownStoreFile(contentStoreDir(config.SnapshotsDirName), contentHash, input.Markdown, "写入快照正文失败"); err != nil {
-		return err
-	}
-	record := config.StoredSnapshotRecord{
-		ID:           fmt.Sprintf("%d-%s", now, contentHash),
-		DocumentPath: input.Path,
-		ContentHash:  contentHash,
-		CreatedAt:    now,
-		Reason:       input.Reason,
-	}
-	return app.config.Update(func(c *config.AppConfig) {
-		records := append([]config.StoredSnapshotRecord{record}, c.Snapshots.Documents[record.DocumentPath]...)
-		if len(records) > snapshotLimit {
-			records = records[:snapshotLimit]
-		}
-		c.Snapshots.Documents[record.DocumentPath] = records
-	})
-}
-
-func listDocumentSnapshots(path string) ([]snapshotRecord, error) {
-	stored := app.config.Get().Snapshots.Documents[path]
-	if len(stored) > snapshotLimit {
-		stored = stored[:snapshotLimit]
-	}
-	dir := contentStoreDir(config.SnapshotsDirName)
-	records := []snapshotRecord{}
-	for _, item := range stored {
-		markdown, err := readMarkdownStoreFile(dir, item.ContentHash, "读取快照正文失败")
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, snapshotRecord{
-			ID: item.ID, DocumentPath: item.DocumentPath, ContentHash: item.ContentHash,
-			Markdown: markdown, CreatedAt: item.CreatedAt, Reason: item.Reason,
-		})
-	}
-	return records, nil
-}
-
 // updateSettings 写入设置并按键前缀同步到 window/workspace/editor 分区；
 // 工作区快照经标签移交的归属守卫过滤，避免旧窗口覆盖移交后的状态。
 func updateSettings(inputs []settingInput) error {
@@ -314,75 +258,15 @@ func updateSettings(inputs []settingInput) error {
 	return withGuardedSettings(inputs, func(accepted []settingInput) error {
 		return app.config.Update(func(c *config.AppConfig) {
 			for _, input := range accepted {
-				routeSettingToSection(c, input.Key, input.ValueJSON)
-				c.App.Settings[input.Key] = config.SettingRecord{Key: input.Key, ValueJSON: input.ValueJSON, UpdatedAt: now}
+				config.PutSettingAt(c, input.Key, input.ValueJSON, now)
 			}
 		})
 	})
 }
 
-// putSetting 直接写一条设置（调用方已持有 Update 回调）。
+// putSettingRecord 直接写一条设置（调用方已持有 Update 回调）。
 func putSettingRecord(c *config.AppConfig, key, valueJSON string) {
-	routeSettingToSection(c, key, valueJSON)
-	c.App.Settings[key] = config.SettingRecord{Key: key, ValueJSON: valueJSON, UpdatedAt: config.NowTS()}
-}
-
-func routeSettingToSection(c *config.AppConfig, key, valueJSON string) {
-	value := jsontext.Value(valueJSON)
-	if !value.IsValid() {
-		value = jsontext.Value("null")
-	}
-	switch {
-	case strings.HasPrefix(key, "windowState:"):
-		c.Window.Settings[strings.TrimPrefix(key, "windowState:")] = value
-	case strings.HasPrefix(key, "workspaceTabs:"):
-		c.Workspace.Settings[strings.TrimPrefix(key, "workspaceTabs:")] = value
-	case strings.HasPrefix(key, "pendingFolder:"), strings.HasPrefix(key, "pendingExternalOpen:"):
-		c.Window.Settings[key] = value
-	case isEditorSettingKey(key):
-		c.Editor.Settings[key] = value
-	}
-}
-
-func isEditorSettingKey(key string) bool {
-	switch key {
-	case "fontSize", "lineHeight", "contentWidthPercent", "blockStyle", "editorMode", "autoSave", "sourceCodeFontSize", "sourceCodeLineHeight":
-		return true
-	}
-	return false
-}
-
-// hashText 是正文内容的稳定短散列（FNV-64a），只用作存储文件名，不承担安全用途。
-func hashText(text string) string {
-	hasher := fnv.New64a()
-	hasher.Write([]byte(text))
-	return strconv.FormatUint(hasher.Sum64(), 16)
-}
-
-func writeMarkdownStoreFile(dir, id, markdown, errorPrefix string) error {
-	path, err := config.MarkdownStorePath(dir, id)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("%s：%w", errorPrefix, err)
-	}
-	if err := os.WriteFile(path, []byte(markdown), 0o644); err != nil {
-		return fmt.Errorf("%s：%w", errorPrefix, err)
-	}
-	return nil
-}
-
-func readMarkdownStoreFile(dir, id, errorPrefix string) (string, error) {
-	path, err := config.MarkdownStorePath(dir, id)
-	if err != nil {
-		return "", err
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("%s：%w", errorPrefix, err)
-	}
-	return string(content), nil
+	config.PutSetting(c, key, valueJSON)
 }
 
 func markdownStoreUpdatedAt(dir, id string) int64 {
