@@ -61,10 +61,13 @@ func main() {
 	if err := initializeInstalledReleaseNotes(); err != nil {
 		applog.Warn("Update", "初始化更新日志版本记录失败："+err.Error())
 	}
-	if nativeShellRequested(os.Args[1:]) {
+	shellSetting, _ := config.ReadSettingFromDisk(dataDir, "desktopShell")
+	if nativeShellRequested(os.Args[1:], os.Getenv, shellSetting) {
+		applog.Info("App", "启动原生界面")
 		runNativeShell(os.Args[1:])
 		return
 	}
+	applog.Info("App", "启动 WebView 界面")
 
 	mygo.Bind(Bridge{})
 	if err := mygo.Protocol.Handle("asset", http.HandlerFunc(serveAssetFile)); err != nil {
@@ -74,7 +77,7 @@ func main() {
 		applog.Error("App", "注册文档正文协议失败："+err.Error())
 	}
 
-	startupTargets := collectExternalOpenTargets(os.Args[1:], mustGetwd())
+	startupTargets := collectExternalOpenTargets(stripShellFlags(os.Args[1:]), mustGetwd())
 	markArgsDelivered(startupTargets.markdownPaths)
 	mygo.App.OnOpenFile(handleOpenFile)
 	mygo.App.OnSecondInstance(func(args []string, workingDir string) {

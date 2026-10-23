@@ -41,6 +41,7 @@
     type OpenDefaultBehavior,
     type InterfaceLanguagePreference,
     type MarkdownLintRuleSet,
+    type DesktopShellPreference,
     type RenderModePreference,
     type SplitViewLayoutPreference,
     type ShortcutCommandId,
@@ -1195,6 +1196,10 @@
   function setRenderMode(renderMode: RenderModePreference) {
     updateDraft({ renderMode });
   }
+  function setDesktopShell(desktopShell: DesktopShellPreference) {
+    updateDraft({ desktopShell });
+  }
+
 
   function setMarkdownLintRuleSet(markdownLintRuleSet: MarkdownLintRuleSet) {
     updateDraft({ markdownLintRuleSet });
@@ -2865,6 +2870,26 @@
                     class:active={draftSettings.renderMode === 'software'}
                     aria-pressed={draftSettings.renderMode === 'software'}
                     on:click={() => setRenderMode('software')}>{t.renderModeSoftware()}</button
+                  >
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <span class="setting-label">{t.desktopShell()}</span>
+                  <p>{t.desktopShellDescription()}</p>
+                </div>
+                <div class="segmented-control" role="group" aria-label={t.desktopShell()}>
+                  <button
+                    type="button"
+                    class:active={draftSettings.desktopShell === 'native'}
+                    aria-pressed={draftSettings.desktopShell === 'native'}
+                    on:click={() => setDesktopShell('native')}>{t.desktopShellNative()}</button
+                  >
+                  <button
+                    type="button"
+                    class:active={draftSettings.desktopShell === 'webview'}
+                    aria-pressed={draftSettings.desktopShell === 'webview'}
+                    on:click={() => setDesktopShell('webview')}>{t.desktopShellWebView()}</button
                   >
                 </div>
               </div>

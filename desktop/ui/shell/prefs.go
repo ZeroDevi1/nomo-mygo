@@ -52,6 +52,7 @@ type Prefs struct {
 	InlineCodeRenderingEnabled  bool    `json:"inlineCodeRenderingEnabled"`
 	CopyMarkdownSyntaxEnabled   bool    `json:"copyMarkdownSyntaxEnabled"`
 	RenderMode                  string  `json:"renderMode"`
+	DesktopShell                string  `json:"desktopShell"` // 界面引擎 native / webview，重启后由 desktop/main.go 读取
 	DeveloperMode               bool    `json:"developerMode"`
 	SoftwareUpdateAutoCheck     bool    `json:"softwareUpdateAutoCheckEnabled"`
 
@@ -99,7 +100,7 @@ func defaultPrefs() Prefs {
 		ExternalFileChangeBehavior: "reload-external", OutlineVisible: true, WritingStatsVisible: true,
 		WritingStatsMetric: "words", DefaultCodeBlockLanguage: "ts", DefaultDiagramType: "flowchart", ZoomPercent: 100, CtrlWheelZoomEnabled: true,
 		OutlineDefaultExpandLevel: 2, CodeBlockLineNumbersVisible: true, CodeBlockIndent: "spaces-2",
-		InlineCodeRenderingEnabled: true, CopyMarkdownSyntaxEnabled: true, RenderMode: "hardware",
+		InlineCodeRenderingEnabled: true, CopyMarkdownSyntaxEnabled: true, RenderMode: "hardware", DesktopShell: "native",
 		SoftwareUpdateAutoCheck: true, ColorThemeID: "nomo-default", QuickInsertEnabled: true, QuickInsertTrigger: "/",
 		MarkdownLintRuleSet: "relaxed", ShortcutPreferences: maps.Clone(defaultShortcuts),
 		ImageHandlingSettings: ImageSettings{ImageInsertStrategy: "copy-assets", UploadProvider: "picgo",
@@ -126,7 +127,7 @@ func (p *Prefs) fields() map[string]any {
 		"outlineDefaultExpandLevel":   &p.OutlineDefaultExpandLevel,
 		"codeBlockLineNumbersVisible": &p.CodeBlockLineNumbersVisible, "codeBlockIndent": &p.CodeBlockIndent,
 		"inlineCodeRenderingEnabled": &p.InlineCodeRenderingEnabled, "copyMarkdownSyntaxEnabled": &p.CopyMarkdownSyntaxEnabled,
-		"renderMode": &p.RenderMode, "developerMode": &p.DeveloperMode,
+		"renderMode": &p.RenderMode, "desktopShell": &p.DesktopShell, "developerMode": &p.DeveloperMode,
 		"softwareUpdateAutoCheckEnabled": &p.SoftwareUpdateAutoCheck,
 		"colorThemeId":                   &p.ColorThemeID, "uiFontFamily": &p.UIFontFamily, "documentFontFamily": &p.DocumentFontFamily,
 		"monoFontFamily": &p.MonoFontFamily, "quickInsertEnabled": &p.QuickInsertEnabled, "quickInsertTrigger": &p.QuickInsertTrigger,
@@ -194,6 +195,7 @@ func (p *Prefs) normalize() {
 	oneOf(&p.CodeBlockIndent, d.CodeBlockIndent, "spaces-2", "spaces-4", "tab")
 	oneOf(&p.DefaultDiagramType, d.DefaultDiagramType, diagramTypes...)
 	oneOf(&p.RenderMode, d.RenderMode, "hardware", "software")
+	oneOf(&p.DesktopShell, d.DesktopShell, "native", "webview")
 }
 
 // Store 把单个偏好写回 config.json；key 为原版设置键。

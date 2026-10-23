@@ -51,6 +51,8 @@ export type WritingStatsMetric = 'lines' | 'words' | 'visibleChars' | 'chars';
 export type ImageDefaultAlignPreference = ImageDefaultAlign;
 export type CodeBlockIndentPreference = 'spaces-2' | 'spaces-4' | 'tab';
 export type RenderModePreference = 'hardware' | 'software';
+/** 桌面界面引擎：原生（MyGo 原生 UI，默认）或 WebView（本前端）；重启后生效，由 desktop/main.go 启动时读取。 */
+export type DesktopShellPreference = 'native' | 'webview';
 export type { MarkdownLintRuleSet };
 export type { InterfaceLanguagePreference };
 
@@ -123,6 +125,7 @@ export interface AppPreferences {
   markdownLintEnabled: boolean;
   markdownLintRuleSet: MarkdownLintRuleSet;
   renderMode: RenderModePreference;
+  desktopShell: DesktopShellPreference;
   shortcutPreferences: ShortcutPreferences;
   imageHandlingSettings: ImageHandlingSettings;
   developerMode: boolean;
@@ -208,6 +211,7 @@ export const DEFAULT_APP_PREFERENCES: AppPreferences = {
   markdownLintEnabled: false,
   markdownLintRuleSet: 'relaxed',
   renderMode: 'hardware',
+  desktopShell: 'native',
   shortcutPreferences: { ...DEFAULT_SHORTCUT_PREFERENCES },
   imageHandlingSettings: { ...DEFAULT_IMAGE_HANDLING_SETTINGS },
   developerMode: false,
@@ -335,6 +339,7 @@ export async function loadAppPreferences(
     markdownLintEnabled: parseSetting<unknown>(settings, 'markdownLintEnabled'),
     markdownLintRuleSet: parseSetting<unknown>(settings, 'markdownLintRuleSet'),
     renderMode: parseSetting<unknown>(settings, 'renderMode'),
+    desktopShell: parseSetting<unknown>(settings, 'desktopShell'),
     shortcutPreferences: parseSetting<unknown>(settings, 'shortcutPreferences'),
     imageHandlingSettings: parseSetting<Partial<ImageHandlingSettings>>(
       settings,
@@ -531,6 +536,9 @@ export function normalizeAppPreferences(
     renderMode: isRenderModePreference(value.renderMode)
       ? value.renderMode
       : DEFAULT_APP_PREFERENCES.renderMode,
+    desktopShell: isDesktopShellPreference(value.desktopShell)
+      ? value.desktopShell
+      : DEFAULT_APP_PREFERENCES.desktopShell,
     shortcutPreferences: normalizeShortcutPreferences(value.shortcutPreferences),
     imageHandlingSettings: normalizeImageSettings(
       value.imageHandlingSettings as Partial<ImageHandlingSettings> | null | undefined,
@@ -689,6 +697,7 @@ function toPersistedPreferenceEntries(
     markdownLintEnabled: preferences.markdownLintEnabled,
     markdownLintRuleSet: preferences.markdownLintRuleSet,
     renderMode: preferences.renderMode,
+    desktopShell: preferences.desktopShell,
     shortcutPreferences: preferences.shortcutPreferences,
     imageHandlingSettings: preferences.imageHandlingSettings,
     developerMode: preferences.developerMode,
@@ -868,6 +877,10 @@ function isCodeBlockIndentPreference(value: unknown): value is CodeBlockIndentPr
 
 function isRenderModePreference(value: unknown): value is RenderModePreference {
   return value === 'hardware' || value === 'software';
+}
+
+function isDesktopShellPreference(value: unknown): value is DesktopShellPreference {
+  return value === 'native' || value === 'webview';
 }
 
 function isMarkdownLintRuleSet(value: unknown): value is MarkdownLintRuleSet {

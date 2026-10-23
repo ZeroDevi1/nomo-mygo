@@ -89,6 +89,11 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
     'WebView2 がハードウェア GPU アクセラレーションを使用するか、ソフトウェア レンダリングを使用するかを選択します。変更を適用するにはアプリを再起動してください。',
   renderModeHardware: 'ハードウェア',
   renderModeSoftware: 'ソフトウェア',
+  desktopShell: 'インターフェース エンジン',
+  desktopShellDescription:
+    'ネイティブ インターフェースはメモリ使用量が少なく、大きな文書も速く開けます。問題がある場合は WebView インターフェースに戻せます。変更を適用するにはアプリを再起動してください。',
+  desktopShellNative: 'ネイティブ',
+  desktopShellWebView: 'WebView',
   visualZoom: 'ビジュアルズーム',
   zoomLevel: 'ズームレベル',
   zoomLevelDescription: 'ドキュメントエディターとソースモードの全体的なスケールを調整します。',

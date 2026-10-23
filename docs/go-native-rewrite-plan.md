@@ -247,7 +247,7 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 
 ### 9.7 原生外壳（2026-10-22，P2 外壳部分）
 
-入口：`nomo --native` 或 `NOMO_NATIVE=1`（`desktop/native.go`），默认仍启动 WebView 外壳。代码在 `desktop/ui/shell`，直接调用 `config`、`docfs`、`i18n`，不经过 IPC；与 WebView 版共用数据目录、`config.json` 的偏好键（`themeMode`、`editorMode`、`sidebarHidden`、`outlineVisible`、`toolbarHidden`）与最近打开记录。设置写入的分区路由从 `main` 包下沉为 `config.PutSetting`，两个外壳共用。
+入口：`desktop/native.go`。（9.20 起原生外壳为默认界面，此前须 `nomo --native` 或 `NOMO_NATIVE=1`。）代码在 `desktop/ui/shell`，直接调用 `config`、`docfs`、`i18n`，不经过 IPC；与 WebView 版共用数据目录、`config.json` 的偏好键（`themeMode`、`editorMode`、`sidebarHidden`、`outlineVisible`、`toolbarHidden`）与最近打开记录。设置写入的分区路由从 `main` 包下沉为 `config.PutSetting`，两个外壳共用。
 
 - 布局对齐原版：自绘标题栏（文件/编辑/格式/查看菜单、文件名与未保存标记、侧栏/大纲/主题按钮）、资源管理器（懒加载目录树，沿用 docfs 忽略规则与 .gitignore）、文档标签页、格式工具栏、查找替换栏、编辑区、文档大纲、状态栏（字数/字符/行、光标行列、路径、语义/源码切换）、空白工作区（新建、打开、最近文件）、未保存确认。macOS 另装系统菜单栏，与标题栏菜单共用一张命令表；快捷键沿用原版。
 - 语义模式为 mdedit；源码模式为 ui/editor（Markdown 高亮、自带查找），其缓冲区是 Document 的镜像，按最小差异双向同步，切换模式不丢失内容或位置。
@@ -449,4 +449,23 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **关闭大文档后归还内存**：Go 后台回收器归还空闲页很慢，关闭 50 MiB 文档后约 299 MB 空闲堆仍计入进程提交内存。关闭 ≥ 4 MiB 的标签、释放分段会话后合并请求，2 秒后执行一次 `debug.FreeOSMemory`（`internal/memtrim`）；无头实测 2.5 秒后空闲未归还堆 299 MB → 0。
 - 验证：Go 全部测试、`GOOS=windows go vet ./...`、`pnpm check`、前端相关 vitest；上述 Windows 行为（退出、托盘、WebView2 参数）只做了交叉编译与静态检查，未在 Windows 实机验证。
 - 发现未改：WebView 外壳打开 10 MiB 混合文档时 WebContent 进程约 6.2 GB、载入约 18 秒（前端编辑器）；WebView 外壳收到 SIGTERM 后未退出（退出事务等待页面确认）。
+
+### 9.20 原生外壳设为默认界面（2026-10-23）
+
+- **选择顺序**（`nativeShellRequested`）：命令行 `--webview` / `--native`（临时，不写设置）→ 环境变量 `NOMO_SHELL=webview|native`（兼容 `NOMO_NATIVE=1|0`）→ 设置 `desktopShell`（两种外壳的“高级 → 渲染”都可切换，重启后生效）→ 默认原生。启动日志记录所选界面。实机验证（release、隔离 HOME）：默认 → 原生；`--webview` → WebView；设置为 WebView → WebView；设置为 WebView 时 `--native` → 原生。
+- WebView 外壳与其前端保留为回退，打包内容不变。
+
+**原生版相对 WebView 版仍缺少的功能**（按影响排序；“未验证”指已实现但未在真机窗口操作过）
+1. Windows 集成设置：Markdown 文件关联、资源管理器右键菜单、Store 版检测旧安装版的提示——WebView 设置页有，原生设置页没有（后端命令仍在，未接入原生界面）。
+2. 启动时恢复上次工作区（打开的标签、各窗口布局）与未保存文档的恢复副本：原生外壳不读写 `workspaceTabs` / `startupWorkspace` 与草稿，启动只打开参数中的文档。
+3. 软件更新：只检查并打开发布页，不下载安装；更新完成后的更新日志弹窗没有。
+4. 把文件拖到窗口打开；标签拖动排序与跨窗口拖动标签；组合标签关系不持久化。
+5. 链接快速编辑浮层（原版 LinkQuickEditor）：工具栏/菜单只插入 `[]()`；链接右键可打开、复制地址。
+6. 图片：右键菜单、拖动调整宽度、对齐设置、点击预览；远程 SVG 徽章文字经离屏栅格化，放大会模糊。
+7. 文档快照：保存前照常创建，但没有浏览与恢复快照的界面。
+8. 右键菜单：代码块、表格（增删行列、调整尺寸）、公式与图表的专属菜单，按普通文本处理。
+9. 列表、引用中的折叠块，以及未配对的 `<details>` 标记按原文显示；目录区的 Markdown 列表原文不随标题自动更新（目录卡片按当前标题实时显示）。
+10. 上标、下标只缩小字号，不上下错位（MyGo 排版片段无基线偏移）。
+11. 托盘图标的未激活态（窗口全部隐藏到托盘时变灰）。
+12. 未验证：多窗口与“移动到新窗口”、Word 导出、真实输入法组字、新工具栏与弹层；原生外壳整体未在 Windows 与 Linux 真机运行过。
 

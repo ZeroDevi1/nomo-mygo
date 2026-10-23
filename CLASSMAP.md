@@ -90,7 +90,7 @@
 | 编辑器对外接口（格式命令、查找、大纲、统计、源码同步） | `desktop/ui/mdedit/api.go` | `structure.go`, `edit.go` | 修改工具栏/菜单命令的原文事务、查找匹配、大纲与写作统计 |
 | 工具栏插入命令（表格尺寸、脚注、正文目录、行内注释、行内公式） | `desktop/ui/mdedit/inserts.go` | `history.go`（`linkLast` 相连撤销）, `api.go`（`Run`） | 修改插入的原文格式、脚注编号、目录锚点规则 |
 
-### 原生外壳（Go，P2，`nomo --native` 或 `NOMO_NATIVE=1`）
+### 原生外壳（Go，默认界面；回退 WebView：`--webview`、`NOMO_SHELL=webview` 或设置 `desktopShell`，见 `desktop/native.go`）
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|

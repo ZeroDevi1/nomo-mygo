@@ -15,13 +15,43 @@ import (
 	"nomo/desktop/ui/shell"
 )
 
-// 原生外壳入口（计划 P2：独立入口开发，现版本照常发布）。
-// 以 `nomo --native` 或环境变量 NOMO_NATIVE=1 启动；默认仍走 WebView 外壳。
+// 原生外壳入口：默认界面。WebView 外壳（Svelte 前端）作为回退保留，选择顺序（先到先得）：
+//  1. 命令行 `--webview` / `--native`（临时切换，不写设置）；
+//  2. 环境变量 NOMO_SHELL=webview|native，兼容旧的 NOMO_NATIVE=1|0；
+//  3. 设置 desktopShell（两种外壳的“高级”设置页都可修改，重启后生效）；
+//  4. 默认原生。
 
-const nativeFlag = "--native"
+const (
+	nativeFlag  = "--native"
+	webviewFlag = "--webview"
+)
 
-func nativeShellRequested(args []string) bool {
-	return os.Getenv("NOMO_NATIVE") == "1" || slices.Contains(args, nativeFlag)
+// nativeShellRequested 按上述顺序决定是否启动原生外壳；setting 为磁盘上 desktopShell 的 JSON 值（未设置时为空）。
+func nativeShellRequested(args []string, getenv func(string) string, setting string) bool {
+	switch {
+	case slices.Contains(args, webviewFlag):
+		return false
+	case slices.Contains(args, nativeFlag):
+		return true
+	}
+	switch getenv("NOMO_SHELL") {
+	case "webview":
+		return false
+	case "native":
+		return true
+	}
+	switch getenv("NOMO_NATIVE") {
+	case "0":
+		return false
+	case "1":
+		return true
+	}
+	return setting != `"webview"`
+}
+
+// stripShellFlags 去掉外壳选择参数，其余参数按外部打开目标处理。
+func stripShellFlags(args []string) []string {
+	return slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == nativeFlag || a == webviewFlag })
 }
 
 // runNativeShell 打开原生外壳窗口并运行到退出。数据目录、配置、日志与单实例锁已由 main
@@ -32,7 +62,7 @@ func runNativeShell(args []string) {
 		os.Setenv("MYGO_GPU", "0")
 		applog.Info("Native", "已启用软件渲染模式")
 	}
-	targets := collectExternalOpenTargets(slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == nativeFlag }), mustGetwd())
+	targets := collectExternalOpenTargets(stripShellFlags(args), mustGetwd())
 	var sh *shell.Shell
 	var win *mygo.Window
 	// 第二实例与打开文件事件投递到最近聚焦的外壳窗口（多窗口时第一个窗口可能已关闭）。

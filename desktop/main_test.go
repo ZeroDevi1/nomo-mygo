@@ -58,3 +58,32 @@ func TestLargeDocumentContentByProtocol(t *testing.T) {
 		t.Fatalf("令牌只能使用一次：%d", w.Code)
 	}
 }
+
+func TestNativeShellRequested(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	none := env(nil)
+	for _, c := range []struct {
+		name    string
+		args    []string
+		getenv  func(string) string
+		setting string
+		want    bool
+	}{
+		{"默认原生", nil, none, "", true},
+		{"设置为 WebView", nil, none, `"webview"`, false},
+		{"设置为原生", nil, none, `"native"`, true},
+		{"命令行优先于设置", []string{"--native"}, none, `"webview"`, true},
+		{"命令行回退 WebView", []string{"a.md", "--webview"}, none, "", false},
+		{"环境变量优先于设置", nil, env(map[string]string{"NOMO_SHELL": "native"}), `"webview"`, true},
+		{"环境变量回退 WebView", nil, env(map[string]string{"NOMO_SHELL": "webview"}), "", false},
+		{"兼容 NOMO_NATIVE=0", nil, env(map[string]string{"NOMO_NATIVE": "0"}), "", false},
+		{"命令行优先于环境变量", []string{"--webview"}, env(map[string]string{"NOMO_SHELL": "native"}), "", false},
+	} {
+		if got := nativeShellRequested(c.args, c.getenv, c.setting); got != c.want {
+			t.Errorf("%s：得到 %v", c.name, got)
+		}
+	}
+	if got := stripShellFlags([]string{"--webview", "a.md", "--native"}); len(got) != 1 || got[0] != "a.md" {
+		t.Errorf("stripShellFlags：%v", got)
+	}
+}

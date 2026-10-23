@@ -227,6 +227,8 @@ func (sw *settingsWindow) page(c *ui.Context) {
 		sw.section(c, "renderingMode", func() {
 			sw.choice(c, "renderMode", "renderMode", &p.RenderMode,
 				[]string{"hardware", "software"}, []string{s.tr("renderModeHardware"), s.tr("renderModeSoftware")})
+			sw.choice(c, "desktopShell", "desktopShell", &p.DesktopShell,
+				[]string{"native", "webview"}, []string{s.tr("desktopShellNative"), s.tr("desktopShellWebView")})
 		})
 		sw.section(c, "defaultInsertBehavior", func() {
 			sw.text(c, "defaultCodeBlockLanguage", "defaultCodeBlockLanguage", &p.DefaultCodeBlockLanguage, "ts", "", false,
