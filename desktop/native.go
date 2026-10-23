@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 
 	"github.com/egoist/mygo"
 
@@ -66,7 +65,7 @@ func runNativeShell(args []string) {
 			Files: targets.markdownPaths, Folders: targets.folderPaths, IconLight: appIconLight, IconDark: appIconDark,
 			ExportPDF: exportNativePDF, CheckUpdate: checkNativeUpdate,
 			LoadEmoji:   func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appIdentifier, retry) },
-			InstallTray: installNativeTray})
+			InstallTray: installNativeTray, SetIconTheme: setDesktopIconTheme})
 		win = sh.Open()
 		applyAppIcon(win)
 		applog.Info("Native", "原生外壳已启动")
@@ -77,21 +76,15 @@ func runNativeShell(args []string) {
 	}
 }
 
-// applyAppIcon 设置应用图标：Windows / Linux 设到窗口（标题栏与任务栏）；macOS 只在不是从
-// .app 包运行（go run、开发构建）时替换 Dock 图标，打包后的应用保留 Assets.car 中支持深色与
-// 着色变体的图标。
+// applyAppIcon 在 Windows / Linux 把应用图标设到窗口（标题栏与任务栏）。macOS 的 Dock 图标由外壳首帧经
+// setDesktopIconTheme 按应用明暗外观设置（同原版运行时 setApplicationIconImage）；应用未运行时 Finder / Dock
+// 仍用 Assets.car 按系统外观选图。
 func applyAppIcon(win *mygo.Window) {
-	switch runtime.GOOS {
-	case "darwin":
-		if exe, err := os.Executable(); err == nil && !strings.Contains(exe, ".app/Contents/MacOS/") {
-			if err := mygo.App.Dock.SetIcon(appIconDock); err != nil {
-				applog.Warn("Native", "设置 Dock 图标失败："+err.Error())
-			}
-		}
-	default:
-		if err := win.SetIcon(appIconLight); err != nil {
-			applog.Warn("Native", "设置窗口图标失败："+err.Error())
-		}
+	if runtime.GOOS == "darwin" {
+		return
+	}
+	if err := win.SetIcon(appIconLight); err != nil {
+		applog.Warn("Native", "设置窗口图标失败："+err.Error())
 	}
 }
 
@@ -132,6 +125,10 @@ func installNativeTray(show, quit func()) bool {
 		applog.Warn("Tray", "创建托盘图标失败："+err.Error())
 		return false
 	}
+	// 登记到 trayState，使 setDesktopIconTheme 切换明暗时一并替换托盘图标。
+	trayState.mu.Lock()
+	trayState.tray = tray
+	trayState.mu.Unlock()
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{ID: trayOpenID, Label: tr("tray_open"), Click: func(*mygo.MenuItem, *mygo.Window) { show() }},
 		mygo.Separator(),

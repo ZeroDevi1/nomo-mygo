@@ -92,6 +92,10 @@ func (s *Shell) applyEditorStyle(tab *Tab) {
 func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 	t := s.currentTheme()
 	dark := c.Theme().Dark
+	if (dark != s.dark || !s.iconSynced) && s.opts.SetIconTheme != nil {
+		s.iconSynced = true
+		go s.opts.SetIconTheme(dark)
+	}
 	s.dark = dark
 	tok := t.Tokens(dark)
 	s.ch.content = tok("documentBackground")

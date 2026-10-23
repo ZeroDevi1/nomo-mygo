@@ -113,6 +113,7 @@ type Shell struct {
 	pdfExporter func(html, path string, outline []PDFOutlineEntry) error
 	checkUpdate func() (UpdateInfo, error)
 	dark        bool // 最近一帧的明暗外观（导出 HTML 配色用），在 applyDocumentAppearance 中更新
+	iconSynced  bool // 已把 dark 交给 Options.SetIconTheme；dark 变化时重新同步
 
 	focusSaved *[3]bool // 专注模式前的侧栏隐藏、大纲显示、工具栏隐藏；nil 表示不在专注模式（不写盘）
 
@@ -138,6 +139,9 @@ type Options struct {
 	// InstallTray 创建托盘图标（主程序提供）：show 恢复窗口，quit 退出；返回托盘是否可用。为空或失败时
 	// “关闭到托盘”不可用，关闭按钮总是关闭窗口。
 	InstallTray func(show, quit func()) bool
+	// SetIconTheme 让 Dock 与托盘图标跟随应用的明暗外观（主程序提供，原版 set_desktop_icon_theme）；首帧与外观
+	// 变化时在后台调用，相同值由主程序去重。为空时图标保持打包版本。
+	SetIconTheme func(dark bool)
 	// LoadEmoji 加载表情目录（主程序提供，读缓存或下载，在后台调用）；retry 为 true 时忽略失败冷却。为空时不提供表情功能。
 	LoadEmoji func(retry bool) ([]emoji.Entry, error)
 	Files     []string // 启动时打开的文档
