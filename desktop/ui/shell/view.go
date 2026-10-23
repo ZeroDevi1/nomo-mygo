@@ -42,6 +42,10 @@ func (s *Shell) view(c *ui.Context) {
 	root := ui.Column(c).Fill()
 	s.shortcuts(root)
 	root.Children(func() {
+		if s.mini.active {
+			s.miniLayout(c)
+			return
+		}
 		if s.pf.mac {
 			s.macLayout(c)
 		} else {
@@ -128,8 +132,11 @@ func (s *Shell) macContent(c *ui.Context) {
 func (s *Shell) macTabs(c *ui.Context) {
 	ui.Row(c).Height(tabBarH - 4).FillWidth().Background(s.ch.tabBar).AlignItems(ui.Stretch).Children(func() {
 		for i, tab := range s.tabs {
+			if s.tabHidden(tab) {
+				continue
+			}
 			ck := c.Key(tab.ID)
-			selected := i == s.active
+			selected := s.tabSelected(tab)
 			cell := ui.Row(ck).Grow(1).Width(0).Padding(0, 6).AlignItems(ui.Center).Gap(4)
 			if selected {
 				cell.Background(s.ch.tabActive)
@@ -143,12 +150,12 @@ func (s *Shell) macTabs(c *ui.Context) {
 			cell.Children(func() {
 				s.closeButton(ck, tab, hovered || selected)
 				label := ui.ButtonBase(ck).Grow(1).Children(func() {
-					txt := ui.Text(ck, tab.Name(s.untitledName)).FontSize(12).SingleLine()
+					txt := ui.Text(ck, s.tabLabel(tab)).FontSize(12).SingleLine()
 					if !selected {
 						txt.TextColor(s.ch.muted)
 					}
 				})
-				if label.Clicked() {
+				if label.Clicked() && !selected {
 					s.activate(i)
 				}
 				ui.Box(ck).Size(18, 18)
@@ -202,8 +209,11 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 	ui.Row(c).Height(tabBarH).FillWidth().Padding(4, 8, 0, 8).Gap(2).AlignItems(ui.End).Children(func() {
 		ui.Row(c).Grow(1).Gap(2).Clip().AlignItems(ui.End).Children(func() {
 			for i, tab := range s.tabs {
+				if s.tabHidden(tab) {
+					continue
+				}
 				ck := c.Key(tab.ID)
-				selected := i == s.active
+				selected := s.tabSelected(tab)
 				box := ui.Row(ck).Height(tabBarH-6).Padding(0, 4, 0, 12).Gap(6).AlignItems(ui.Center).Radius(t.Radius*2, t.Radius*2, 0, 0).MaxWidth(240)
 				switch {
 				case selected:
@@ -215,12 +225,12 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 				box.Children(func() {
 					label := ui.ButtonBase(ck).Gap(6).Children(func() {
 						ui.Icon(ck, icons.ForFile(tab.Name(s.untitledName))).FontSize(14).TextColor(s.ch.muted)
-						txt := ui.Text(ck, tab.Name(s.untitledName)).FontSize(12).SingleLine()
+						txt := ui.Text(ck, s.tabLabel(tab)).FontSize(12).SingleLine()
 						if !selected {
 							txt.TextColor(s.ch.muted)
 						}
 					})
-					if label.Clicked() {
+					if label.Clicked() && !selected {
 						s.activate(i)
 					}
 					s.closeButton(ck, tab, hovered || selected)
@@ -251,13 +261,14 @@ func (s *Shell) closeButton(c *ui.Context, tab *Tab, visible bool) {
 		}
 	})
 	if x.Clicked() {
-		s.requestClose([]int{tab.ID}, false)
+		s.requestClose(s.tabIDsOf(tab), false)
 	}
 }
 
 // tabMenu 是标签的右键菜单，对应原版 DocumentTabs 的关闭、关闭其他、关闭右侧、复制路径、在文件夹中显示。
 func (s *Shell) tabMenu(el ui.Element, tab *Tab) {
 	el.ContextMenu(func(m *ui.Menu) {
+		s.comparisonMenu(m, tab)
 		if m.Item(s.tr("closeTab")).Chosen() {
 			s.requestClose([]int{tab.ID}, false)
 		}
@@ -280,6 +291,9 @@ func (s *Shell) tabMenu(el ui.Element, tab *Tab) {
 				seen = seen || t.ID == tab.ID
 			}
 			s.requestClose(ids, false)
+		}
+		if m.Item(s.tr("moveTabToNewWindow")).Disabled(len(s.tabIDsOf(tab)) == len(s.tabs)).Chosen() {
+			s.moveToNewWindow(tab)
 		}
 		m.Separator()
 		if m.Item(s.tr("copyPath")).Disabled(tab.Path == "").Chosen() {
@@ -310,16 +324,15 @@ func (s *Shell) titleText(c *ui.Context) {
 // trailingTools 是标题栏右侧：模式切换、查找、大纲、侧栏（Windows / Linux）、设置。
 func (s *Shell) trailingTools(c *ui.Context) {
 	if t := s.activeTab(); t != nil {
+		modes := []string{modeSemantic, modeSource, modeSplit}
 		mode := 0
-		if s.mode() == modeSource {
-			mode = 1
-		}
-		if t.Kind() == kindMarkdown && ui.Segmented(c, &mode, s.tr("semanticEditing"), s.tr("sourceMode")).FontSize(12).Changed() {
-			if mode == 1 {
-				s.setMode(modeSource)
-			} else {
-				s.setMode(modeSemantic)
+		for k, m := range modes {
+			if s.prefs.EditorMode == m {
+				mode = k
 			}
+		}
+		if t.Kind() == kindMarkdown && ui.Segmented(c, &mode, s.tr("semanticEditing"), s.tr("sourceMode"), s.tr("splitMode")).FontSize(12).Changed() {
+			s.setMode(modes[mode])
 		}
 		ui.Box(c).Width(6)
 		if s.toolButton(c, "search", s.tr("searchReplace"), s.finding).Clicked() {
@@ -393,13 +406,38 @@ func (s *Shell) document(c *ui.Context) {
 	}
 	// MinHeight(0) 让这一行可以比内容矮：否则大纲的滚动内容会撑高整行，编辑区压到状态栏下面。
 	ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-		ck := c.Key(fmt.Sprint(s.mode(), tab.ID))
+		// 组合标签以左侧成员为键：在两篇之间切换活动文档时不重建编辑区（保留焦点与滚动位置）。
+		keyID := tab.ID
+		if left, _, ok := s.comparisonOf(tab); ok {
+			keyID = left.ID
+		}
+		ck := c.Key(fmt.Sprint(s.mode(), s.split(), keyID))
 		ui.Column(ck).Grow(1).Fill().Children(func() {
 			var el ui.Element
-			if s.mode() == modeSource {
+			if left, right, ok := s.comparisonOf(tab); ok {
+				el = s.comparisonView(c, left, right)
+				if s.mode() == modeSemantic {
+					if r := el.Bounds(); r.W > 0 {
+						s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
+					}
+					s.quickInsert(c, s.activeTab(), el)
+					s.emojiSuggest(c, s.activeTab(), el)
+				}
+			} else if s.split() {
+				el = s.splitView(c, tab, ck)
+				if r := el.Bounds(); r.W > 0 {
+					s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
+				}
+				s.quickInsert(c, tab, el)
+				s.emojiSuggest(c, tab, el)
+			} else if s.mode() == modeSource {
 				// 与语义模式同宽居中（原版源码模式同样受内容宽度约束）。
 				ui.Row(ck).Grow(1).Fill().Justify(ui.Center).Padding(16, 0, 0, 0).Children(func() {
-					el = editor.View(ck, tab.Source()).Fill().MaxWidth(820)
+					st := tab.Source()
+					if st.OnCompletion == nil && tab.Kind() == kindMarkdown {
+						st.OnCompletion = func(req editor.CompletionRequest) { s.sourceEmojiCompletion(tab, req) }
+					}
+					el = editor.View(ck, st).Fill().MaxWidth(820)
 				})
 			} else {
 				el = tab.Ed.View(ck)
@@ -664,6 +702,7 @@ func (s *Shell) dialogs(c *ui.Context) {
 		s.resolveClose(2)
 	}
 	s.renameDialog(c)
+	s.closeChoiceDialog(c)
 }
 
 func (s *Shell) toggleSidebar() {

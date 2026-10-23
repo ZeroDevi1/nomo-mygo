@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/docfs"
+	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
 )
 
@@ -28,8 +30,11 @@ import (
 // PDF 把同一份 HTML 交给 Options.ExportPDF（主程序用按需创建的隐藏 WebView 打印，导出完即销毁，
 // 不常驻）；标题前插入书签标记，由主程序转换为 PDF 书签。
 //
+// 公式与 Mermaid 与原版一样内联 KaTeX HTML（附内联字体的 KaTeX 样式）与 SVG，由离屏渲染页生成（render.go
+// 的 markup，在写出前于后台调用）；渲染不可用或失败时保留源码并附错误说明。
+//
 // 与原版的差异：代码高亮用 MyGo editor 的 Tokenizer 与 GitHub 配色（原版为 Shiki），未知语言不高亮；
-// 公式与 Mermaid 以源码显示，提示块按引用块显示，不附带精细排版运行时。
+// 提示块按引用块显示，不附带精细排版运行时。
 
 // PDFOutlineEntry 是 PDF 书签：MarkerURI 为标题前标记链接的地址，主程序据此定位页面。
 type PDFOutlineEntry struct {
@@ -181,6 +186,75 @@ func highlightCodeHTML(out string, dark bool) string {
 	})
 }
 
+var (
+	exportMathRe    = regexp.MustCompile(`(?s)<span class="math (inline|display)">(.*?)</span>|<div class="math display">(.*?)</div>`)
+	exportMermaidRe = regexp.MustCompile(`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
+)
+
+// renderExportMarkup 把导出 HTML 中的公式与 Mermaid 源码替换为渲染结果（在后台调用，可能耗时数秒）。没有
+// 公式与图表、或离屏渲染不可用（测试中没有窗口）时原样返回；单项失败时保留源码并附错误说明（原版同样处理）。
+func (s *Shell) renderExportMarkup(doc string, dark bool) string {
+	if s.win == nil || !strings.Contains(doc, `class="math `) && !strings.Contains(doc, "language-mermaid") {
+		return doc
+	}
+	type hit struct {
+		a, z int
+		kind string
+		src  string
+	}
+	var hits []hit
+	for _, m := range exportMathRe.FindAllStringSubmatchIndex(doc, -1) {
+		h := hit{a: m[0], z: m[1]}
+		if m[2] >= 0 {
+			h.kind, h.src = map[string]string{"inline": mdedit.RenderMathInline, "display": mdedit.RenderMathDisplay}[doc[m[2]:m[3]]], doc[m[4]:m[5]]
+		} else {
+			h.kind, h.src = mdedit.RenderMathDisplay, doc[m[6]:m[7]]
+		}
+		hits = append(hits, h)
+	}
+	for _, m := range exportMermaidRe.FindAllStringSubmatchIndex(doc, -1) {
+		hits = append(hits, hit{a: m[0], z: m[1], kind: mdedit.RenderMermaid, src: doc[m[2]:m[3]]})
+	}
+	if len(hits) == 0 {
+		return doc
+	}
+	slices.SortFunc(hits, func(x, y hit) int { return x.a - y.a })
+	reqs := make([]mdedit.RenderRequest, len(hits))
+	for k, h := range hits {
+		reqs[k] = mdedit.RenderRequest{Kind: h.kind, Src: html.UnescapeString(h.src)}
+	}
+	items, css, err := s.rend.markup(reqs, dark)
+	if err != nil {
+		applog.Warn("Export", "导出时渲染公式与图表失败，保留源码："+err.Error())
+		return doc
+	}
+	var b strings.Builder
+	at := 0
+	for k, h := range hits {
+		b.WriteString(doc[at:h.a])
+		it := items[k]
+		tag, class := "div", "math-block"
+		if h.kind == mdedit.RenderMathInline {
+			tag, class = "span", "math-inline"
+		}
+		if it.err != "" {
+			b.WriteString(doc[h.a:h.z] + `<span class="nomo-render-error">` + html.EscapeString(it.err) + `</span>`)
+		} else if h.kind == mdedit.RenderMermaid {
+			// 与原版导出结构一致：.mermaid-block > .mermaid-block-rendered（export-document.css 居中、限宽）。
+			b.WriteString(`<div class="mermaid-block"><div class="mermaid-block-rendered">` + it.html + `</div></div>`)
+		} else {
+			b.WriteString("<" + tag + ` class="` + class + `">` + it.html + "</" + tag + ">")
+		}
+		at = h.z
+	}
+	b.WriteString(doc[at:])
+	out := b.String()
+	if css != "" {
+		out = strings.Replace(out, "</style>", "\n"+strings.ReplaceAll(css, "</style", `<\/style`)+"</style>", 1)
+	}
+	return out
+}
+
 func stripFrontMatter(src string) string {
 	if !strings.HasPrefix(src, "---\n") && !strings.HasPrefix(src, "---\r\n") {
 		return src
@@ -247,8 +321,9 @@ func (s *Shell) exportHTML() {
 		return
 	}
 	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() error {
-		doc, _ := s.exportDocument(tab, s.dark, false)
-		return func() error { return docfs.WriteFileAtomically(path, []byte(doc)) }
+		dark := s.dark
+		doc, _ := s.exportDocument(tab, dark, false)
+		return func() error { return docfs.WriteFileAtomically(path, []byte(s.renderExportMarkup(doc, dark))) }
 	})
 }
 
@@ -261,7 +336,62 @@ func (s *Shell) exportPDF() {
 	}
 	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() error {
 		doc, outline := s.exportDocument(tab, false, true)
-		return func() error { return s.pdfExporter(doc, path, outline) }
+		return func() error { return s.pdfExporter(s.renderExportMarkup(doc, false), path, outline) }
+	})
+}
+
+// exportWord 导出 .docx（原版 wordExportService）：在离屏渲染页中复用原版的文档模型与打包，本地图片先内联为
+// data URL；写出成功后在状态栏附上降级说明（如 GIF 只取首帧、HTML 保留为源码）。
+func (s *Shell) exportWord() {
+	tab := s.activeTab()
+	if tab == nil || s.win == nil {
+		return
+	}
+	s.exportTo(tab, "docx", "Word", "exportWordSuccess", func(path string) func() error {
+		dir := ""
+		if tab.Path != "" {
+			dir = filepath.Dir(tab.Path)
+		}
+		md := inlineMarkdownImages(tab.Doc.Source(), dir)
+		title := strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName)))
+		return func() error {
+			data, warnings, err := s.rend.word(md, title)
+			if err != nil {
+				return err
+			}
+			if err := docfs.WriteFileAtomically(path, data); err != nil {
+				return err
+			}
+			if len(warnings) > 0 {
+				applog.Info("Export", "Word 导出降级："+strings.Join(warnings, "；"))
+			}
+			return nil
+		}
+	})
+}
+
+var (
+	mdImageRe   = regexp.MustCompile(`(!\[[^\]]*\]\(\s*)(<[^>]+>|[^)\s]+)`)
+	htmlImageRe = regexp.MustCompile(`(<img\b[^>]*?\ssrc=")([^"]+)(")`)
+)
+
+// inlineMarkdownImages 把 Markdown 图片与 <img> 的本地地址替换为 data URL（单张至多 maxInlineImage），远程
+// 地址与读取失败的保持原样。
+func inlineMarkdownImages(src, dir string) string {
+	src = mdImageRe.ReplaceAllStringFunc(src, func(m string) string {
+		sub := mdImageRe.FindStringSubmatch(m)
+		path := strings.TrimSuffix(strings.TrimPrefix(sub[2], "<"), ">")
+		if data := inlineImage(dir, path); data != "" {
+			return sub[1] + data
+		}
+		return m
+	})
+	return htmlImageRe.ReplaceAllStringFunc(src, func(m string) string {
+		sub := htmlImageRe.FindStringSubmatch(m)
+		if data := inlineImage(dir, html.UnescapeString(sub[2])); data != "" {
+			return sub[1] + data + sub[3]
+		}
+		return m
 	})
 }
 

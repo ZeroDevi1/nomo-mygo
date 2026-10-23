@@ -451,8 +451,17 @@ func TestTextAndJSONDocumentsUseSourceEditor(t *testing.T) {
 	buf := tab.Source().Buffer
 	buf.Edit(editorEdit(buf.Len(), "\n"))
 	tt.Frame()
-	if tab.Doc.Source() != "{\"a\": 1}\n\n" || !tab.Dirty() {
-		t.Fatalf("源码编辑未写回：%q", tab.Doc.Source())
+	// TXT/JSON 以源码缓冲为唯一事实源（不建 Markdown 文档），保存读取的也是缓冲。
+	if tab.text() != "{\"a\": 1}\n\n" || !tab.Dirty() || tab.Doc.Source() != "" {
+		t.Fatalf("源码编辑结果：%q dirty=%v", tab.text(), tab.Dirty())
+	}
+	// 保存后不再算未保存，磁盘内容即缓冲内容。
+	posted := make(chan func(), 4)
+	s.post = func(fn func()) { posted <- fn }
+	s.save(tab, false, nil)
+	(<-posted)()
+	if got, _ := os.ReadFile(p); string(got) != "{\"a\": 1}\n\n" || tab.Dirty() {
+		t.Fatalf("保存结果 %q dirty=%v", got, tab.Dirty())
 	}
 }
 
@@ -471,5 +480,84 @@ func TestHighlightCodeHTML(t *testing.T) {
 	}
 	if !strings.Contains(out, "<pre><code class=\"language-nope\">a &lt; b\n</code></pre>") {
 		t.Fatalf("未知语言应原样保留：%s", out)
+	}
+}
+
+func TestSplitModeSyncsBothPanes(t *testing.T) {
+	p := writeDoc(t, "# 标题\n\n第一段\n")
+	s, tt := newTestShell(t, p)
+	s.setMode(modeSplit)
+	tt.Frame()
+	if !s.split() || !tt.HasText("双栏模式") {
+		t.Fatal("应进入双栏模式")
+	}
+	snapshot(t, tt, "split")
+	tab := s.activeTab()
+	// 语义侧编辑 → 源码侧同步。
+	tab.Doc.SetSelection(selection(len(tab.Doc.Source())))
+	tab.Ed.InsertText("甲")
+	tt.Frame()
+	if got := tab.Source().Buffer.String(); got != tab.Doc.Source() {
+		t.Fatalf("源码侧未同步：%q", got)
+	}
+	// 源码侧编辑 → 语义侧同步。
+	buf := tab.Source().Buffer
+	buf.Edit(editorEdit(buf.Len(), "乙"))
+	tt.Frame()
+	if !strings.HasSuffix(tab.Doc.Source(), "甲乙") {
+		t.Fatalf("语义侧未同步：%q", tab.Doc.Source())
+	}
+	// 比例：拖动后夹在 25–75，按设置的左右布局。
+	if s.prefs.SplitLeftPercent != 50 || s.prefs.SplitViewLayout != "semantic-source" {
+		t.Fatalf("默认比例与布局 %v %s", s.prefs.SplitLeftPercent, s.prefs.SplitViewLayout)
+	}
+	s.setMode(modeSemantic)
+	tt.Frame()
+	if s.split() {
+		t.Fatal("应退出双栏")
+	}
+}
+
+func TestComparisonTabs(t *testing.T) {
+	a, b := writeDoc(t, "# 甲文档\n\n甲正文\n"), filepath.Join(t.TempDir(), "b.md")
+	if err := os.WriteFile(b, []byte("# 乙文档\n\n乙正文\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, tt := newTestShell(t, a, b)
+	ta, tb := s.tabs[0], s.tabs[1]
+	s.combine(ta, tb)
+	tt.Frame()
+	// 正文由编辑器自绘（不是可访问文本），以两篇都已排版为准。
+	if s.activeTab() != tb || ta.Ed.CacheBytes() == 0 || tb.Ed.CacheBytes() == 0 {
+		t.Fatal("组合后应并排显示两篇，活动为右侧")
+	}
+	if s.tabLabel(ta) != "doc.md | b.md" || !s.tabHidden(tb) {
+		t.Fatalf("标签栏应画成一个组合标签：%q", s.tabLabel(ta))
+	}
+	snapshot(t, tt, "comparison")
+	s.swapComparison(ta)
+	if l, r, _ := s.comparisonOf(ta); l != tb || r != ta || s.activeTab() != tb {
+		t.Fatal("交换左右后左右与活动文档不对")
+	}
+	// 关闭一篇：组合解散，另一篇恢复为普通标签。
+	s.requestClose([]int{tb.ID}, false)
+	tt.Frame()
+	if ta.partner != 0 || len(s.tabs) != 1 {
+		t.Fatalf("关闭成员后应解散：partner=%d tabs=%d", ta.partner, len(s.tabs))
+	}
+}
+
+func TestInlineMarkdownImages(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a b.png"), []byte("\x89PNG\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := "![甲](<a b.png>) ![乙](a%20b.png \"标题\") ![远程](https://e.com/x.png) <img src=\"a b.png\" width=\"20\">"
+	out := inlineMarkdownImages(src, dir)
+	if strings.Count(out, "data:image/png;base64,") != 3 {
+		t.Fatalf("本地图片应内联 3 处：%s", out)
+	}
+	if !strings.Contains(out, "https://e.com/x.png") || !strings.Contains(out, `"标题"`) || !strings.Contains(out, `width="20"`) {
+		t.Fatalf("远程地址、标题与属性应保留：%s", out)
 	}
 }

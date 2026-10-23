@@ -36,21 +36,26 @@ func runNativeShell(args []string) {
 	targets := collectExternalOpenTargets(slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == nativeFlag }), mustGetwd())
 	var sh *shell.Shell
 	var win *mygo.Window
+	// 第二实例与打开文件事件投递到最近聚焦的外壳窗口（多窗口时第一个窗口可能已关闭）。
 	deliver := func(t externalOpenTargets) {
-		if win == nil {
+		target, w := sh, win
+		if cur := shell.Current(); cur != nil {
+			target, w = cur, cur.Window()
+		}
+		if w == nil {
 			return
 		}
-		win.Update(func() {
-			sh.OpenFiles(append(t.folderPaths, t.markdownPaths...))
-			win.Show()
-			win.Focus()
+		w.Update(func() {
+			target.OpenFiles(append(t.folderPaths, t.markdownPaths...))
+			w.Show()
+			w.Focus()
 		})
 	}
 	mygo.App.OnOpenFile(func(path string) { deliver(externalOpenTargets{markdownPaths: []string{path}}) })
 	mygo.App.OnSecondInstance(func(args []string, workingDir string) {
 		deliver(collectExternalOpenTargets(args, workingDir))
 	})
-	// 关闭最后一个窗口即退出：原生外壳暂不常驻托盘。
+	// 关闭最后一个窗口即退出；“关闭到托盘”时窗口只是隐藏，不触发此事件。
 	mygo.App.OnWindowAllClosed(func() { mygo.App.Quit() })
 	mygo.App.WhenReady(func() {
 		system := ""
@@ -60,7 +65,8 @@ func runNativeShell(args []string) {
 		sh = shell.New(shell.Options{Config: app.config, Locale: effectiveLocale(), SystemLocale: system, Version: appVersion(),
 			Files: targets.markdownPaths, Folders: targets.folderPaths, IconLight: appIconLight, IconDark: appIconDark,
 			ExportPDF: exportNativePDF, CheckUpdate: checkNativeUpdate,
-			LoadEmoji: func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appIdentifier, retry) }})
+			LoadEmoji:   func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appIdentifier, retry) },
+			InstallTray: installNativeTray})
 		win = sh.Open()
 		applyAppIcon(win)
 		applog.Info("Native", "原生外壳已启动")
@@ -116,4 +122,30 @@ func checkNativeUpdate() (shell.UpdateInfo, error) {
 		info.Version = *p.Version
 	}
 	return info, nil
+}
+
+// installNativeTray 为原生外壳创建托盘：单击恢复主窗口（Linux 只能显示菜单），菜单为“打开 Nomo / 退出”，
+// 图标与文案沿用 WebView 版托盘（tray.go）。
+func installNativeTray(show, quit func()) bool {
+	tray, err := mygo.NewTray(mygo.TrayOptions{ID: "nomo-native-tray", Icon: trayIcon(), ToolTip: "Nomo"})
+	if err != nil {
+		applog.Warn("Tray", "创建托盘图标失败："+err.Error())
+		return false
+	}
+	menu := mygo.NewMenu([]*mygo.MenuItem{
+		{ID: trayOpenID, Label: tr("tray_open"), Click: func(*mygo.MenuItem, *mygo.Window) { show() }},
+		mygo.Separator(),
+		{ID: trayExitID, Label: tr("tray_exit"), Click: func(*mygo.MenuItem, *mygo.Window) { quit() }},
+	})
+	if runtime.GOOS == "linux" {
+		tray.SetMenu(menu)
+	} else {
+		tray.OnClick(show)
+		tray.OnRightClick(func() {
+			tray.SetMenu(menu)
+			tray.PopUpMenu()
+			tray.SetMenu(nil)
+		})
+	}
+	return true
 }

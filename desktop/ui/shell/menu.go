@@ -43,6 +43,7 @@ func (s *Shell) menuGroups() []menuGroup {
 			{id: "saveAs", label: "saveAs", mods: cmd | shift, key: ui.KeyS, run: func(s *Shell) { s.save(s.activeTab(), true, nil) }},
 			custom(command{id: "exportHtml", label: "exportHtml", sep: true, run: (*Shell).exportHTML}, "export-html"),
 			custom(command{id: "exportPdf", label: "exportPdf", run: (*Shell).exportPDF}, "export-pdf"),
+			{id: "exportWord", label: "exportWord", run: (*Shell).exportWord},
 			{id: "close", label: "closeCurrentFile", mods: cmd, key: ui.KeyW, sep: true, run: func(s *Shell) {
 				if t := s.activeTab(); t != nil {
 					s.requestClose([]int{t.ID}, false)
@@ -84,6 +85,7 @@ func (s *Shell) menuGroups() []menuGroup {
 			{id: "outline", label: "showOutline", run: (*Shell).toggleOutline},
 			custom(command{id: "toolbar", label: "showToolbar", run: (*Shell).toggleToolbar}, "toggle-toolbar"),
 			custom(command{id: "focus", label: "enterFocusMode", run: (*Shell).toggleFocus}, "toggle-focus"),
+			custom(command{id: "mini", label: "markdownMiniShortcut", run: (*Shell).toggleMini}, "toggle-markdown-mini"),
 			{id: "zoomIn", label: "increaseZoom", mods: cmd, key: ui.KeyEqual, sep: true, run: func(s *Shell) { s.zoom(10) }},
 			{id: "zoomOut", label: "decreaseZoom", mods: cmd, key: ui.KeyMinus, run: func(s *Shell) { s.zoom(-10) }},
 			custom(command{id: "theme", label: "switchTheme", sep: true, run: func(s *Shell) { s.toggleTheme(s.prefs.ThemeMode == "dark") }}, "toggle-theme"),
@@ -233,8 +235,10 @@ func (s *Shell) installMenu() {
 	// 应用菜单按 macOS 惯例自行组织：关于、设置…（⌘,）、服务、隐藏、退出。
 	app := &mygo.MenuItem{Label: "Nomo", Submenu: []*mygo.MenuItem{
 		{Role: mygo.RoleAbout}, mygo.Separator(),
-		{Label: s.tr("settings") + "…", Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
-			s.win.Update(s.openSettings)
+		{Label: s.tr("settings") + "…", Accelerator: "CmdOrCtrl+,", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+			if t := shellForWindow(w); t != nil {
+				t.win.Update(t.openSettings)
+			}
 		}},
 		mygo.Separator(), {Role: mygo.RoleServices}, mygo.Separator(),
 		{Role: mygo.RoleHide}, {Role: mygo.RoleHideOthers}, {Role: mygo.RoleUnhide}, mygo.Separator(), {Role: mygo.RoleQuit},
@@ -269,14 +273,19 @@ func (s *Shell) installMenu() {
 
 func (s *Shell) nativeItem(it command) *mygo.MenuItem {
 	return &mygo.MenuItem{Label: s.itemLabel(it), Accelerator: accelerator(it.mods, it.key), Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+		// 系统菜单只有一份：命令发给菜单事件所在窗口的外壳（多窗口时为当前聚焦的窗口）。
+		t := shellForWindow(w)
+		if t == nil {
+			return
+		}
 		// 设置窗口在前时，⌘W 关闭设置窗口，其余文档命令不作用于它。
-		if s.settings != nil && w == s.settings.win {
+		if t.settings != nil && w == t.settings.win {
 			if it.id == "close" {
 				w.Close()
 			}
 			return
 		}
-		s.win.Update(func() { s.runCommand(it) })
+		t.win.Update(func() { t.runCommand(it) })
 	}}
 }
 

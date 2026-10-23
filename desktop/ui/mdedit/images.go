@@ -77,9 +77,25 @@ type RenderRequest struct {
 	FontSize  float32
 }
 
-// RenderFunc 把请求渲染为位图，返回位图、显示尺寸（CSS 像素，按 DIP 显示）与基线以下的深度（行内公式用于
-// 与正文基线对齐，其余为 0）。在后台 worker 中调用，可能耗时数百毫秒；渲染失败（如 Mermaid 语法错误）返回 error。
-type RenderFunc func(req RenderRequest) (img image.Image, w, h, depth float32, err error)
+// RenderResult 是一个渲染请求的结果：Img 与显示尺寸 W、H（CSS 像素，按 DIP 显示），Depth 为基线以下的深度
+// （行内公式用于与正文基线对齐，其余为 0）；Err 为渲染失败（如 Mermaid 语法错误）；Skipped 表示本批未处理
+// （如超出离屏视口），稍后重新排队。
+type RenderResult struct {
+	Img         image.Image
+	W, H, Depth float32
+	Err         error
+	Skipped     bool
+}
+
+// RenderFunc 批量渲染请求，结果与 reqs 一一对应。在后台 worker 中调用，可能耗时数百毫秒；批量是为了让多个
+// 公式共用一次截图。
+type RenderFunc func(reqs []RenderRequest) []RenderResult
+
+// renderBatch 是一次交给 RenderFunc 的请求数上限：一屏公式通常不超过此数。
+const renderBatch = 16
+
+// renderCoalesce 是取批前的等待：一帧内为可见公式排入的请求在此期间到齐，合为一批（经验值，远小于单次渲染耗时）。
+const renderCoalesce = 8 * time.Millisecond
 
 // SetRenderer 设置公式与图表的渲染函数；在 UI 线程调用。
 func (im *Images) SetRenderer(f RenderFunc) { im.render = f }
@@ -287,16 +303,29 @@ func (im *Images) work(q *imageQueue) {
 			im.mu.Unlock()
 			return
 		}
+		if q.items[0].req != nil {
+			// 渲染队列：先等 renderCoalesce 收集同一帧排入的请求，再一次取出至多 renderBatch 个批量渲染。
+			if len(q.items) < renderBatch {
+				im.mu.Unlock()
+				time.Sleep(renderCoalesce)
+				im.mu.Lock()
+				if len(q.items) == 0 || im.closed {
+					im.mu.Unlock() // 回到循环开头重新加锁判断退出
+					continue
+				}
+			}
+			n := min(len(q.items), renderBatch)
+			batch := append([]*imageEntry(nil), q.items[:n]...)
+			q.items = q.items[n:]
+			im.mu.Unlock()
+			im.renderEntries(q, batch)
+			continue
+		}
 		en := q.items[0]
 		q.items = q.items[1:]
 		im.mu.Unlock()
 
-		var res imageResult
-		if en.req != nil {
-			res = im.renderEntry(*en.req)
-		} else {
-			res = im.load(en.src)
-		}
+		res := im.load(en.src)
 		im.post(func() { im.finish(en, res) })
 	}
 }
@@ -314,17 +343,49 @@ type imageResult struct {
 	err     error
 }
 
-// renderEntry 调用渲染函数并把结果转为位图（在 worker 中运行）。
-func (im *Images) renderEntry(req RenderRequest) imageResult {
-	img, w, h, depth, err := im.render(req)
-	if err != nil {
-		return imageResult{err: err}
+// renderEntries 批量渲染并把结果转为位图（在 worker 中运行）；未处理的请求放回队首。
+func (im *Images) renderEntries(q *imageQueue, batch []*imageEntry) {
+	reqs := make([]RenderRequest, len(batch))
+	for k, en := range batch {
+		reqs[k] = *en.req
 	}
-	if img == nil || w <= 0 || h <= 0 {
-		return imageResult{err: errors.New("empty render")}
+	results := im.render(reqs)
+	var skipped []*imageEntry
+	for k, en := range batch {
+		var r RenderResult
+		if k < len(results) {
+			r = results[k]
+		} else {
+			r.Err = errors.New("missing render result")
+		}
+		if r.Skipped {
+			skipped = append(skipped, en)
+			continue
+		}
+		var res imageResult
+		switch {
+		case r.Err != nil:
+			res.err = r.Err
+		case r.Img == nil || r.W <= 0 || r.H <= 0:
+			res.err = errors.New("empty render")
+		default:
+			b := r.Img.Bounds()
+			res = imageResult{bmp: ui.NewBitmap(r.Img), w: r.W, h: r.H, depth: r.Depth, bytes: b.Dx() * b.Dy() * 4 * 4 / 3}
+		}
+		im.post(func() { im.finish(en, res) })
 	}
-	b := img.Bounds()
-	return imageResult{bmp: ui.NewBitmap(img), w: w, h: h, depth: depth, bytes: b.Dx() * b.Dy() * 4 * 4 / 3}
+	if len(skipped) > 0 {
+		if len(skipped) == len(batch) {
+			// 一个都没渲染（如单个超大图表）：逐个失败，避免无限重排。
+			for _, en := range skipped {
+				im.post(func() { im.finish(en, imageResult{err: errors.New("render skipped")}) })
+			}
+			return
+		}
+		im.mu.Lock()
+		q.items = append(skipped, q.items...)
+		im.mu.Unlock()
+	}
 }
 
 // finish 在 UI 线程写入加载结果；缓存项已被替换或缓存已关闭时丢弃。

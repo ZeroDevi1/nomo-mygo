@@ -24,6 +24,8 @@ const names = [
   'rotate-ccw', 'download',
   // 表情（原版 EditorToolbar 的 Smile 按钮）
   'smile',
+  // Markdown 小窗（原版 AppTitleBar）
+  'pin', 'pin-off', 'maximize-2',
 ];
 
 // 读取图标源：v1 中部分旧名（如 file-json-2）只剩 .js 别名，指向改名后的 .svelte。

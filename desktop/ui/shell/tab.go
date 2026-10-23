@@ -29,6 +29,16 @@ type Tab struct {
 	eol      string
 	mixedRaw string
 
+	// 组合标签（compare.go）：partner 为对照的另一篇的 ID（0 表示不在组合中），left 表示位于左侧；左侧成员的
+	// comparePct 为左栏宽度百分比（20–80）。
+	partner    int
+	left       bool
+	comparePct float32
+
+	// plain 为 true 表示 TXT/JSON 标签：源码编辑器的 rope 缓冲是唯一事实源，不建 Markdown 文档（Doc 为空文档，
+	// 只为满足共用代码路径）；未保存判定、保存与外部重载都走缓冲。大文件因此只占一份原文、打开不做 Markdown 解析。
+	plain bool
+
 	Doc *mdedit.Document
 	Ed  *mdedit.Editor
 
@@ -55,10 +65,15 @@ type Tab struct {
 }
 
 func newTab(id int, path, text string, enc docfs.Encoding) *Tab {
-	t := &Tab{ID: id, Path: path, Encoding: enc}
+	t := &Tab{ID: id, Path: path, Encoding: enc, plain: documentKind(path) != kindMarkdown}
 	text = t.adoptLineEndings(text)
-	doc := mdedit.NewDocument(text)
-	t.Doc, t.Ed = doc, mdedit.NewEditor(doc)
+	if t.plain {
+		t.Doc = mdedit.NewDocument("")
+		t.source = t.newSource(text)
+	} else {
+		t.Doc = mdedit.NewDocument(text)
+	}
+	t.Ed = mdedit.NewEditor(t.Doc)
 	t.markSaved(text)
 	if path != "" {
 		t.diskModified = docfs.ModifiedAt(path)
@@ -93,7 +108,7 @@ func (t *Tab) adoptLineEndings(raw string) string {
 
 // diskText 返回要写入磁盘的文本：LF 换回文件原有的换行风格；混用换行且内容未改时返回原文。
 func (t *Tab) diskText(text string) string {
-	if t.mixedRaw != "" && text == t.savedText {
+	if t.mixedRaw != "" && !t.Dirty() {
 		return t.mixedRaw
 	}
 	if t.eol == "\n" || t.eol == "" {
@@ -103,6 +118,10 @@ func (t *Tab) diskText(text string) string {
 }
 
 func (t *Tab) markSaved(text string) {
+	if t.plain {
+		t.source.Buffer.MarkSaved()
+		return
+	}
 	t.savedVersion, t.savedText = t.Doc.Version(), text
 	t.dirtyVer, t.dirty = t.Doc.Version(), false
 }
@@ -139,6 +158,9 @@ func (t *Tab) Name(untitled func(n int) string) string {
 // Dirty 报告是否有未保存修改。版本变化后比较一次原文（撤销回保存时的内容不算修改），
 // 结果按版本缓存，不会每帧比较全文。
 func (t *Tab) Dirty() bool {
+	if t.plain {
+		return t.source.Buffer.Modified()
+	}
 	if v := t.Doc.Version(); v != t.dirtyVer {
 		t.dirtyVer = v
 		t.dirty = v != t.savedVersion && t.Doc.Source() != t.savedText
@@ -148,6 +170,17 @@ func (t *Tab) Dirty() bool {
 
 // Stats 返回按版本缓存的写作统计。
 func (t *Tab) Stats() mdedit.Stats {
+	if t.plain {
+		// 大文本只报行数：全文统计每次编辑都是 O(n)。
+		if v := t.source.Buffer.Version(); v != t.statsVer || t.statsVer == 0 {
+			if t.source.Buffer.Len() > plainStatsLimit {
+				t.statsVer, t.stats = v, mdedit.Stats{Lines: t.source.Buffer.LineCount()}
+			} else {
+				t.statsVer, t.stats = v, mdedit.TextStats(t.source.Buffer.String())
+			}
+		}
+		return t.stats
+	}
 	if v := t.Doc.Version(); v != t.statsVer || t.statsVer == 0 {
 		t.statsVer, t.stats = v, t.Doc.Stats()
 	}
@@ -156,6 +189,9 @@ func (t *Tab) Stats() mdedit.Stats {
 
 // Outline 返回按版本缓存的大纲。
 func (t *Tab) Outline() []mdedit.Heading {
+	if t.plain {
+		return nil
+	}
 	if v := t.Doc.Version(); v != t.outVer || t.outline == nil {
 		t.outVer, t.outline = v, t.Doc.Headings()
 	}
@@ -165,23 +201,50 @@ func (t *Tab) Outline() []mdedit.Heading {
 // Source 返回源码模式的编辑器状态，首次使用时创建。
 func (t *Tab) Source() *editor.State {
 	if t.source == nil {
-		buf := editor.NewBuffer(t.Doc.Source())
-		label, lang, numbers := "Markdown", "document.md", editor.LineNumbersOff
-		switch t.Kind() {
-		case kindJSON:
-			label, lang, numbers = "JSON", "document.json", editor.LineNumbersOn
-		case kindText:
-			label, lang = "Text", "document.txt"
-		}
-		buf.SetLanguage(editor.LanguageFor(lang))
-		t.source = &editor.State{Buffer: buf, SoftWrap: true, LineNumbers: numbers, Label: label}
-		t.srcVer, t.docVer = buf.Version(), t.Doc.Version()
+		t.source = t.newSource(t.Doc.Source())
+		t.srcVer, t.docVer = t.source.Buffer.Version(), t.Doc.Version()
 	}
 	return t.source
 }
 
+// plainStatsLimit 是 TXT/JSON 标签做完整写作统计的字节上限，更大的只统计行数。
+const plainStatsLimit = 2 << 20
+
+// text 返回标签当前的原文（TXT/JSON 为缓冲内容）。
+func (t *Tab) text() string {
+	if t.plain {
+		return t.source.Buffer.String()
+	}
+	return t.Doc.Source()
+}
+
+// version 返回原文版本（TXT/JSON 为缓冲版本），用于保存与自动保存判断修改。
+func (t *Tab) version() uint64 {
+	if t.plain {
+		return t.source.Buffer.Version()
+	}
+	return t.Doc.Version()
+}
+
+// newSource 按文档类型创建源码编辑器状态。
+func (t *Tab) newSource(text string) *editor.State {
+	buf := editor.NewBuffer(text)
+	label, lang, numbers := "Markdown", "document.md", editor.LineNumbersOff
+	switch t.Kind() {
+	case kindJSON:
+		label, lang, numbers = "JSON", "document.json", editor.LineNumbersOn
+	case kindText:
+		label, lang = "Text", "document.txt"
+	}
+	buf.SetLanguage(editor.LanguageFor(lang))
+	return &editor.State{Buffer: buf, SoftWrap: true, LineNumbers: numbers, Label: label}
+}
+
 // syncToSource 在进入源码模式前，把语义编辑期间的改动按差异带到源码缓冲区。
 func (t *Tab) syncToSource() {
+	if t.plain {
+		return
+	}
 	st := t.Source()
 	if t.Doc.Version() == t.docVer {
 		return
@@ -197,7 +260,7 @@ func (t *Tab) syncToSource() {
 
 // syncFromSource 把源码缓冲区的改动写回 Doc；缓冲区未变时不做任何事（每帧调用）。
 func (t *Tab) syncFromSource() {
-	if t.source == nil || t.source.Buffer.Version() == t.srcVer {
+	if t.plain || t.source == nil || t.source.Buffer.Version() == t.srcVer {
 		return
 	}
 	t.Ed.SetSource(t.source.Buffer.String())

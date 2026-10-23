@@ -48,8 +48,10 @@ type Stats struct {
 }
 
 // Stats 统计原文（O(n)）；调用方按 Version 缓存，不要每帧调用。
-func (d *Document) Stats() Stats {
-	src := d.Source()
+func (d *Document) Stats() Stats { return TextStats(d.Source()) }
+
+// TextStats 按与 Document.Stats 相同的规则统计任意文本（TXT/JSON 标签用）。
+func TextStats(src string) Stats {
 	s := Stats{Lines: 1}
 	inWord := false
 	for i := 0; i < len(src); {
@@ -516,3 +518,84 @@ func (e *Editor) CaretContext(limit int) (before string, literal, ok bool) {
 	}
 	return before, false, true
 }
+
+// LiteralAt 报告原文偏移 pos 是否位于不应自动补全的字面内容中：代码块、公式块、HTML 块、front matter、
+// 目录区，或行内代码、公式、链接、图片、行内 HTML 之内（源码模式的表情建议用，对应原版 SourceEmojiContext）。
+// 只读取块索引与解析结果，不需要视图。
+func (d *Document) LiteralAt(pos int) bool {
+	i, _ := d.BlockAt(pos)
+	if i < 0 {
+		return false
+	}
+	top := d.blocks[i]
+	switch top.Kind {
+	case KindFrontMatter, KindToc, parser.CodeBlock, parser.HTMLBlock, parser.MathBlock:
+		return true
+	}
+	// 自顶层块向下找包含 pos 的最深的块，按其类型与行内节点判断。
+	b := top.Index
+	for {
+		next := -1
+		for c := range d.md.Children(b) {
+			cb := d.md.Block(c)
+			if cb.Start <= pos && pos <= cb.End {
+				next = c
+				break
+			}
+		}
+		if next < 0 {
+			break
+		}
+		b = next
+	}
+	switch d.md.Block(b).Kind {
+	case parser.CodeBlock, parser.HTMLBlock, parser.MathBlock:
+		return true
+	}
+	for _, in := range d.md.Inlines(b) {
+		switch in.Kind {
+		case parser.Code, parser.Math, parser.Link, parser.Image, parser.HTML:
+			if in.Start < pos && pos < in.End {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TopSourceOffset 返回视口顶部那一行的原文起点（双栏模式同步滚动用）；文档为空时返回 0。
+func (e *Editor) TopSourceOffset() int {
+	e.sync()
+	for _, v := range e.vsegs {
+		r := &e.entries[v.i].rows[v.k]
+		if v.y+r.bandH > 0 {
+			return e.Doc.blocks[v.i].Start + r.a
+		}
+	}
+	return 0
+}
+
+// ScrollToSource 滚动视图，使包含原文偏移 off 的行位于视口顶部；不移动光标（双栏模式同步滚动用）。
+func (e *Editor) ScrollToSource(off int) {
+	if len(e.entries) == 0 {
+		return
+	}
+	i, after := e.Doc.BlockAt(off)
+	if i < 0 {
+		i = clamp(after+1, 0, len(e.entries)-1)
+	}
+	en := e.ensure(i)
+	y := float32(0)
+	rel := off - e.Doc.blocks[i].Start
+	for k := range en.rows {
+		if en.rows[k].a <= rel {
+			y = en.rows[k].y
+		}
+	}
+	e.anchor, e.anchorOff = i, y
+	e.normalize()
+	e.dirty = true
+}
+
+// Focused 报告编辑区是否持有键盘焦点（上一帧的状态）。
+func (e *Editor) Focused() bool { return e.focused }

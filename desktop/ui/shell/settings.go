@@ -132,7 +132,7 @@ func (sw *settingsWindow) flush() {
 }
 
 func (sw *settingsWindow) page(c *ui.Context) {
-	s, p := sw.s, &sw.s.prefs
+	s, p := sw.s, sw.s.prefs
 	switch sw.cat {
 	case "general":
 		sw.section(c, "basicBehavior", func() {

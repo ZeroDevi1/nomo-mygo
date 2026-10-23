@@ -3,9 +3,11 @@ package shell
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/emoji"
 	"nomo/desktop/internal/i18n"
@@ -423,4 +425,36 @@ func (s *Shell) emojiPicker(c *ui.Context, root ui.Rect) {
 			s.closeEmojiPicker(false)
 		}
 	})
+}
+
+// sourceEmojiCompletion 是源码模式的表情建议（原版 sourceSuggestions）：编辑器在键入时请求补全，这里识别光标前的
+// 冒号查询，用 ShowCompletions 从冒号处给出至多 8 个候选，确认后整段替换为表情。代码与公式等字面内容中不给出；
+// 判断用上一帧同步的 Document（键入只改变光标处，之前的偏移不变）。
+func (s *Shell) sourceEmojiCompletion(t *Tab, req editor.CompletionRequest) {
+	st := t.source
+	if st == nil || s.loadEmoji == nil || t.Kind() != kindMarkdown {
+		return
+	}
+	text := st.Buffer.String()
+	end := clampInt(req.Offset, 0, len(text))
+	from := max(0, end-192)
+	if nl := strings.LastIndexByte(text[from:end], '\n'); nl >= 0 {
+		from += nl + 1
+	}
+	before := text[from:end]
+	q, ok := emoji.FindQuery(before, end)
+	if !ok || unsafeTail.MatchString(before) || t.Doc.LiteralAt(q.From) {
+		st.ShowCompletions(-1, nil)
+		return
+	}
+	s.ensureEmoji(false)
+	if s.emo.status != emojiReady {
+		return
+	}
+	var items []editor.Completion
+	for _, e := range emoji.Search(s.emo.cat, q.Text, -1, emojiSuggestLimit) {
+		items = append(items, editor.Completion{Label: e.Unicode + "  " + e.Label(s.chinese()), Detail: ":" + e.Shortcodes[0] + ":",
+			Insert: e.Unicode, FilterText: before[q.From-from:]})
+	}
+	st.ShowCompletions(q.From, items)
 }

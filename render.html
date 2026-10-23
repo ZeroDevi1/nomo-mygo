@@ -14,11 +14,15 @@
         position: absolute;
         left: 0;
         top: 0;
-        display: inline-block;
+      }
+      /* 每个渲染项按内容收缩、纵向排布（间距 4px），位置由 render-entry.ts 逐项测量。 */
+      .nomo-item {
+        width: max-content;
         padding: 2px 3px;
+        margin-bottom: 4px;
         line-height: 1.4;
       }
-      #stage .katex-display {
+      .nomo-item .katex-display {
         margin: 0;
       }
     </style>

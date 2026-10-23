@@ -385,12 +385,17 @@ func TestRenderObjectsMathAndMermaid(t *testing.T) {
 	defer im.Close()
 	var reqs []RenderRequest
 	var mu sync.Mutex
-	im.SetRenderer(func(req RenderRequest) (image.Image, float32, float32, float32, error) {
+	batches := 0
+	im.SetRenderer(func(batch []RenderRequest) []RenderResult {
 		mu.Lock()
-		reqs = append(reqs, req)
+		reqs = append(reqs, batch...)
+		batches++
 		mu.Unlock()
-		img := image.NewRGBA(image.Rect(0, 0, 80, 40))
-		return img, 40, 20, 5, nil
+		out := make([]RenderResult, len(batch))
+		for k := range batch {
+			out[k] = RenderResult{Img: image.NewRGBA(image.Rect(0, 0, 80, 40)), W: 40, H: 20, Depth: 5}
+		}
+		return out
 	})
 	ed.SetImages(im, "")
 	ed.Doc.SetSelection(Selection{0, 0})
@@ -398,6 +403,9 @@ func TestRenderObjectsMathAndMermaid(t *testing.T) {
 	tp.drain(t, 3)
 	tt.Frame()
 	mu.Lock()
+	if batches != 1 {
+		t.Errorf("一屏的 3 个渲染请求应合为 1 批，实际 %d 批", batches)
+	}
 	kinds := map[string]string{}
 	for _, r := range reqs {
 		kinds[r.Kind] = r.Src

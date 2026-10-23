@@ -18,6 +18,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
@@ -32,6 +33,7 @@ import (
 const (
 	modeSemantic = "semantic"
 	modeSource   = "source"
+	modeSplit    = "split" // 双栏：语义与源码同时显示，mode() 返回活动一侧
 )
 
 // Shell 是一个原生文档窗口的全部界面状态。
@@ -45,7 +47,7 @@ type Shell struct {
 	nextID   int
 	untitled int
 
-	prefs    Prefs    // 与设置窗口共享，修改后 Store 写回 config.json
+	prefs    *Prefs   // 与设置窗口及同一进程的其他窗口共享（windows.go），修改后 Store 写回 config.json
 	pf       platform // 当前平台的原生风格
 	ch       chrome   // 本帧外壳配色（随明暗与窗口材质变化）
 	sidebarW float32
@@ -82,13 +84,27 @@ type Shell struct {
 	// post 把后台任务（对话框、文件写入）的结果交回 UI 线程；默认为 win.Update，测试中可替换。
 	post func(func())
 
+	mini miniState // Markdown 小窗（mini.go）
+	opts Options   // 创建参数，“移动到新窗口”用它创建新窗口（windows.go）
+	// 托盘（tray.go）：trayOK 为托盘是否可用；quitting 为正在退出（不再按关闭到托盘拦截）；closeChoice* 为
+	// “关闭 Nomo”选择框的状态。
+	installTray         func(show, quit func()) bool
+	trayOK, quitting    bool
+	closeChoiceOpen     bool
+	closeChoiceRemember bool
 	// rend 是公式与 Mermaid 的离屏渲染服务（见 render.go），窗口打开后接入图片缓存。
 	rend renderService
 	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
 	images *mdedit.Images
 
 	quick quickState // 快捷插入菜单，见 quickinsert.go
-	emo   emojiState // 表情建议与选择器，见 emoji.go
+	// 双栏模式（split.go）：splitActive 为活动一侧（modeSemantic / modeSource，随焦点切换）；splitPct 为左侧
+	// 宽度百分比的界面值，拖动结束后写入 prefs.SplitLeftPercent；splitSync 记录上次同步滚动时两侧的位置。
+	splitActive string
+	splitPct    float32
+	splitSave   *time.Timer
+	splitSync   splitScroll
+	emo         emojiState // 表情建议与选择器，见 emoji.go
 	// editorOrigin 为语义编辑区左上角（窗口坐标），每帧更新；按键回调中定位浮层用。
 	editorOrigin ui.Point
 	// loadEmoji 加载表情目录（主程序提供，可能耗时十余秒，在后台调用）；为空时不提供表情功能。
@@ -117,6 +133,9 @@ type Options struct {
 	ExportPDF func(html, path string, outline []PDFOutlineEntry) error
 	// CheckUpdate 检查新版本（主程序提供，可能耗时数秒，在后台调用）；为空时不显示检查更新。
 	CheckUpdate func() (UpdateInfo, error)
+	// InstallTray 创建托盘图标（主程序提供）：show 恢复窗口，quit 退出；返回托盘是否可用。为空或失败时
+	// “关闭到托盘”不可用，关闭按钮总是关闭窗口。
+	InstallTray func(show, quit func()) bool
 	// LoadEmoji 加载表情目录（主程序提供，读缓存或下载，在后台调用）；retry 为 true 时忽略失败冷却。为空时不提供表情功能。
 	LoadEmoji func(retry bool) ([]emoji.Entry, error)
 	Files     []string // 启动时打开的文档
@@ -132,8 +151,8 @@ type UpdateInfo struct {
 
 // New 读取偏好与最近记录，并打开启动参数中的文档。
 func New(o Options) *Shell {
-	s := &Shell{cfg: o.Config, locale: o.Locale, active: -1, sidebarW: 240,
-		prefs: loadPrefs(o.Config), pf: currentPlatform(), systemLocale: o.SystemLocale, version: o.Version, pdfExporter: o.ExportPDF, checkUpdate: o.CheckUpdate, loadEmoji: o.LoadEmoji}
+	s := &Shell{opts: o, cfg: o.Config, locale: o.Locale, active: -1, sidebarW: 240,
+		prefs: sharedPrefs(o.Config), pf: currentPlatform(), systemLocale: o.SystemLocale, version: o.Version, pdfExporter: o.ExportPDF, checkUpdate: o.CheckUpdate, loadEmoji: o.LoadEmoji, installTray: o.InstallTray}
 	s.loadThemes()
 	s.images = mdedit.NewImages(func(fn func()) {
 		if s.post != nil {
@@ -156,10 +175,21 @@ func New(o Options) *Shell {
 
 // mode 返回当前编辑模式；原版的 split（双栏）在原生外壳实现前按语义模式显示。
 func (s *Shell) mode() string {
-	if t := s.activeTab(); s.prefs.EditorMode == modeSource || t != nil && t.Kind() != kindMarkdown {
+	t := s.activeTab()
+	switch {
+	case s.prefs.EditorMode == modeSource || t != nil && t.Kind() != kindMarkdown:
+		return modeSource
+	case s.prefs.EditorMode == modeSplit && s.splitActive == modeSource:
+		// 双栏时命令、插入与查找作用于活动一侧（原版 getActiveEditorMode）。
 		return modeSource
 	}
 	return modeSemantic
+}
+
+// split 报告当前是否为双栏模式（只对 Markdown 文档生效）。
+func (s *Shell) split() bool {
+	t := s.activeTab()
+	return s.prefs.EditorMode == modeSplit && t != nil && t.Kind() == kindMarkdown && t.partner == 0 // 组合标签不用双栏（原版 splitModeDisabled）
 }
 
 // setPref 修改一项偏好并写盘；同时刷新主窗口（设置窗口的修改需要主窗口重绘）。
@@ -168,6 +198,12 @@ func (s *Shell) setPref(key string) {
 	if key == "themeMode" && s.win != nil {
 		// 只在窗口（即应用主循环）存在时切换：SetSource 需要主线程处理，无窗口时会一直等待。
 		applyAppearance(s.prefs.ThemeMode)
+	}
+	// 偏好由各窗口共享：全部重绘，让其他窗口也立即按新设置显示。
+	for _, other := range registry.shells {
+		if other.win != nil {
+			other.win.Update(func() {})
+		}
 	}
 	if s.win != nil {
 		s.win.Update(func() {})
@@ -190,9 +226,14 @@ func applyAppearance(mode string) {
 // Open 创建并显示外壳窗口。
 func (s *Shell) Open() *mygo.Window {
 	applyAppearance(s.prefs.ThemeMode)
+	first := len(registry.shells) == 0
+	stateKey := "native-main" // 只有第一个窗口记住位置与尺寸，后开的窗口用默认几何
+	if !first {
+		stateKey = ""
+	}
 	s.win = mygo.NewWindow(mygo.WindowOptions{
 		Title: "Nomo", Width: 1180, Height: 760, MinWidth: 920, MinHeight: 640, // 与 WebView 版文档窗口一致
-		StateKey: "native-main", TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
+		StateKey: stateKey, TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
 	})
 	s.post = s.win.Update
 	s.images.SetRenderer(s.rend.render)
@@ -200,12 +241,17 @@ func (s *Shell) Open() *mygo.Window {
 		if s.closingAll && len(s.closing) == 0 {
 			return
 		}
+		if s.handleWindowClose(e) {
+			return
+		}
 		if s.anyDirty() {
 			e.PreventDefault()
 			s.win.Update(func() { s.requestClose(s.tabIDs(), true) })
 		}
 	})
+	register(s)
 	s.win.OnFocus(func() {
+		registry.focused = s
 		s.win.Update(func() {
 			s.checkExternalChanges()
 			s.images.Revalidate()
@@ -213,14 +259,26 @@ func (s *Shell) Open() *mygo.Window {
 	})
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
+		unregister(s)
 		s.images.Close()
 		s.rend.close()
 		if s.settings != nil {
 			s.settings.win.Close()
 		}
 	})
-	s.installMenu()
+	if first {
+		s.installMenu()
+	}
 	s.updateTitle()
+	if s.installTray != nil && !registry.trayInstalled {
+		registry.trayOK = s.installTray(func() {
+			if c := Current(); c != nil {
+				c.win.Update(c.showFromTray)
+			}
+		}, quitAll)
+		registry.trayInstalled = true
+	}
+	s.trayOK = registry.trayOK
 	return s.win
 }
 
@@ -275,7 +333,10 @@ func (s *Shell) activate(i int) {
 	}
 	if prev := s.activeTab(); prev != nil {
 		prev.syncFromSource()
-		prev.Ed.ReleaseLayouts()
+		// 同一组合内切换活动文档时两篇都在显示，不释放布局。
+		if prev.partner != s.tabs[i].ID {
+			prev.Ed.ReleaseLayouts()
+		}
 	}
 	s.active = i
 	if s.mode() == modeSource {
@@ -431,7 +492,7 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 		}()
 		return
 	}
-	text, ver, path, enc := t.Doc.Source(), t.Doc.Version(), t.Path, t.Encoding
+	text, ver, path, enc := t.text(), t.version(), t.Path, t.Encoding
 	disk := t.diskText(text)
 	snapshot := s.prefs.CreateSnapshotBeforeSave
 	t.saving = true
@@ -449,9 +510,10 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 				s.status = s.tr("saveFileFailed") + "：" + err.Error()
 				return
 			}
-			if t.Doc.Version() == ver {
+			switch {
+			case t.version() == ver:
 				t.markSaved(text)
-			} else {
+			case !t.plain:
 				t.savedVersion, t.savedText, t.dirtyVer = ver, text, 0
 			}
 			t.diskModified = docfs.ModifiedAt(path)
@@ -507,11 +569,13 @@ func (s *Shell) resolveClose(choice int) {
 		s.save(s.tabs[i], false, s.continueClose)
 	default:
 		s.closing, s.closingAll = nil, false
+		s.quitting = false // 取消了退出：之后点关闭按钮仍按“关闭窗口行为”处理
 		s.focusEditor = true
 	}
 }
 
 func (s *Shell) removeTab(i int) {
+	s.ungroup(s.tabs[i])
 	s.tabs[i].Ed.ReleaseLayouts()
 	s.tabs = slices.Delete(s.tabs, i, i+1)
 	switch {
@@ -553,9 +617,17 @@ func (s *Shell) checkExternalChanges() {
 	}
 	t.syncFromSource()
 	text := t.adoptLineEndings(doc.Markdown)
-	t.Ed.SetSource(text)
-	if t.source != nil {
-		t.syncToSource()
+	if t.plain {
+		// TXT/JSON：缓冲是事实源，按差异更新（保留撤销历史）。
+		buf := t.source.Buffer
+		old := buf.String()
+		p, sfx := diffBounds(old, text)
+		buf.Edit(editor.Edit{Start: p, End: len(old) - sfx, Text: text[p : len(text)-sfx]})
+	} else {
+		t.Ed.SetSource(text)
+		if t.source != nil {
+			t.syncToSource()
+		}
 	}
 	t.markSaved(text)
 	t.diskModified = mod
@@ -563,13 +635,19 @@ func (s *Shell) checkExternalChanges() {
 
 // setMode 切换语义 / 源码模式；两侧原文先同步再切换。
 func (s *Shell) setMode(mode string) {
-	if mode == s.mode() {
+	if mode == s.prefs.EditorMode {
 		return
 	}
 	if t := s.activeTab(); t != nil {
-		if mode == modeSource {
+		switch mode {
+		case modeSource:
+			t.syncFromSource()
 			t.syncToSource()
-		} else {
+		case modeSplit:
+			t.syncFromSource()
+			t.syncToSource()
+			s.splitActive = modeSemantic
+		default:
 			t.syncFromSource()
 			t.Ed.ReleaseLayouts()
 		}
@@ -601,7 +679,7 @@ func (s *Shell) autoSave(c *ui.Context) {
 		if t.Path == "" || t.saving || !t.Dirty() {
 			continue
 		}
-		if v := t.Doc.Version(); v != t.autoVer {
+		if v := t.version(); v != t.autoVer {
 			t.autoVer, t.autoAt = v, now
 		}
 		if due := t.autoAt.Add(delay); !now.Before(due) {

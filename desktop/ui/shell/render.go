@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,15 +119,26 @@ func (r *renderService) ensureLocked(ctx context.Context) error {
 	return nil
 }
 
-// render 渲染一个请求（mdedit.RenderFunc）。在图片缓存的后台 worker 中调用。
-func (r *renderService) render(req mdedit.RenderRequest) (image.Image, float32, float32, float32, error) {
+// render 批量渲染（mdedit.RenderFunc），在图片缓存的后台 worker 中调用：页面把一批请求纵向排布并逐个测量，
+// 这里把窗口缩到整批的包围尺寸后截图一次，再按各项位置裁剪。
+func (r *renderService) render(reqs []mdedit.RenderRequest) []mdedit.RenderResult {
+	out := make([]mdedit.RenderResult, len(reqs))
+	fail := func(err error) []mdedit.RenderResult {
+		for k := range out {
+			out[k].Err = err
+		}
+		return out
+	}
+	if len(reqs) == 0 {
+		return out
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
 	if err := r.ensureLocked(ctx); err != nil {
 		applog.Warn("Native", "公式/图表渲染窗口不可用："+err.Error())
-		return nil, 0, 0, 0, err
+		return fail(err)
 	}
 	if r.idle != nil {
 		r.idle.Stop()
@@ -137,50 +149,86 @@ func (r *renderService) render(req mdedit.RenderRequest) (image.Image, float32, 
 		r.destroyLocked()
 	})
 	r.themeMu.Lock()
-	th := r.theme[0]
-	if req.Dark {
-		th = r.theme[1]
-	}
+	theme := r.theme
 	r.themeMu.Unlock()
-	arg, _ := json.Marshal(map[string]any{"kind": req.Kind, "src": req.Src, "fg": th.fg, "bg": th.bg,
-		"fontSize": req.FontSize, "mermaidTheme": th.mermaid, "viewport": renderViewport})
-	out, err := r.evalLocked(ctx, "return await window.nomoRender("+string(arg)+")")
+	items := make([]map[string]any, len(reqs))
+	for k, req := range reqs {
+		th := theme[0]
+		if req.Dark {
+			th = theme[1]
+		}
+		items[k] = map[string]any{"kind": req.Kind, "src": req.Src, "fg": th.fg, "bg": th.bg, "fontSize": req.FontSize, "mermaidTheme": th.mermaid}
+	}
+	arg, _ := json.Marshal(items)
+	res, err := r.evalLocked(ctx, fmt.Sprintf("return await window.nomoRenderBatch(%s, %d)", arg, renderViewport))
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return fail(err)
 	}
-	res, _ := out.(map[string]any)
-	num := func(k string) float64 { v, _ := res[k].(float64); return v }
-	if msg, _ := res["error"].(string); msg != "" {
-		return nil, 0, 0, 0, errors.New(msg)
+	batch, _ := res.(map[string]any)
+	dpr, _ := batch["dpr"].(float64)
+	dpr = max(1, dpr)
+	list, _ := batch["items"].([]any)
+	type box struct{ x, y, w, h, depth float64 }
+	boxes := make([]box, len(reqs))
+	var maxX, maxY float64
+	for k := range reqs {
+		it, _ := func() (map[string]any, bool) {
+			if k < len(list) {
+				m, ok := list[k].(map[string]any)
+				return m, ok
+			}
+			return nil, false
+		}()
+		num := func(name string) float64 { v, _ := it[name].(float64); return v }
+		switch {
+		case it == nil:
+			out[k].Err = errors.New("缺少渲染结果")
+		case it["skipped"] == true:
+			out[k].Skipped = true
+		case it["error"] != nil:
+			msg, _ := it["error"].(string)
+			out[k].Err = errors.New(msg)
+		case num("w") <= 0 || num("h") <= 0:
+			out[k].Err = errors.New("渲染结果为空")
+		default:
+			boxes[k] = box{num("x"), num("y"), num("w"), num("h"), num("depth")}
+			maxX, maxY = max(maxX, num("x")+num("w")), max(maxY, num("y")+num("h"))
+		}
 	}
-	w, h, depth, dpr := num("w"), num("h"), num("depth"), max(1, num("dpr"))
-	if w <= 0 || h <= 0 {
-		return nil, 0, 0, 0, errors.New("渲染结果为空")
+	if maxX <= 0 {
+		return out
 	}
-	// 截图取整个可见页面：先把窗口缩到舞台大小，避免每次编解码整块离屏视口（2 倍屏上可达 4800² 像素）。
-	r.win.SetContentSize(int(math.Ceil(w))+2, int(math.Ceil(h))+2)
+	// 截图取整个可见页面：先把窗口缩到整批的包围尺寸，避免编解码整块离屏视口（2 倍屏上可达 4800² 像素）。
+	r.win.SetContentSize(int(math.Ceil(maxX))+2, int(math.Ceil(maxY))+2)
 	// 等页面按新尺寸重绘（隐藏窗口里 rAF 被暂停，用定时器）。
 	if _, err := r.evalLocked(ctx, "await new Promise((r) => setTimeout(r, 50)); return true"); err != nil {
-		return nil, 0, 0, 0, err
+		return fail(err)
 	}
 	shot, err := r.captureLocked(ctx)
-	// 下一次渲染前恢复完整视口，让大图表按完整宽度排版。
+	// 下一批渲染前恢复完整视口，让大图表按完整宽度排版。
 	if r.win != nil {
 		defer r.win.SetContentSize(renderViewport, renderViewport)
 	}
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return fail(err)
 	}
 	full, err := png.Decode(bytes.NewReader(shot))
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return fail(err)
 	}
-	// 截图按设备像素；舞台位于页面左上角，按尺寸 × dpr 裁剪并复制出独立的位图。
+	// 截图按设备像素，各项按 CSS 位置 × dpr 裁剪并复制出独立的位图。
 	b := full.Bounds()
-	crop := image.Rect(b.Min.X, b.Min.Y, b.Min.X+int(math.Ceil(w*dpr)), b.Min.Y+int(math.Ceil(h*dpr))).Intersect(b)
-	img := image.NewRGBA(image.Rect(0, 0, crop.Dx(), crop.Dy()))
-	draw.Draw(img, img.Bounds(), full, crop.Min, draw.Src)
-	return img, float32(w), float32(h), float32(depth), nil
+	for k, bx := range boxes {
+		if out[k].Err != nil || out[k].Skipped || bx.w <= 0 {
+			continue
+		}
+		crop := image.Rect(b.Min.X+int(bx.x*dpr), b.Min.Y+int(bx.y*dpr),
+			b.Min.X+int(math.Ceil((bx.x+bx.w)*dpr)), b.Min.Y+int(math.Ceil((bx.y+bx.h)*dpr))).Intersect(b)
+		img := image.NewRGBA(image.Rect(0, 0, crop.Dx(), crop.Dy()))
+		draw.Draw(img, img.Bounds(), full, crop.Min, draw.Src)
+		out[k] = mdedit.RenderResult{Img: img, W: float32(bx.w), H: float32(bx.h), Depth: float32(bx.depth)}
+	}
+	return out
 }
 
 // evalLocked 执行脚本并等待结果，超时则销毁窗口（下次请求重建）并返回错误：页面卡住时不让串行队列一直等。
@@ -224,4 +272,84 @@ func (r *renderService) captureLocked(ctx context.Context) ([]byte, error) {
 		r.destroyLocked()
 		return nil, errors.New("渲染截图超时")
 	}
+}
+
+// markupItem 是导出用的渲染结果：html 为 KaTeX HTML 或 Mermaid SVG，失败时 err 非空。
+type markupItem struct {
+	html, err string
+}
+
+// markup 为导出渲染公式与图表的标记（不截图），返回各项结果与按需附带的 KaTeX 样式（含内联字体）。在后台调用。
+func (r *renderService) markup(reqs []mdedit.RenderRequest, dark bool) ([]markupItem, string, error) {
+	if len(reqs) == 0 {
+		return nil, "", nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout*3)
+	defer cancel()
+	if err := r.ensureLocked(ctx); err != nil {
+		return nil, "", err
+	}
+	r.themeMu.Lock()
+	th := r.theme[0]
+	if dark {
+		th = r.theme[1]
+	}
+	r.themeMu.Unlock()
+	items := make([]map[string]any, len(reqs))
+	for k, req := range reqs {
+		items[k] = map[string]any{"kind": req.Kind, "src": req.Src, "mermaidTheme": th.mermaid}
+	}
+	arg, _ := json.Marshal(items)
+	res, err := r.evalLocked(ctx, "return await window.nomoRenderMarkup("+string(arg)+")")
+	if err != nil {
+		return nil, "", err
+	}
+	m, _ := res.(map[string]any)
+	css, _ := m["css"].(string)
+	list, _ := m["items"].([]any)
+	out := make([]markupItem, len(reqs))
+	for k := range out {
+		if k >= len(list) {
+			out[k].err = "缺少渲染结果"
+			continue
+		}
+		it, _ := list[k].(map[string]any)
+		out[k].html, _ = it["html"].(string)
+		out[k].err, _ = it["error"].(string)
+	}
+	return out, css, nil
+}
+
+// word 在离屏页面中生成 .docx（复用原版 Word 导出），返回文件字节与降级说明。在后台调用，大文档可能耗时数十秒。
+func (r *renderService) word(markdown, title string) ([]byte, []string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := r.ensureLocked(ctx); err != nil {
+		return nil, nil, err
+	}
+	md, _ := json.Marshal(markdown)
+	tt, _ := json.Marshal(title)
+	res, err := r.evalLocked(ctx, "return await window.nomoExportWord("+string(md)+", "+string(tt)+")")
+	if err != nil {
+		return nil, nil, err
+	}
+	m, _ := res.(map[string]any)
+	data, _ := m["data"].(string)
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(raw) == 0 {
+		return nil, nil, errors.New("Word 导出结果为空")
+	}
+	var warnings []string
+	if list, ok := m["warnings"].([]any); ok {
+		for _, w := range list {
+			if s, ok := w.(string); ok {
+				warnings = append(warnings, s)
+			}
+		}
+	}
+	return raw, warnings, nil
 }

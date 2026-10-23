@@ -21,6 +21,8 @@ type Prefs struct {
 	ThemeMode                   string  `json:"themeMode"`
 	InterfaceLanguage           string  `json:"interfaceLanguage"`
 	EditorMode                  string  `json:"editorMode"`
+	SplitViewLayout             string  `json:"splitViewLayout"`  // 双栏左右：semantic-source（语义在左）或 source-semantic
+	SplitLeftPercent            float64 `json:"splitLeftPercent"` // 双栏左侧宽度百分比，25–75
 	AutoSaveEnabled             bool    `json:"autoSaveEnabled"`
 	AutoSaveDelayMs             float64 `json:"autoSaveDelayMs"`
 	CreateSnapshotBeforeSave    bool    `json:"createSnapshotBeforeSave"`
@@ -89,6 +91,7 @@ var defaultShortcuts = map[string]string{
 func defaultPrefs() Prefs {
 	return Prefs{
 		ThemeMode: "system", InterfaceLanguage: "system", EditorMode: modeSemantic,
+		SplitViewLayout: "semantic-source", SplitLeftPercent: 50,
 		AutoSaveDelayMs: 1000, CreateSnapshotBeforeSave: true, FontSize: 16, LineHeight: 1.75,
 		TypographyEnabled: true, ContentWidthPercent: 60, LargeDocumentLimit: 500_000, DocumentStyleID: "nomo-modern",
 		OpenDefaultBehavior: "ask-every-time", FilePreviewEnabled: true, CloseWindowBehavior: "ask-every-time",
@@ -107,6 +110,7 @@ func defaultPrefs() Prefs {
 func (p *Prefs) fields() map[string]any {
 	return map[string]any{
 		"themeMode": &p.ThemeMode, "interfaceLanguage": &p.InterfaceLanguage, "editorMode": &p.EditorMode,
+		"splitViewLayout": &p.SplitViewLayout, "splitLeftPercent": &p.SplitLeftPercent,
 		"autoSaveEnabled": &p.AutoSaveEnabled, "autoSaveDelayMs": &p.AutoSaveDelayMs,
 		"createSnapshotBeforeSave": &p.CreateSnapshotBeforeSave, "fontSize": &p.FontSize, "lineHeight": &p.LineHeight,
 		"typographyEnabled": &p.TypographyEnabled, "contentWidthPercent": &p.ContentWidthPercent,
@@ -155,8 +159,9 @@ func (p *Prefs) normalize() {
 	}
 	oneOf(&p.ThemeMode, d.ThemeMode, "system", "light", "dark")
 	oneOf(&p.InterfaceLanguage, d.InterfaceLanguage, "system", "zh-CN", "zh-TW", "en-US", "ja-JP")
-	// 原版还有 split（双栏），原生外壳暂未实现，读到时按语义模式显示但不改写设置。
-	oneOf(&p.EditorMode, d.EditorMode, modeSemantic, modeSource, "split")
+	oneOf(&p.EditorMode, d.EditorMode, modeSemantic, modeSource, modeSplit)
+	oneOf(&p.SplitViewLayout, d.SplitViewLayout, "semantic-source", "source-semantic")
+	clampF(&p.SplitLeftPercent, 25, 75, d.SplitLeftPercent)
 	clampF(&p.AutoSaveDelayMs, 500, 5000, d.AutoSaveDelayMs)
 	clampF(&p.FontSize, 14, 22, d.FontSize)
 	clampF(&p.LineHeight, 1.4, 2.1, d.LineHeight)

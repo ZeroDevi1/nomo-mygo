@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/config"
 	"nomo/desktop/internal/emoji"
@@ -137,5 +138,30 @@ func TestEmojiPickerSearchAndInsert(t *testing.T) {
 	tt.Frame()
 	if s.emo.picker || tab.Doc.Source() != "你好🐱" {
 		t.Fatalf("Esc 后 picker=%v %q", s.emo.picker, tab.Doc.Source())
+	}
+}
+
+func TestSourceModeEmojiCompletion(t *testing.T) {
+	s, tt, settle := newEmojiShell(t, "段落 `x` ")
+	s.setMode(modeSource)
+	tt.Frame()
+	tab := s.activeTab()
+	st := tab.Source()
+	if st.OnCompletion == nil {
+		t.Fatal("源码模式应接入补全")
+	}
+	s.ensureEmoji(false)
+	settle()
+	n := len(st.Buffer.String())
+	st.Buffer.Edit(editorEdit(n, ":smi"))
+	tt.Frame()
+	s.sourceEmojiCompletion(tab, editor.CompletionRequest{Offset: n + 4})
+	tt.Frame()
+	if !tt.HasText(":smile:") {
+		t.Fatal("源码模式应给出表情候选")
+	}
+	// 行内代码中不给出。
+	if !tab.Doc.LiteralAt(strings.Index(tab.Doc.Source(), "x")) {
+		t.Fatal("行内代码应判为字面内容")
 	}
 }
