@@ -25,6 +25,7 @@ const (
 	stMark      // <mark>
 	stComment   // HTML 注释
 	stFootRef   // 脚注引用：显示为标签（原版 sup.footnote-ref 显示 id）
+	stSmall     // <sup>、<sub>：按正文 75% 字号显示（同脚注标签）；MyGo 的排版片段没有基线偏移，不做上下错位
 )
 
 // run 是一段可见原文。src 偏移相对所在行（片段）的起点，块整体平移时投影仍然有效。
@@ -263,7 +264,7 @@ func (pb *projBuilder) inside(a, z int) bool {
 var htmlStyles = map[string]style{
 	"strong": stBold, "b": stBold, "em": stItalic, "i": stItalic,
 	"u": stUnderline, "ins": stUnderline, "s": stStrike, "del": stStrike, "strike": stStrike,
-	"mark": stMark, "code": stCode, "span": 0, "sup": 0, "sub": 0, "kbd": stCode, "a": stLink,
+	"mark": stMark, "code": stCode, "span": 0, "sup": stSmall, "sub": stSmall, "kbd": stCode, "a": stLink,
 }
 
 // htmlTag 解析单个 HTML 标签，返回小写标签名与是否为结束、自闭合标签。

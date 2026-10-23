@@ -741,6 +741,9 @@ func (e *Editor) spans(p *projection, sizes [][2]float32) []ui.Span {
 			sp.Background = e.pal.mark
 			sp.Radius = 2
 		}
+		if r.st&stSmall != 0 {
+			sp.Size = bodySize * e.scale * 0.75
+		}
 		if r.st&stFootRef != 0 {
 			sp.Size = bodySize * e.scale * 0.75
 			sp.Color, sp.Background, sp.Radius = e.pal.link, e.pal.codeBg, 3

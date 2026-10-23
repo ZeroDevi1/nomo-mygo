@@ -99,6 +99,20 @@ func (e *Editor) insertDiagram() {
 	e.insertBlock("```mermaid\n" + code + "\n```")
 }
 
+// InsertMermaid 插入 Mermaid 图表：code 为空时插入空白图表并把光标放进代码块（原版 insertMermaidBlock 进入编辑），
+// 否则插入该模板（原版 insertDiagramBlock）。
+func (e *Editor) InsertMermaid(code string) {
+	if code != "" {
+		e.insertBlock("```mermaid\n" + code + "\n```")
+		e.dirty = true
+		return
+	}
+	e.insertBlock("```mermaid\n\n```")
+	p := e.Doc.Sel.Head - len("\n```")
+	e.Doc.Sel = Selection{Anchor: p, Head: p}
+	e.dirty = true
+}
+
 // insertCommentBlock 插入注释块（原版 insertCommentBlock），光标置于注释内。
 func (e *Editor) insertCommentBlock() {
 	e.insertBlock("<!--  -->")

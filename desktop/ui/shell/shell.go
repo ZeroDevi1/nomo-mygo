@@ -105,6 +105,7 @@ type Shell struct {
 	splitSave   *time.Timer
 	splitSync   splitScroll
 	emo         emojiState // 表情建议与选择器，见 emoji.go
+	tbar        toolbarState // 工具栏的表格尺寸与内容宽度弹层，见 toolbar.go
 	// editorOrigin 为语义编辑区左上角（窗口坐标），每帧更新；按键回调中定位浮层用。
 	editorOrigin ui.Point
 	// loadEmoji 加载表情目录（主程序提供，可能耗时十余秒，在后台调用）；为空时不提供表情功能。
@@ -175,7 +176,7 @@ func New(o Options) *Shell {
 	if len(o.Folders) > 0 {
 		s.openFolder(o.Folders[0])
 	}
-	s.OpenFiles(o.Files)
+	s.OpenExternal(o.Files)
 	return s
 }
 
@@ -369,6 +370,21 @@ func (s *Shell) addTab(t *Tab) {
 	t.Ed.PasteData = func(d transfer.Data) bool { return s.pasteData(t, d) }
 	s.tabs = append(s.tabs, t)
 	s.activate(len(s.tabs) - 1)
+}
+
+// OpenExternal 打开从系统传入的文档（启动参数、Finder 双击、第二实例）：窗口尚未打开文件夹且没有已保存路径或
+// 未保存修改的标签时，先把第一个文档所在目录作为资源管理器根目录（原版 openStartupExternalMarkdownPaths：双击文档
+// 冷启动时打开其所在目录），再打开文档。已在工作的窗口只打开文档，不改变文件夹。
+func (s *Shell) OpenExternal(paths []string) {
+	if s.folder == nil && !slices.ContainsFunc(s.tabs, func(t *Tab) bool { return t.Path != "" || t.Dirty() }) {
+		for _, p := range paths {
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				s.openFolder(filepath.Dir(p))
+				break
+			}
+		}
+	}
+	s.OpenFiles(paths)
 }
 
 // OpenFiles 打开文档；已打开的切换过去。

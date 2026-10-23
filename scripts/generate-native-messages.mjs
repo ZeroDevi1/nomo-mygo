@@ -13,14 +13,15 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const locales = ['zh-CN', 'zh-TW', 'en-US'];
 
-/** 解析 EXTRA_TRANSLATIONS（i18n.ts）或 EMOJI_TRANSLATIONS（i18n.emoji.ts）的某个语言块：`    key: '值',`（值可换行书写）。 */
+/** 解析 EXTRA_TRANSLATIONS（i18n.ts）或 EMOJI_TRANSLATIONS（i18n.emoji.ts）的某个语言块：`    key: '值',`（值可换行书写；
+ * 一行可写多项，如 `    a: '…', b: '…',`）。 */
 function extraTranslations(source, locale) {
   const start = source.indexOf(`  '${locale}': {`);
   if (start < 0) throw new Error(`${locale} 翻译块缺失`);
   const end = source.indexOf('\n  },', start);
   const block = source.slice(start, end);
   const table = {};
-  const entry = /^ {4}([A-Za-z0-9_]+):\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/gm;
+  const entry = /(?:^ {4}|, )([A-Za-z0-9_]+):\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/gm;
   for (const m of block.matchAll(entry)) {
     table[m[1]] = JSON.parse(m[2].startsWith("'") ? `"${m[2].slice(1, -1).replace(/\\'/g, "'").replace(/"/g, '\\"')}"` : m[2]);
   }

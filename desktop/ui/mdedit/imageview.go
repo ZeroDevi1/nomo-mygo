@@ -33,6 +33,8 @@ type Labels struct {
 	NoHeadings string // 目录卡片无标题时的提示，原版 t.documentHasNoHeadings()
 	// DetailsTitle 是折叠块标题为空时的占位文字，原版 t.detailsTitlePlaceholder()
 	DetailsTitle string
+	// InlineComment 是插入行内注释且无选区时的占位内容，原版 t.inlineComment()
+	InlineComment string
 }
 
 // SetLabels 设置界面文字；变化时全部布局作废（注释卡片含标签文字）。

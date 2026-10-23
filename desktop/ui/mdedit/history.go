@@ -17,6 +17,7 @@ type step struct {
 	before   Selection
 	after    Selection
 	kind     editKind
+	linked   bool // 与栈中下一步（更早的一步）一起撤销、重做（一个命令改动两处原文时，见 linkLast）
 }
 
 // history 保存完整撤销栈，不做裁剪（见 AGENTS.md：不得以裁剪撤销历史替代缓存治理）。
@@ -55,3 +56,11 @@ func (h *history) record(kind editKind, from int, old, text string, before, afte
 
 // seal 结束当前可合并的一步，使后续编辑另起一步。
 func (h *history) seal() { h.open = false }
+
+// linkLast 把栈顶一步与它下面的一步连成一次撤销（Editor.undo 连续撤销、重做相连的步骤）。
+func (h *history) linkLast() {
+	if n := len(h.undo); n >= 2 {
+		h.undo[n-1].linked = true
+	}
+	h.open = false
+}

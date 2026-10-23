@@ -291,6 +291,18 @@ func (e *Editor) Run(name string) bool {
 		e.toggleWrapPair("<mark>", "</mark>")
 	case "underline":
 		e.toggleWrapPair("<u>", "</u>")
+	case "superscript":
+		e.toggleWrapPair("<sup>", "</sup>")
+	case "subscript":
+		e.toggleWrapPair("<sub>", "</sub>")
+	case "inlineComment":
+		e.insertInlineComment()
+	case "mathInline":
+		e.insertInlineMath()
+	case "footnote":
+		e.insertFootnote()
+	case "toc":
+		e.insertToc()
 	case "link":
 		e.insertLink()
 	case "paragraph":
@@ -321,7 +333,7 @@ func (e *Editor) Run(name string) bool {
 	case "horizontalRule":
 		e.insertBlock("---")
 	case "table":
-		e.insertBlock("| 列 1 | 列 2 |\n| --- | --- |\n|  |  |")
+		e.InsertTable(3, 3)
 	case "details":
 		e.InsertDetails()
 	default:
@@ -503,7 +515,7 @@ func (e *Editor) insertBlock(block string) {
 }
 
 // inlineMarkers 是“清除样式”去掉的行内标记（与原版只移除行内表现、不改块级结构一致）。
-var inlineMarkers = []string{"**", "__", "~~", "==", "`", "<u>", "</u>", "<ins>", "</ins>", "<mark>", "</mark>",
+var inlineMarkers = []string{"**", "__", "~~", "==", "`", "<u>", "</u>", "<ins>", "</ins>", "<mark>", "</mark>", "<sup>", "</sup>", "<sub>", "</sub>",
 	"<strong>", "</strong>", "<b>", "</b>", "<em>", "</em>", "<i>", "</i>", "<s>", "</s>", "<del>", "</del>", "*", "_"}
 
 // clearFormat 去掉选区内的行内样式标记，保留文字与块级结构；无选区时不做任何事。

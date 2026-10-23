@@ -201,6 +201,10 @@ func buildRows(d *Document, ti int, top Block, seed maphash.Seed) ([]row, []fram
 	} else {
 		bb.block(top.Index, container{tone: -1})
 	}
+	if len(bb.rows) == 0 {
+		// 每个顶层块至少一行：光标定位、绘制与高度计算都按行索引，空行集会越界。
+		bb.lines(top.Start, top.End, roleBody, container{tone: -1}, 0)
+	}
 	for k := range bb.rows {
 		bb.rows[k].hash = bb.hash(&bb.rows[k])
 	}
@@ -370,6 +374,9 @@ func (bb *blockBuilder) block(i int, c container) {
 		}
 		if len(bb.rows) > f {
 			bb.rows[f].marker = "[^" + b.Label() + "]"
+		} else {
+			// 内容为空的定义（如刚输入的 “[^1]: ”）没有子块，按原文显示一行。
+			bb.lines(b.Start, b.End, roleBody, c, 0)
 		}
 	default:
 		bb.lines(b.Start, b.End, roleBody, c, 0)

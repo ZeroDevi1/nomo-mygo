@@ -45,7 +45,7 @@ func runNativeShell(args []string) {
 			return
 		}
 		w.Update(func() {
-			target.OpenFiles(append(t.folderPaths, t.markdownPaths...))
+			target.OpenExternal(append(t.folderPaths, t.markdownPaths...))
 			w.Show()
 			w.Focus()
 		})

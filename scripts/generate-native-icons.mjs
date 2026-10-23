@@ -30,6 +30,8 @@ const names = [
   'smile',
   // Markdown 小窗（原版 AppTitleBar）
   'pin', 'pin-off', 'maximize-2',
+  // 原版 EditorToolbar 的上下标、行内注释、公式、图表、目录与内容宽度
+  'superscript', 'subscript', 'message-square', 'sigma', 'braces', 'table-of-contents', 'align-horizontal-space-around',
 ];
 
 // 读取图标源：v1 中部分旧名（如 file-json-2）只剩 .js 别名，指向改名后的 .svelte。

@@ -481,49 +481,6 @@ func (s *Shell) document(c *ui.Context) {
 	}
 }
 
-// toolbar 是格式工具栏，按钮与原版 EditorToolbar 对应；源码模式下禁用。
-func (s *Shell) toolbar(c *ui.Context) {
-	disabled := s.mode() != modeSemantic
-	ui.Row(c).Height(toolbarH).FillWidth().Padding(0, 10).Gap(1).AlignItems(ui.Center).Children(func() {
-		group := func(items ...[3]string) {
-			for _, it := range items {
-				b := s.toolButton(c, it[0], it[1], false).Disabled(disabled)
-				if disabled {
-					b.Opacity(0.4)
-				}
-				if b.Clicked() {
-					s.run(it[2])
-				}
-			}
-			ui.Box(c).Size(1, 16).Background(s.ch.separator).Margin(0, 6)
-		}
-		group([3]string{"heading-1", s.tr("setHeadingOne"), "heading1"}, [3]string{"heading-2", s.tr("heading") + " 2", "heading2"},
-			[3]string{"heading-3", s.tr("heading") + " 3", "heading3"}, [3]string{"pilcrow", s.tr("paragraph"), "paragraph"})
-		group([3]string{"bold", s.tr("toggleBold"), "bold"}, [3]string{"italic", s.tr("toggleItalic"), "italic"},
-			[3]string{"strikethrough", s.tr("toggleStrikethrough"), "strikethrough"}, [3]string{"underline", s.tr("toggleUnderline"), "underline"},
-			[3]string{"highlighter", s.tr("toggleHighlight"), "highlight"}, [3]string{"code", s.tr("inlineCode"), "inlineCode"},
-			[3]string{"link", s.tr("link"), "link"})
-		group([3]string{"list", s.tr("unorderedList"), "unorderedList"}, [3]string{"list-ordered", s.tr("orderedList"), "orderedList"},
-			[3]string{"square-check", s.tr("toggleTaskList"), "taskList"}, [3]string{"quote", s.tr("toggleQuote"), "quote"},
-			[3]string{"panel-top-close", s.tr("insertDetails"), "details"},
-			[3]string{"code-xml", s.tr("insertCodeBlock"), "codeBlock"}, [3]string{"table-2", s.tr("insertTable"), "table"},
-			[3]string{"minus", s.tr("horizontalRule"), "horizontalRule"})
-		// 表情按钮与原版一样位于工具栏右侧。
-		ui.Box(c).Grow(1)
-		if s.loadEmoji != nil {
-			b := s.toolButton(c, "smile", s.tr("emojiInsert"), s.emo.picker).Disabled(disabled)
-			if disabled {
-				b.Opacity(0.4)
-			}
-			if b.Clicked() {
-				r := b.Bounds()
-				s.openEmojiPicker(ui.Point{X: r.X + r.W - emojiPickerW, Y: r.Y + r.H + 6})
-			}
-		}
-	})
-	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-}
-
 // findBar 是语义模式的查找替换栏；匹配随原文版本、查询与选项变化重新计算。
 func (s *Shell) findBar(c *ui.Context, tab *Tab) {
 	if !s.finding {
@@ -654,6 +611,7 @@ func (s *Shell) statusBar(c *ui.Context, tab *Tab) {
 		if tab.saving {
 			muted(s.tr("settingsSaving"))
 		}
+		s.zoomControl(c)
 	})
 }
 

@@ -88,6 +88,7 @@
 | 输入法、键盘与命令 | `desktop/ui/mdedit/input.go` | `view.go`, `edit.go`, `structure.go` | 修改 TextInputClient、光标移动、删除、剪贴板与加粗等命令 |
 | 结构编辑 | `desktop/ui/mdedit/structure.go` | `input.go`, `blocks.go` | 修改列表/引用内回车与退出、行首退格提出容器、Tab 缩进与表格单元格切换、任务勾选 |
 | 编辑器对外接口（格式命令、查找、大纲、统计、源码同步） | `desktop/ui/mdedit/api.go` | `structure.go`, `edit.go` | 修改工具栏/菜单命令的原文事务、查找匹配、大纲与写作统计 |
+| 工具栏插入命令（表格尺寸、脚注、正文目录、行内注释、行内公式） | `desktop/ui/mdedit/inserts.go` | `history.go`（`linkLast` 相连撤销）, `api.go`（`Run`） | 修改插入的原文格式、脚注编号、目录锚点规则 |
 
 ### 原生外壳（Go，P2，`nomo --native` 或 `NOMO_NATIVE=1`）
 
@@ -97,6 +98,7 @@
 | 外壳状态、偏好、文件操作 | `desktop/ui/shell/shell.go` | `tab.go`, `desktop/internal/config`, `desktop/internal/docfs` | 修改新建/打开/保存/关闭确认、最近打开、外部修改检测、偏好持久化 |
 | 文档标签与源码模式同步 | `desktop/ui/shell/tab.go` | `desktop/ui/mdedit` | 修改语义/源码模式的原文同步、未保存判定、统计与大纲缓存 |
 | 布局（标题栏、侧栏、标签、工具栏、查找栏、大纲、状态栏、空白工作区、确认框） | `desktop/ui/shell/view.go` | `explorer.go`, `menu.go` | 修改外壳布局与外观 |
+| 格式工具栏与状态栏缩放 | `desktop/ui/shell/toolbar.go` | `view.go`（`toolButton`、`statusBar`）, `editoroptions.go`（图表模板） | 修改工具栏按钮与分组、表格尺寸网格、公式/图表菜单、内容宽度与缩放弹层 |
 | 菜单与快捷键 | `desktop/ui/shell/menu.go` | `view.go` | 增删菜单命令或快捷键（标题栏菜单、macOS 菜单栏共用一张表） |
 | 平台原生风格（macOS / Windows 11 / Linux 的布局结构、材质、配色） | `desktop/ui/shell/platform.go` | `view.go`, `settings.go` | 修改各平台主题、vibrancy / Mica、外壳配色 |
 | 偏好（与原版 AppPreferences 同键、同默认、同取值范围） | `desktop/ui/shell/prefs.go` | `settings.go`, `shell.go` | 新增设置项或修改默认值、规范化规则 |

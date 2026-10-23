@@ -445,16 +445,25 @@ func (e *Editor) copySel(cut bool) {
 	}
 }
 
+// undo 撤销或重做一步；相连的步骤（history.linkLast）一并处理：撤销时刚撤销的一步标记为相连则继续，重做时下一步
+// 标记为相连则继续。
 func (e *Editor) undo(redo bool) {
-	var ed Edit
-	var ok bool
-	if redo {
-		ed, ok = e.Doc.Redo()
-	} else {
-		ed, ok = e.Doc.Undo()
-	}
-	if ok {
+	h := &e.Doc.hist
+	for {
+		var ed Edit
+		var ok bool
+		if redo {
+			ed, ok = e.Doc.Redo()
+		} else {
+			ed, ok = e.Doc.Undo()
+		}
+		if !ok {
+			return
+		}
 		e.applyEdit(ed)
+		if redo && (len(h.redo) == 0 || !h.redo[len(h.redo)-1].linked) || !redo && !h.redo[len(h.redo)-1].linked {
+			return
+		}
 	}
 }
 

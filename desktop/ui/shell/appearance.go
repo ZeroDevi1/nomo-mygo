@@ -117,7 +117,7 @@ func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 			s.images.InvalidateRenders()
 		}
 		tab.Ed.SetLabels(mdedit.Labels{Comment: s.tr("comment"), Toc: s.tr("toc"), NoHeadings: s.tr("documentHasNoHeadings"),
-			DetailsTitle: s.tr("detailsTitlePlaceholder")})
+			DetailsTitle: s.tr("detailsTitlePlaceholder"), InlineComment: s.tr("inlineComment")})
 		if tab.source != nil {
 			mono := s.prefs.MonoFontFamily
 			if mono == "" {
