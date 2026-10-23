@@ -194,6 +194,9 @@ func (e *Editor) tab(back bool) bool {
 	if !ok {
 		return false
 	}
+	if e.codeTab(s, back) {
+		return true
+	}
 	en := &e.entries[s.i]
 	r := &en.rows[s.k]
 	if r.ncol > 0 {

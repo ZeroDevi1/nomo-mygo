@@ -114,7 +114,7 @@ func (e *Editor) entryPos(s seg, atEnd bool) int {
 	}
 	r := &e.entries[s.i].rows[s.k]
 	top := e.Doc.blocks[s.i]
-	p := projectLeaf(e.Doc, top.Index+r.rel, s.base, s.end, expansion{}, leafOpts{prefix: r.role == roleHeading, callout: r.callout})
+	p := projectLeaf(e.Doc, top.Index+r.rel, s.base, s.end, expansion{}, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode})
 	return s.base + p.toSrc(0, false)
 }
 
@@ -136,8 +136,8 @@ func (e *Editor) moveH(pos, dir int, word, line bool) int {
 			}
 			return 0
 		}
-		if after+1 < len(e.Doc.blocks) {
-			return e.entryPos(e.firstSeg(after+1), false)
+		if n := e.visibleNeighbor(after, 1); n >= 0 {
+			return e.entryPos(e.firstSeg(n), false)
 		}
 		return len(src)
 	}
@@ -194,14 +194,17 @@ func (e *Editor) moveV(pos, dir int) int {
 	} else {
 		// 间隙光标：上移到前一块末行，下移到后一块首行。
 		_, after := e.Doc.BlockAt(pos)
-		t := after + 1
+		t := e.visibleNeighbor(after, 1)
 		if dir < 0 {
 			t = after
+			if t >= 0 && e.detailsHidden(t) {
+				t = e.visibleNeighbor(t, -1)
+			}
 		}
 		if t < 0 {
-			return 0
-		}
-		if t >= len(e.entries) {
+			if dir < 0 {
+				return 0
+			}
 			return len(e.Doc.Source())
 		}
 		if dir < 0 {
@@ -436,7 +439,11 @@ func (e *Editor) copySel(cut bool) {
 	if a == z || !e.hasSvc {
 		return
 	}
-	e.svc.WriteClipboard(e.Doc.Source()[a:z])
+	text := e.Doc.Source()[a:z]
+	if e.opts.PlainCopy {
+		text = plainText(text)
+	}
+	e.svc.WriteClipboard(text)
 	if cut {
 		e.replaceSel("", editOther)
 	}
@@ -594,6 +601,10 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 	case ui.InputCommand:
 		return e.command(ev.Text)
 	case ui.InputScroll:
+		// 按住 Ctrl 滚动交给外壳缩放（原版 ctrlWheelZoomEnabled），不滚动文档。
+		if ev.Mods&ui.Ctrl != 0 && e.CtrlWheel != nil && e.CtrlWheel(ev.DY) {
+			return true
+		}
 		// 横向滚轮（或 Shift+滚轮）在超宽表格上横向滚动表格，其余纵向滚动文档。
 		dx := ev.DX
 		if ev.Mods&ui.Shift != 0 && dx == 0 {
@@ -609,6 +620,19 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 		e.scrollBy(ev.DY)
 		return true
 	case ui.InputPointerDown:
+		if ev.Button == 1 {
+			// 右键：记下位置供 ContextTarget 判断目标；点在选区外时光标移到该处（与浏览器一致），菜单由外壳弹出。
+			e.sync()
+			pos := e.hit(ui.Point{X: ev.X, Y: ev.Y})
+			e.ctxPos, e.ctxDetails = pos, -1
+			if f, ok := e.detailsHeaderHit(ui.Point{X: ev.X, Y: ev.Y}); ok {
+				e.ctxDetails = f.key
+			}
+			if a, z := e.Doc.Sel.Range(); pos < a || pos > z || a == z {
+				e.setHead(pos, false)
+			}
+			return false
+		}
 		if ev.Button != 0 {
 			return false
 		}
@@ -622,6 +646,10 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 		}
 		if at, ok := e.taskHit(ui.Point{X: ev.X, Y: ev.Y}); ok {
 			e.toggleTask(at)
+			return true
+		}
+		if f, ok := e.detailsToggleHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Mods&ui.Shift == 0 { // 连点每次都切换
+			e.toggleDetails(f)
 			return true
 		}
 		if at, ok := e.imageHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {

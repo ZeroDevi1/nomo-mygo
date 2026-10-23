@@ -31,6 +31,8 @@ type Labels struct {
 	Comment    string // 注释卡片的标签，原版 t.comment()
 	Toc        string // 目录卡片的标题，原版 t.toc()
 	NoHeadings string // 目录卡片无标题时的提示，原版 t.documentHasNoHeadings()
+	// DetailsTitle 是折叠块标题为空时的占位文字，原版 t.detailsTitlePlaceholder()
+	DetailsTitle string
 }
 
 // SetLabels 设置界面文字；变化时全部布局作废（注释卡片含标签文字）。

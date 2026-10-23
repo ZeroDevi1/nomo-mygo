@@ -3,6 +3,7 @@ package shell
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -14,9 +15,12 @@ import (
 	"nomo/desktop/internal/imageasset"
 )
 
+// codeLanguagePattern 限制代码块默认语言为信息串可用的字符（空为不标语言）。
+var codeLanguagePattern = regexp.MustCompile(`^[A-Za-z0-9_+#.-]{0,32}$`)
+
 // settingsWindow 是原生设置窗口，分类与文案对应原版 SettingsWindow.svelte。
 //
-// 只列出原生外壳已生效的设置；尚未实现的功能（排版、代码块行号等）不展示无效的开关。
+// 只列出原生外壳已生效的设置；尚未实现的功能（精细排版）不展示无效的开关。
 // 读写与主窗口共享的 Shell.prefs，键与 WebView 版相同。
 // 生命周期：openSettings 创建，关闭窗口即销毁（Shell.settings 置空）。
 type settingsWindow struct {
@@ -148,6 +152,11 @@ func (sw *settingsWindow) page(c *ui.Context) {
 		sw.section(c, "editorScale", func() {
 			sw.slider(c, "fontSize", "fontSize", &p.FontSize, 14, 22, 1, "%.0f px", false)
 			sw.slider(c, "lineHeight", "lineHeight", &p.LineHeight, 1.4, 2.1, 0.05, "%.2f", false)
+			sw.choice(c, "defaultIndent", "codeBlockIndent", &p.CodeBlockIndent,
+				[]string{"spaces-2", "spaces-4", "tab"}, []string{s.tr("twoSpaces"), s.tr("fourSpaces"), "Tab"})
+			sw.toggle(c, "codeBlockLineNumbers", "codeBlockLineNumbersVisible", &p.CodeBlockLineNumbersVisible)
+			sw.toggle(c, "inlineCodeRendering", "inlineCodeRenderingEnabled", &p.InlineCodeRenderingEnabled)
+			sw.toggle(c, "copyMarkdownSyntax", "copyMarkdownSyntaxEnabled", &p.CopyMarkdownSyntaxEnabled)
 			sw.slider(c, "contentWidth", "contentWidthPercent", &p.ContentWidthPercent, 45, 90, 1, "%.0f%%", false)
 			sw.choice(c, "calloutStyle", "documentStyleId", &p.DocumentStyleID,
 				[]string{"nomo-modern", "nomo-classic"}, []string{s.tr("modern"), s.tr("classic")})
@@ -179,10 +188,12 @@ func (sw *settingsWindow) page(c *ui.Context) {
 		})
 		sw.section(c, "visualZoom", func() {
 			sw.slider(c, "zoomLevel", "zoomPercent", &p.ZoomPercent, 80, 160, 10, "%.0f%%", false)
+			sw.toggle(c, "ctrlWheelZoom", "ctrlWheelZoomEnabled", &p.CtrlWheelZoomEnabled)
 		})
 	case "files":
 		sw.section(c, "filesAndWindows", func() {
 			sw.toggle(c, "hideExplorerOnLaunch", "sidebarHidden", &p.SidebarHidden)
+			sw.toggle(c, "filePreviewTab", "filePreviewEnabled", &p.FilePreviewEnabled)
 			sw.choice(c, "externalFileChangeBehavior", "externalFileChangeBehavior", &p.ExternalFileChangeBehavior,
 				[]string{"reload-external", "overwrite-external", "ignore"},
 				[]string{s.tr("externalFileChangeBehaviorReload"), s.tr("externalFileChangeBehaviorOverwrite"), s.tr("externalFileChangeBehaviorIgnore")})
@@ -214,6 +225,15 @@ func (sw *settingsWindow) page(c *ui.Context) {
 			sw.choice(c, "renderMode", "renderMode", &p.RenderMode,
 				[]string{"hardware", "software"}, []string{s.tr("renderModeHardware"), s.tr("renderModeSoftware")})
 		})
+		sw.section(c, "defaultInsertBehavior", func() {
+			sw.text(c, "defaultCodeBlockLanguage", "defaultCodeBlockLanguage", &p.DefaultCodeBlockLanguage, "ts", "", false,
+				func(v string) (string, bool) { v = strings.TrimSpace(v); return v, codeLanguagePattern.MatchString(v) })
+			labels := make([]string, len(diagramLabels))
+			for k, key := range diagramLabels {
+				labels[k] = s.tr(key)
+			}
+			sw.choice(c, "defaultDiagramType", "defaultDiagramType", &p.DefaultDiagramType, diagramTypes, labels)
+		})
 		sw.section(c, "customShortcuts", func() { sw.shortcuts(c) })
 	case "stats":
 		sw.section(c, "statsAndNavigation", func() {
@@ -221,6 +241,8 @@ func (sw *settingsWindow) page(c *ui.Context) {
 			sw.toggle(c, "showDocumentStats", "writingStatsVisible", &p.WritingStatsVisible)
 			sw.choice(c, "defaultStatsMetric", "writingStatsMetric", &p.WritingStatsMetric,
 				[]string{"words", "chars", "lines"}, []string{s.tr("words"), s.tr("chars"), s.tr("lines")})
+			sw.toggle(c, "readingTime", "readingTimeVisible", &p.ReadingTimeVisible)
+			sw.slider(c, "outlineDefaultExpandLevel", "outlineDefaultExpandLevel", &p.OutlineDefaultExpandLevel, 1, 6, 1, "H%.0f", false)
 		})
 	case "about":
 		ui.Column(c).Gap(6).Children(func() {

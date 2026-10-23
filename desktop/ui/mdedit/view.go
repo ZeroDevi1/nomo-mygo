@@ -41,6 +41,9 @@ type entry struct {
 	// tablesW 为计算表格列宽时的内容区宽度，变化后重算。
 	tablesW float32
 	used    uint64
+	// inset、rinset 为展开时应用的折叠块缩进（detailsInset），scale 为展开时的字号缩放（标记行内边距与代码行号栏
+	// 宽度随之变化）；任一与当前值不同时重新展开。
+	inset, rinset, scale float32
 }
 
 // vseg 是一个可见行：y 为行框顶部相对元素顶部的位置。
@@ -149,6 +152,9 @@ type Editor struct {
 	// Intercept 在编辑器处理按键之前调用，返回 true 表示已被外壳处理（如快捷插入菜单打开时
 	// 的上下键、回车与 Esc）；nil 表示不拦截。只在 UI 线程调用。
 	Intercept func(ev ui.InputEvent) bool
+	// CtrlWheel 在按住 Ctrl 滚动时调用，dy 为纵向滚动量；返回 true 表示外壳已处理（缩放），nil 或返回 false
+	// 时按普通滚动处理。
+	CtrlWheel func(dy float32) bool
 	// PasteData 在粘贴且剪贴板含图片或文件时调用，返回 true 表示外壳已处理（插入图片），
 	// 否则按文本粘贴。
 	PasteData func(d transfer.Data) bool
@@ -223,6 +229,17 @@ type Editor struct {
 	// tocVer/tocHash 为上次检查目录卡片时的原文版本与标题摘要；标题变化后目录卡片重新排版。
 	tocVer  uint64
 	tocHash uint64
+	// folds 为折叠块的临时展开状态（键为“<details”的偏移，随编辑平移），foldGen 在其变化时递增；dview 缓存
+	// 折叠视图（detailsState），dhad 表示上次同步时文档含折叠块，dsyncVer 为上次同步标记块的原文版本。
+	folds    map[int]bool
+	foldGen  uint64
+	dview    *detailsView
+	dhad     bool
+	dsyncVer uint64
+	// opts 为外壳设置中影响编辑区的选项（SetOptions）。
+	opts Options
+	// ctxPos 为最近一次右键的原文位置，ctxDetails 为右键落在折叠块标题行时该块的键（否则 -1），供 ContextTarget 使用。
+	ctxPos, ctxDetails int
 }
 
 type dragMode uint8
@@ -235,7 +252,7 @@ const (
 
 // NewEditor 创建绑定 doc 的编辑器视图。
 func NewEditor(doc *Document) *Editor {
-	e := &Editor{Doc: doc, seed: maphash.MakeSeed(), dirty: true, anchorOff: -padTop, current: -1, lineMul: defaultLineHeight}
+	e := &Editor{Doc: doc, seed: maphash.MakeSeed(), dirty: true, anchorOff: -padTop, current: -1, lineMul: defaultLineHeight, ctxDetails: -1}
 	e.scale = 1
 	e.measureLine()
 	e.entries = make([]entry, len(doc.blocks))
@@ -385,6 +402,7 @@ func (e *Editor) applyEdit(ed Edit) {
 	if !ed.Applied {
 		return
 	}
+	e.remapFolds(ed.Change)
 	var reuse []row
 	var oldFrames []frame
 	if ed.Removed == 1 && ed.Inserted == 1 && e.entries[ed.First].split {
@@ -419,14 +437,34 @@ func (e *Editor) applyEdit(ed Edit) {
 func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 	en := &e.entries[i]
 	top := e.Doc.blocks[i]
-	rows, frames := buildRows(e.Doc, top, e.seed)
+	rows, frames := buildRows(e.Doc, i, top, e.seed)
+	e.applyLineNumbers(rows, frames)
+	// 折叠块正文按层级缩进（行哈希按缩进前计算，行内容相同的布局仍可继承）。
+	inset, rinset := e.detailsInset(i)
+	for k := range rows {
+		if rows[k].htmlKind == previewDetails {
+			// 标记行（标题行或其原文）位于卡片内边距之内，不压在边框上。
+			rows[k].indent += bodySize * e.scale * detailsPadXEm
+		}
+	}
+	if inset != 0 || rinset != 0 {
+		for k := range rows {
+			rows[k].indent += inset
+			rows[k].rinset = rinset
+		}
+		for k := range frames {
+			frames[k].indent += inset
+			frames[k].rinset = rinset
+		}
+	}
+	en.inset, en.rinset, en.scale = inset, rinset, e.scale
 	// 同一块重新展开（块内编辑）时保留表格的横向滚动位置。
 	for k := range frames {
 		if k < len(oldFrames) && oldFrames[k].kind == frames[k].kind {
 			frames[k].scrollX = oldFrames[k].scrollX
 		}
 	}
-	e.layoutTables(e.Doc.Source(), top.Start, rows, frames, e.width())
+	e.layoutTables(e.Doc.Source(), top.Start, rows, frames, e.width()-rinset)
 	en.tablesW = e.width()
 	for k := range rows {
 		r := &rows[k]
@@ -493,7 +531,7 @@ func (e *Editor) rowBox(r *row) (x, w float32) {
 	if r.ncol > 0 {
 		return r.indent + r.cellX - r.shift + cellPadX, max(1, r.cellW-2*cellPadX)
 	}
-	w = cw - r.indent
+	w = cw - r.indent - r.rinset
 	if r.role == roleCode || r.role == roleFront {
 		w -= codePadX
 	}
@@ -545,9 +583,11 @@ func (e *Editor) ensure(i int) *entry {
 	en.used = e.tick
 	if !en.split {
 		e.split(i, nil, nil)
+	} else if l, r := e.detailsInset(i); l != en.inset || r != en.rinset || en.scale != e.scale {
+		e.split(i, en.rows, en.frames)
 	} else if en.tablesW != e.width() {
 		// 内容区宽度变化：重算表格列宽（单元格行宽变化后，其布局在 ensureRow 中按 shapeW 作废）。
-		e.layoutTables(e.Doc.Source(), e.Doc.blocks[i].Start, en.rows, en.frames, e.width())
+		e.layoutTables(e.Doc.Source(), e.Doc.blocks[i].Start, en.rows, en.frames, e.width()-en.rinset)
 		en.tablesW = e.width()
 	}
 	if en.ydirty {
@@ -593,7 +633,7 @@ func (e *Editor) ensureRow(i, k int) bool {
 	_, w := e.rowBox(r)
 	p := r.proj
 	var sizes [][2]float32
-	if r.layout != nil && r.gen == e.layoutGen && r.sig == sig && r.shapeW == w {
+	if r.layout != nil && r.gen == e.layoutGen && r.sig == sig && r.shapeW == w && !e.detailsStale(i, r) {
 		// 投影有效：只有行内图片的尺寸变化（加载完成）时按原投影重排。
 		if len(p.objs) == 0 || r.imgGen == e.imageGen() {
 			return false
@@ -604,11 +644,14 @@ func (e *Editor) ensureRow(i, k int) bool {
 		}
 	} else {
 		if r.kind == rowText {
-			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout})
+			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode})
 		} else if r.htmlImg && !ex.inBlock {
 			p = projectHTMLImages(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
 		} else if r.htmlKind != previewNone && !ex.inBlock {
 			p = projectHTMLPreview(e.Doc.Source()[top.Start+r.a:top.Start+r.b], r.htmlKind)
+			if b := p.objs[0].html; b != nil && b.details {
+				b.dblock, b.dver, b.dgen = i, e.Doc.version, e.foldGen
+			}
 		} else {
 			p = projectIdentity(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
 		}
@@ -764,8 +807,8 @@ func (e *Editor) neighbor(s seg, dir int) (seg, bool) {
 	if nk := s.k + dir; nk >= 0 && nk < len(e.entries[s.i].rows) {
 		return e.segOf(s.i, nk), true
 	}
-	ni := s.i + dir
-	if ni < 0 || ni >= len(e.entries) {
+	ni := e.visibleNeighbor(s.i, dir)
+	if ni < 0 {
 		return seg{}, false
 	}
 	if dir < 0 {
@@ -795,8 +838,8 @@ func (e *Editor) neighborV(s seg, dir int, x float32) (seg, bool) {
 	if s2, ok := pick(s.i, e.entries[s.i].rows[s.k].band+dir); ok {
 		return s2, true
 	}
-	ni := s.i + dir
-	if ni < 0 || ni >= len(e.entries) {
+	ni := e.visibleNeighbor(s.i, dir)
+	if ni < 0 {
 		return seg{}, false
 	}
 	rows := e.ensure(ni).rows
@@ -837,6 +880,9 @@ func (e *Editor) gapCaret() (after int, ok bool) {
 
 // height 返回块 i 的显示高度；光标位于其后的间隙时，额外留出一行放光标。
 func (e *Editor) height(i int) float32 {
+	if e.detailsHidden(i) {
+		return 0
+	}
 	h := e.entries[i].height
 	if a, ok := e.gapCaret(); ok && a == i {
 		h += e.lineH
@@ -883,6 +929,9 @@ func (e *Editor) prepare(w, h float32) {
 	e.vsegs, e.vblocks = e.vsegs[:0], e.vblocks[:0]
 	y := -e.anchorOff
 	for i := e.anchor; i < len(e.entries) && y < h; i++ {
+		if e.detailsHidden(i) {
+			continue
+		}
 		en := e.layoutVisible(i, y, h)
 		e.vblocks = append(e.vblocks, vblock{i: i, top: y})
 		for k := firstVisible(en, y); k < len(en.rows) && y+en.rows[k].y < h; k++ {

@@ -123,7 +123,7 @@ func (s *Shell) treeRow(c *ui.Context, n *folderNode, depth int, active string) 
 		if n.dir {
 			n.open = !n.open && n.hasChildren
 		} else {
-			s.OpenFiles([]string{n.path})
+			s.openPreview(n.path)
 		}
 	}
 }

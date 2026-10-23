@@ -83,6 +83,10 @@ func editorColors(t *themes.Theme, dark, classic bool) *mdedit.Colors {
 func (s *Shell) applyEditorStyle(tab *Tab) {
 	tab.Ed.SetStyle(float32(s.prefs.FontSize), float32(s.prefs.ZoomPercent), float32(s.prefs.ContentWidthPercent))
 	tab.Ed.SetLineHeight(float32(s.prefs.LineHeight))
+	tab.Ed.SetOptions(s.editorOptions())
+	if tab.Ed.CtrlWheel == nil {
+		tab.Ed.CtrlWheel = s.ctrlWheel
+	}
 }
 
 func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
@@ -108,7 +112,8 @@ func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 		if s.rend.setTheme(renderThemeOf(t, false), renderThemeOf(t, true)) {
 			s.images.InvalidateRenders()
 		}
-		tab.Ed.SetLabels(mdedit.Labels{Comment: s.tr("comment"), Toc: s.tr("toc"), NoHeadings: s.tr("documentHasNoHeadings")})
+		tab.Ed.SetLabels(mdedit.Labels{Comment: s.tr("comment"), Toc: s.tr("toc"), NoHeadings: s.tr("documentHasNoHeadings"),
+			DetailsTitle: s.tr("detailsTitlePlaceholder")})
 		if tab.source != nil {
 			mono := s.prefs.MonoFontFamily
 			if mono == "" {

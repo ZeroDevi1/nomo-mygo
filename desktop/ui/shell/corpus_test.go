@@ -2,6 +2,8 @@ package shell
 
 import (
 	"bytes"
+	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,6 +36,7 @@ func TestCorpusShell(t *testing.T) {
 	t.Run("fourTabs", func(t *testing.T) { corpusFourTabs(t, root) })
 	t.Run("openEditClose", func(t *testing.T) { corpusOpenEditClose(t, root) })
 	t.Run("folderTree", func(t *testing.T) { corpusFolderTree(t, root) })
+	t.Run("protocol", func(t *testing.T) { corpusProtocol(t, root) })
 }
 
 // corpusFolderTree 打开 256 文件的目录树，全部展开并画出，再依次打开其中 32 个文件（每次只保留一个标签）。
@@ -245,4 +248,116 @@ func corpusOpenEditClose(t *testing.T, root string) {
 	if heaps[1] > heaps[0]*1.5+20 {
 		t.Errorf("20 轮后 Go 堆增长明显：%v", heaps)
 	}
+}
+
+// corpusProtocol 按测试集“建议固定的测试流程”逐样本跑 3 轮（09 目录树与根目录说明文件除外）：经外壳打开到首帧；
+// 依次切换源码、双栏、语义并记录每次切换后一帧的耗时，原文不变；另存副本（在测试集的临时副本中、与原文件同目录，
+// 原版另存为不改写图片路径）后重新打开，原文一致、相对图片路径与原文件同样可解析。滚动、查找末尾标记与中文输入
+// 撤销由 mdedit 的 TestCorpus 覆盖。NOMO_CORPUS_MATCH 只跑路径含该子串的样本；设 NOMO_CORPUS_OUT 时写出
+// protocol.md。无头渲染，不代表实机耗时。
+func corpusProtocol(t *testing.T, root string) {
+	mirror := t.TempDir()
+	if err := os.CopyFS(mirror, os.DirFS(root)); err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	_ = filepath.WalkDir(mirror, func(p string, d os.DirEntry, err error) error {
+		rel, _ := filepath.Rel(mirror, p)
+		if err == nil && !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".md") && strings.Contains(rel, string(filepath.Separator)) &&
+			!strings.HasPrefix(rel, "09_") && strings.Contains(rel, os.Getenv("NOMO_CORPUS_MATCH")) {
+			files = append(files, p)
+		}
+		return nil
+	})
+	slices.Sort(files)
+	ms := func(d time.Duration) string { return fmt.Sprintf("%.1f", float64(d.Microseconds())/1000) }
+	var report strings.Builder
+	report.WriteString("| 样本 | 打开（3 轮） | →源码 | →双栏 | →语义 | 另存 | 重开一致 | 图片路径 | 问题 |\n|---|---|---|---|---|---|---|---|---|\n")
+	for _, path := range files {
+		rel, _ := filepath.Rel(mirror, path)
+		var open, toSrc, toSplit, toSem, saveDur []string
+		var issues []string
+		sameText, imagesOK := true, true
+		for round := 0; round < 3; round++ {
+			start := time.Now()
+			s, tt, settle := newCorpusShell(t, path)
+			open = append(open, ms(time.Since(start)))
+			tab := s.activeTab()
+			if tab == nil {
+				issues = append(issues, "未打开")
+				break
+			}
+			before := tab.text()
+			for k, mode := range []string{modeSource, modeSplit, modeSemantic} {
+				st := time.Now()
+				s.setMode(mode)
+				tt.Frame()
+				d := ms(time.Since(st))
+				switch k {
+				case 0:
+					toSrc = append(toSrc, d)
+				case 1:
+					toSplit = append(toSplit, d)
+				default:
+					toSem = append(toSem, d)
+				}
+			}
+			if tab.text() != before {
+				issues = append(issues, "模式切换改变原文")
+			}
+			// 另存副本：等同于在保存对话框中选择原目录下的新文件名。
+			copyPath := strings.TrimSuffix(path, filepath.Ext(path)) + fmt.Sprintf("-副本%d.md", round)
+			tab.Path = copyPath
+			done := false
+			st := time.Now()
+			var doneAt time.Time
+			s.save(tab, false, func() { done, doneAt = true, time.Now() })
+			for deadline := time.Now().Add(60 * time.Second); !done && time.Now().Before(deadline); {
+				settle()
+			}
+			if !done {
+				issues = append(issues, "另存超时")
+				break
+			}
+			saveDur = append(saveDur, ms(doneAt.Sub(st)))
+			s2, _, _ := newCorpusShell(t, copyPath)
+			if t2 := s2.activeTab(); t2 == nil || t2.text() != before {
+				sameText = false
+			}
+			for _, ref := range imageRefs(before) {
+				if filepath.IsAbs(ref) || strings.Contains(ref, "://") || strings.HasPrefix(ref, "data:") {
+					continue
+				}
+				_, e1 := os.Stat(filepath.Join(filepath.Dir(path), ref))
+				_, e2 := os.Stat(filepath.Join(filepath.Dir(copyPath), ref))
+				if (e1 == nil) != (e2 == nil) {
+					imagesOK = false
+				}
+			}
+			_ = os.Remove(copyPath)
+			runtime.GC()
+		}
+		yes := map[bool]string{true: "是", false: "否"}
+		fmt.Fprintf(&report, "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", rel, strings.Join(open, " / "), strings.Join(toSrc, " / "),
+			strings.Join(toSplit, " / "), strings.Join(toSem, " / "), strings.Join(saveDur, " / "), yes[sameText], yes[imagesOK], strings.Join(slices.Compact(issues), "；"))
+		if !sameText || !imagesOK || len(issues) > 0 {
+			t.Errorf("%s：重开一致=%v 图片路径=%v %v", rel, sameText, imagesOK, issues)
+		}
+	}
+	if out := os.Getenv("NOMO_CORPUS_OUT"); out != "" {
+		_ = os.WriteFile(filepath.Join(out, "protocol.md"), []byte(report.String()), 0o644)
+	}
+	t.Log("\n" + report.String())
+}
+
+// imageRefs 返回 Markdown 图片与 <img> 的地址（与 inlineMarkdownImages 识别的写法相同）。
+func imageRefs(src string) []string {
+	var out []string
+	for _, m := range mdImageRe.FindAllStringSubmatch(src, -1) {
+		out = append(out, strings.TrimSuffix(strings.TrimPrefix(m[2], "<"), ">"))
+	}
+	for _, m := range htmlImageRe.FindAllStringSubmatch(src, -1) {
+		out = append(out, html.UnescapeString(m[2]))
+	}
+	return out
 }

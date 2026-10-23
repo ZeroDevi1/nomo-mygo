@@ -35,7 +35,7 @@ func (s *Shell) splitView(c *ui.Context, tab *Tab, ck *ui.Context) (semantic ui.
 		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceEmojiCompletion(tab, req) }
 	}
 	semPane := func() {
-		semantic = tab.Ed.View(ck)
+		semantic = s.editorView(ck, tab)
 	}
 	srcPane := func() {
 		ui.Row(ck).Fill().Padding(16, 0, 0, 12).Children(func() {

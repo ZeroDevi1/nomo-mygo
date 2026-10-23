@@ -19,6 +19,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		}
 	}
 	e.syncToc()
+	e.syncDetails()
 	busy := e.dirty
 	e.prepare(r.W, r.H)
 	x0 := r.X + e.left()
@@ -29,6 +30,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 			e.drawFrame(p, en, f, x0, r.Y+v.top, r)
 		}
 	}
+	e.drawDetails(p, x0, r.Y)
 	selA, selB := e.Doc.Sel.Range()
 	mark, marked := e.Doc.Marked()
 	head := e.Doc.Sel.Head
@@ -39,6 +41,9 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		tx, ty := x0+s.x, r.Y+v.y+row.padTop
 		if row.marker != "" || row.task != parser.NoTask {
 			e.drawMarker(p, row, s, x0, ty)
+		}
+		if row.lineNo > 0 {
+			e.drawLineNumber(p, row, x0, ty)
 		}
 		// 分割线在光标不在其中时只画线，不显示“---”。
 		if row.role == roleRule && !(head >= s.base && head <= s.end) || row.bandH == 0 {
@@ -149,7 +154,7 @@ func (e *Editor) drawFrame(p *ui.Painter, en *entry, f frame, x0, top float32, v
 		return
 	}
 	x := x0 + f.indent
-	w := e.width() - f.indent
+	w := e.width() - f.indent - f.rinset
 	switch f.kind {
 	case frameQuote:
 		if e.classic {

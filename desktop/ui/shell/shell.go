@@ -118,6 +118,8 @@ type Shell struct {
 
 	svc         *ui.Services // 剪贴板等窗口服务，每帧由视图更新
 	focusEditor bool         // 下一帧让编辑区获得焦点（切换标签、打开文档后）
+	outlineList ui.ListState // 大纲面板的虚拟列表位置（各标签共用）
+	wheelAcc    float32      // Ctrl 滚轮缩放的累计滚动量（ctrlWheel）
 	status      string
 }
 
@@ -384,6 +386,23 @@ func (s *Shell) OpenFiles(paths []string) {
 		s.nextID++
 		s.addTab(newTab(s.nextID, doc.Path, doc.Markdown, doc.Encoding))
 		s.remember(doc.Path, "file")
+	}
+}
+
+// openPreview 从资源管理器单击打开文件（原版 filePreviewEnabled）：新打开的标签显示为预览标签（标题斜体），之前的
+// 预览标签随之固定；编辑或双击标题后也固定。关闭该设置时与普通打开相同。
+func (s *Shell) openPreview(path string) {
+	if i := s.findTab(path); i >= 0 || !s.prefs.FilePreviewEnabled {
+		s.OpenFiles([]string{path})
+		return
+	}
+	n := len(s.tabs)
+	s.OpenFiles([]string{path})
+	if len(s.tabs) > n {
+		for _, t := range s.tabs {
+			t.preview = false
+		}
+		s.tabs[len(s.tabs)-1].preview = true
 	}
 }
 
@@ -660,6 +679,10 @@ func (s *Shell) setMode(mode string) {
 // run 在当前文档上执行编辑命令；源码模式下格式命令不可用。
 func (s *Shell) run(name string) {
 	t := s.activeTab()
+	if t != nil && name == "details" && s.mode() == modeSource && t.Kind() == kindMarkdown {
+		s.insertSourceDetails(t)
+		return
+	}
 	if t == nil || s.mode() != modeSemantic {
 		return
 	}

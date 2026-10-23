@@ -22,6 +22,9 @@ body {
 .nomo-export .html-widget-aligned-paragraph { margin: 1em 0; }
 .nomo-export h4, .nomo-export h5, .nomo-export h6 { color: var(--md-editor-heading-fg); }
 .nomo-export hr { border: 0; border-top: 1px solid var(--md-editor-border); margin: 24px 0; }
+.nomo-export details { margin: 1em 0; border: 1px solid var(--md-editor-border); border-radius: 6px; padding: 0.5em 0.8em; min-width: 0; }
+.nomo-export summary { cursor: pointer; font-weight: 600; }
+@media print { .nomo-export details { break-inside: auto; } .nomo-export summary { break-after: avoid; } }
 .nomo-export img { min-width: 0; min-height: 0; height: auto; user-select: auto; }
 .nomo-export .task-checkbox-widget, .nomo-export .footnote-ref, .nomo-export .footnote-def-marker { cursor: default; }
 .nomo-export .task-checkbox-widget { user-select: none; }

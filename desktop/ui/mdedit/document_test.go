@@ -249,3 +249,23 @@ func TestChunkedTreeMatchesWholeParse(t *testing.T) {
 		t.Logf("种子 %d：结束时 %d 段", seed, len(tr.chunks))
 	}
 }
+
+// TestStatsIncremental 随机编辑后，增量维护的写作统计与整篇重算一致。
+func TestStatsIncremental(t *testing.T) {
+	inserts := []string{"a", "word", " ", "\n", "中文", "かな", "x1", "-", "😀", "", "foo bar\nbaz"}
+	d := NewDocument(repoFile(t, "sample.md"))
+	_ = d.Stats()
+	rng := rand.New(rand.NewSource(7))
+	for i := 0; i < 2000; i++ {
+		s := d.Source()
+		from := runeStartBefore(s, rng.Intn(len(s)+1))
+		to := runeStartBefore(s, min(len(s), from+rng.Intn(6)))
+		if to < from {
+			to = from
+		}
+		d.Replace(from, to, inserts[rng.Intn(len(inserts))], editOther)
+		if got, want := d.Stats(), TextStats(d.Source()); got != want {
+			t.Fatalf("第 %d 次编辑后统计 %+v，整篇 %+v", i, got, want)
+		}
+	}
+}

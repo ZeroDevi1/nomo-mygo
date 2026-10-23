@@ -91,6 +91,10 @@ type row struct {
 	htmlImg bool
 	// htmlKind 非 previewNone 表示可预览的 HTML 块或注释块（见 htmlpreview.go），显示规则同 htmlImg。
 	htmlKind uint8
+	// lineNo 为代码块中代码行的行号（从 1 起，0 表示不编号），由 split 按显示行号设置写入（applyLineNumbers）。
+	lineNo int32
+	// rinset 为折叠块正文的右内缩（DIP），由 split 按所在层级设置，rowBox 从可用宽度中扣除。
+	rinset float32
 	// empty 为 true 表示空列表项或空引用的占位行（没有叶子块），编辑时按文本行处理。
 	empty bool
 	// 表格单元格：cellX、cellW 为所在列相对表格左边的位置与宽度，shift 为表格横向滚动偏移（见 layoutTables）。
@@ -141,7 +145,8 @@ type frame struct {
 	kind        frameKind
 	first, last int
 	indent      float32
-	tone        int // 提示块类型
+	rinset      float32 // 折叠块正文的右内缩，绘制宽度与表格可用宽度从中扣除
+	tone        int     // 提示块类型
 	lang        string
 	// 表格（frameTable）：cols 为各列宽度，tableW 为总宽，viewW 为可见宽度（内容区去掉缩进），scrollX 为
 	// 横向滚动偏移（0 ≤ scrollX ≤ tableW−viewW），由 layoutTables 计算、scrollTable 修改。
@@ -176,9 +181,12 @@ type container struct {
 	nesting int // 列表嵌套层数，决定项目符号样式
 }
 
-func buildRows(d *Document, top Block, seed maphash.Seed) ([]row, []frame) {
+func buildRows(d *Document, ti int, top Block, seed maphash.Seed) ([]row, []frame) {
 	bb := &blockBuilder{d: d, top: top, src: d.Source(), seed: seed}
-	if top.Kind == KindToc {
+	if d.details().marker(ti) != nil {
+		// 折叠块标记：整块一行，收起时为标题行或卡片底边（detailsview.go），光标严格位于块内时显示原文。
+		bb.add(row{kind: rowLine, role: roleHTML, htmlKind: previewDetails, a: 0, b: top.End - top.Start, tone: -1, after: paraAfter / 2})
+	} else if top.Kind == KindToc {
 		// 整个目录区一行：收起时为目录卡片（见 htmlpreview.go），光标严格位于区内时显示原文。
 		z := top.End
 		bb.pending += 8
@@ -211,7 +219,7 @@ func (bb *blockBuilder) hash(r *row) uint64 {
 		}
 	}
 	b := [...]uint32{uint32(r.kind), uint32(r.role), uint32(r.level), math.Float32bits(r.indent), uint32(r.col), uint32(r.ncol),
-		uint32(r.align), uint32(int32(r.tone)), math.Float32bits(r.padTop), math.Float32bits(r.padBottom), flags}
+		uint32(r.align), uint32(int32(r.tone)), math.Float32bits(r.padTop), math.Float32bits(r.padBottom), flags, uint32(r.htmlKind)}
 	var buf [4 * len(b)]byte
 	for i, v := range b {
 		binary.LittleEndian.PutUint32(buf[4*i:], v)

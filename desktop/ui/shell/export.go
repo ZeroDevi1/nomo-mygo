@@ -49,10 +49,12 @@ const maxInlineImage = 20 << 20
 const pdfMarkerHost = "nomo-pdf-outline.invalid"
 
 var (
-	headingTagRe = regexp.MustCompile(`(?s)<h([1-6])>(.*?)</h[1-6]>`)
-	imgSrcRe     = regexp.MustCompile(`<img src="([^"]*)"`)
-	codeBlockRe  = regexp.MustCompile(`(?s)<pre><code class="language-([^"]*)">(.*?)</code></pre>`)
-	tagRe        = regexp.MustCompile(`<[^>]+>`)
+	headingTagRe      = regexp.MustCompile(`(?s)<h([1-6])>(.*?)</h[1-6]>`)
+	imgSrcRe          = regexp.MustCompile(`<img src="([^"]*)"`)
+	detailsTagRe      = regexp.MustCompile(`(?i)<details(?:\s[^>]*)?>`)
+	detailsOpenAttrRe = regexp.MustCompile(`(?i)\sopen\b`)
+	codeBlockRe       = regexp.MustCompile(`(?s)<pre><code class="language-([^"]*)">(.*?)</code></pre>`)
+	tagRe             = regexp.MustCompile(`<[^>]+>`)
 )
 
 // exportDocument 生成导出 HTML；forPDF 时插入书签标记并返回书签列表。
@@ -61,6 +63,15 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 	body := parser.New(parser.Default | parser.ExtDollarMath)
 	body.Set(src)
 	out := highlightCodeHTML(body.HTML(), dark)
+	if forPDF {
+		// 打印前展开全部折叠块（原版 exportPrint 在布局前把 details.open 设为 true），PDF 中正文完整。
+		out = detailsTagRe.ReplaceAllStringFunc(out, func(m string) string {
+			if detailsOpenAttrRe.MatchString(m) {
+				return m
+			}
+			return "<details open" + m[len("<details"):]
+		})
+	}
 
 	// 标题：加 id（与原版目录锚点一样按标题文字生成，重复时追加序号）与 PDF 书签标记。
 	var outline []PDFOutlineEntry

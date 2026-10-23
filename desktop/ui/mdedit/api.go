@@ -47,14 +47,76 @@ type Stats struct {
 	Chars, Words, Lines int
 }
 
-// Stats 统计原文（O(n)）；调用方按 Version 缓存，不要每帧调用。
-func (d *Document) Stats() Stats { return TextStats(d.Source()) }
+// Stats 返回原文的写作统计：首次调用时整篇统计（O(n)），之后由每次编辑增量维护（见 statsEdit）。
+func (d *Document) Stats() Stats {
+	if !d.statsOK {
+		d.stats, d.statsOK = TextStats(d.Source()), true
+	}
+	return d.stats
+}
+
+// statsEdit 在原文 [from, to) 被替换为 text 之后增量更新统计。统计按字符顺序扫描，只有字母与数字会把“在词中”
+// 状态延续到下一个字符，其余字符（空白、换行、标点、汉字与假名）都会把它重置；因此只需重算编辑点向前、向后各到
+// 最近一个重置字符为止的区间，区间外的贡献不变。成本与该区间长度成正比（通常是一个词）。
+func (d *Document) statsEdit(oldSrc string, from, to int, text string) {
+	if !d.statsOK {
+		return
+	}
+	a := from
+	for a > 0 {
+		r, n := utf8.DecodeLastRuneInString(oldSrc[:a])
+		if resetsWord(r) {
+			break
+		}
+		a -= n
+	}
+	z := to
+	for z < len(oldSrc) {
+		r, n := utf8.DecodeRuneInString(oldSrc[z:])
+		z += n
+		if resetsWord(r) {
+			break
+		}
+	}
+	src := d.Source()
+	old, cur := TextStats(oldSrc[a:z]), TextStats(src[a:z+len(text)-(to-from)])
+	d.stats.Chars += cur.Chars - old.Chars
+	d.stats.Words += cur.Words - old.Words
+	d.stats.Lines += cur.Lines - old.Lines
+}
+
+// resetsWord 报告字符 r 之后是否不在词中（与 TextStats 的规则一致）。
+func resetsWord(r rune) bool {
+	return !(unicode.IsLetter(r) || unicode.IsDigit(r)) ||
+		unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r)
+}
 
 // TextStats 按与 Document.Stats 相同的规则统计任意文本（TXT/JSON 标签用）。
 func TextStats(src string) Stats {
 	s := Stats{Lines: 1}
 	inWord := false
 	for i := 0; i < len(src); {
+		// ASCII 快速路径：与下方通用分支的规则相同，免去逐字符的 Unicode 表查询。
+		if c := src[i]; c < utf8.RuneSelf {
+			i++
+			switch {
+			case c == '\n':
+				s.Lines++
+				inWord = false
+			case c == ' ' || c >= '\t' && c <= '\r':
+				inWord = false
+			case c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9':
+				s.Chars++
+				if !inWord {
+					s.Words++
+				}
+				inWord = true
+			default:
+				s.Chars++
+				inWord = false
+			}
+			continue
+		}
 		r, n := utf8.DecodeRuneInString(src[i:])
 		i += n
 		switch {
@@ -245,7 +307,11 @@ func (e *Editor) Run(name string) bool {
 	case "quote":
 		e.toggleQuote()
 	case "codeBlock":
-		e.wrapLines("```\n", "\n```")
+		e.insertCodeBlock()
+	case "mermaid":
+		e.insertDiagram()
+	case "comment":
+		e.insertCommentBlock()
 	case "mathBlock":
 		e.wrapLines("$$\n", "\n$$")
 	case "callout":
@@ -256,6 +322,8 @@ func (e *Editor) Run(name string) bool {
 		e.insertBlock("---")
 	case "table":
 		e.insertBlock("| 列 1 | 列 2 |\n| --- | --- |\n|  |  |")
+	case "details":
+		e.InsertDetails()
 	default:
 		return false
 	}
@@ -599,3 +667,45 @@ func (e *Editor) ScrollToSource(off int) {
 
 // Focused 报告编辑区是否持有键盘焦点（上一帧的状态）。
 func (e *Editor) Focused() bool { return e.focused }
+
+// ContextTarget 描述最近一次右键位置的目标，外壳据此组织编辑区右键菜单（对应原版 contextMenu.ts 的
+// ContextMenuTarget）。Kind 为 "selection"（右键落在非空选区内）、"details"（折叠块标题行）、"link"、"heading"
+// 或 "text"；Href 为链接地址，Level 为标题级别，DetailsKey、DetailsOpen 为折叠块的键与默认展开。
+type ContextTarget struct {
+	Kind        string
+	Href        string
+	Level       int
+	DetailsKey  int
+	DetailsOpen bool
+}
+
+// ContextTarget 返回最近一次右键位置的目标；应在右键菜单打开时调用。
+func (e *Editor) ContextTarget() ContextTarget {
+	d := e.Doc
+	pos := clamp(e.ctxPos, 0, len(d.Source()))
+	if a, z := d.Sel.Range(); a < z && pos >= a && pos <= z {
+		return ContextTarget{Kind: "selection"}
+	}
+	if e.ctxDetails >= 0 {
+		if f, ok := e.detailsFrameByKey(e.ctxDetails); ok {
+			return ContextTarget{Kind: "details", DetailsKey: f.key, DetailsOpen: f.defaultOpen}
+		}
+	}
+	i, _ := d.BlockAt(pos)
+	if i < 0 {
+		return ContextTarget{Kind: "text"}
+	}
+	b := d.blocks[i]
+	if b.Kind == parser.Heading {
+		return ContextTarget{Kind: "heading", Level: d.md.Block(b.Index).Level}
+	}
+	if s, ok := e.segAt(pos); ok && s.kind == rowText {
+		r := &e.entries[s.i].rows[s.k]
+		for _, in := range d.md.Inlines(b.Index + r.rel) {
+			if in.Kind == parser.Link && pos >= in.Start && pos <= in.End {
+				return ContextTarget{Kind: "link", Href: in.Dest}
+			}
+		}
+	}
+	return ContextTarget{Kind: "text"}
+}

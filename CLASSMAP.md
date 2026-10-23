@@ -66,6 +66,8 @@
 | 原文、块索引、选区与撤销 | `desktop/ui/mdedit/document.go` | `edit.go`, `history.go`, `text.go` | 修改增量块索引、UTF-16/字节换算、组字与撤销合并规则 |
 | 分段解析（大文档按键成本） | `desktop/ui/mdedit/chunks.go` | `document.go`（`recollect` 增量块收集） | 修改分段阈值、切分安全条件、编辑后的合并与重新切分 |
 | 正文行高（行距排版） | `desktop/ui/mdedit/lines.go` | `view.go`（`ensureRow`）, `blocks.go`（`rowLead`）, `draw.go` | 修改行距规则、加行距后的命中测试、选区与逐行绘制 |
+| 折叠块（details） | `desktop/ui/mdedit/details.go`（识别与配对）、`detailsview.go`（视图与命令） | `blocks.go`（标记行）、`htmlpreview.go`（`previewDetails`）、`desktop/ui/shell/editormenu.go` | 修改折叠标记语法、配对与增量平移、卡片绘制、折叠隐藏与自动展开、插入/默认展开/取消折叠 |
+| 编辑区选项（代码块行号、Tab 缩进、行内代码、复制语法、默认插入） | `desktop/ui/mdedit/options.go` | `desktop/ui/shell/editoroptions.go`（设置到选项、图表模板、Ctrl 滚轮） | 修改原版 editor.updateOptions 对应的显示与插入行为 |
 | 原文到显示的投影 | `desktop/ui/mdedit/projection.go` | `view.go` | 修改行内标记就地展开/隐藏、行内 HTML 标签样式、实体解码、提示块标记、显示与原文偏移映射 |
 | 块组件（列表、任务、引用、提示块、表格、代码块、分割线、front matter） | `desktop/ui/mdedit/blocks.go` | `draw.go`, `view.go`, `document.go` | 修改块展开为行的规则、容器前缀、缩进与间距、装饰范围 |
 | 可见区布局与缓存 | `desktop/ui/mdedit/view.go` | `blocks.go`, `input.go` | 修改行虚拟化、阅读锚点、布局缓存预算与淘汰、命中测试、主题配色 |
@@ -99,6 +101,8 @@
 | 资源管理器与标签的文件操作 | `desktop/ui/shell/fileops.go` | `explorer.go`, `view.go` | 修改新建、重命名、复制路径、在文件夹中显示 |
 | 资源管理器目录树 | `desktop/ui/shell/explorer.go` | `desktop/internal/docfs/tree.go` | 修改目录懒加载、刷新与点击打开 |
 | 颜色主题、字体与用户主题导入导出 | `desktop/ui/shell/appearance.go` | `desktop/ui/themes`, `settings.go` | 修改主题到编辑器配色的映射、字体应用、用户主题文件读写 |
+| 编辑区右键菜单 | `desktop/ui/shell/editormenu.go` | `desktop/ui/mdedit/api.go`（`ContextTarget`） | 修改右键目标判断与各目标的菜单项（原版 buildEditorContextMenuItems） |
+| 大纲面板（可折叠树、默认展开层级） | `desktop/ui/shell/outline.go` | `view.go`（`outline`） | 修改大纲可见项、展开箭头与默认层级 |
 | 快捷插入菜单 | `desktop/ui/shell/quickinsert.go` | `desktop/ui/mdedit/api.go`（`CaretRect`、`Delete`、`Intercept`） | 修改触发条件、菜单项与键盘操作 |
 | 原生表情建议与选择器 | `desktop/ui/shell/emoji.go` | `desktop/internal/emoji`, `desktop/ui/mdedit/api.go`（`CaretContext`、`Replace`）, `Document.InputVersion` | 修改冒号建议的弹出与排除条件、键盘操作、选择器分类/网格/搜索、插入目标校验 |
 | 图片粘贴、拖放与插入 | `desktop/ui/shell/images.go` | `desktop/internal/imageasset`, `mdedit` `PasteData` | 修改图片导入策略、PicGo 上传、插入的 Markdown / HTML |

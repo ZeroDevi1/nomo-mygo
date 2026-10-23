@@ -43,6 +43,7 @@ type Prefs struct {
 	WritingStatsMetric          string  `json:"writingStatsMetric"`
 	ReadingTimeVisible          bool    `json:"readingTimeVisible"`
 	DefaultCodeBlockLanguage    string  `json:"defaultCodeBlockLanguage"`
+	DefaultDiagramType          string  `json:"defaultDiagramType"`
 	ZoomPercent                 float64 `json:"zoomPercent"`
 	CtrlWheelZoomEnabled        bool    `json:"ctrlWheelZoomEnabled"`
 	OutlineDefaultExpandLevel   float64 `json:"outlineDefaultExpandLevel"`
@@ -96,7 +97,7 @@ func defaultPrefs() Prefs {
 		TypographyEnabled: true, ContentWidthPercent: 60, LargeDocumentLimit: 500_000, DocumentStyleID: "nomo-modern",
 		OpenDefaultBehavior: "ask-every-time", FilePreviewEnabled: true, CloseWindowBehavior: "ask-every-time",
 		ExternalFileChangeBehavior: "reload-external", OutlineVisible: true, WritingStatsVisible: true,
-		WritingStatsMetric: "words", DefaultCodeBlockLanguage: "ts", ZoomPercent: 100, CtrlWheelZoomEnabled: true,
+		WritingStatsMetric: "words", DefaultCodeBlockLanguage: "ts", DefaultDiagramType: "flowchart", ZoomPercent: 100, CtrlWheelZoomEnabled: true,
 		OutlineDefaultExpandLevel: 2, CodeBlockLineNumbersVisible: true, CodeBlockIndent: "spaces-2",
 		InlineCodeRenderingEnabled: true, CopyMarkdownSyntaxEnabled: true, RenderMode: "hardware",
 		SoftwareUpdateAutoCheck: true, ColorThemeID: "nomo-default", QuickInsertEnabled: true, QuickInsertTrigger: "/",
@@ -120,7 +121,8 @@ func (p *Prefs) fields() map[string]any {
 		"sidebarHidden": &p.SidebarHidden, "toolbarHidden": &p.ToolbarHidden, "outlineVisible": &p.OutlineVisible,
 		"writingStatsVisible": &p.WritingStatsVisible, "writingStatsMetric": &p.WritingStatsMetric,
 		"readingTimeVisible": &p.ReadingTimeVisible, "defaultCodeBlockLanguage": &p.DefaultCodeBlockLanguage,
-		"zoomPercent": &p.ZoomPercent, "ctrlWheelZoomEnabled": &p.CtrlWheelZoomEnabled,
+		"defaultDiagramType": &p.DefaultDiagramType,
+		"zoomPercent":        &p.ZoomPercent, "ctrlWheelZoomEnabled": &p.CtrlWheelZoomEnabled,
 		"outlineDefaultExpandLevel":   &p.OutlineDefaultExpandLevel,
 		"codeBlockLineNumbersVisible": &p.CodeBlockLineNumbersVisible, "codeBlockIndent": &p.CodeBlockIndent,
 		"inlineCodeRenderingEnabled": &p.InlineCodeRenderingEnabled, "copyMarkdownSyntaxEnabled": &p.CopyMarkdownSyntaxEnabled,
@@ -190,6 +192,7 @@ func (p *Prefs) normalize() {
 	clampF(&p.ZoomPercent, 80, 160, d.ZoomPercent)
 	clampF(&p.OutlineDefaultExpandLevel, 1, 6, d.OutlineDefaultExpandLevel)
 	oneOf(&p.CodeBlockIndent, d.CodeBlockIndent, "spaces-2", "spaces-4", "tab")
+	oneOf(&p.DefaultDiagramType, d.DefaultDiagramType, diagramTypes...)
 	oneOf(&p.RenderMode, d.RenderMode, "hardware", "software")
 }
 

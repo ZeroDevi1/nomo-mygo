@@ -74,12 +74,14 @@ type leafOpts struct {
 	prefix bool
 	// callout 为 true 时，开头的 [!TYPE] 及其后的换行按标记处理。
 	callout bool
+	// rawCode 为 true 时行内代码按原文显示（反引号可见、无代码样式），对应 inlineCodeRenderingEnabled 关闭。
+	rawCode bool
 }
 
 // projectLeaf 为解析器块 idx（原文区间 [start, end)）生成投影。
 func projectLeaf(d *Document, idx, start, end int, ex expansion, o leafOpts) *projection {
 	src := d.Source()[start:end]
-	pb := projBuilder{src: src, ex: ex, p: &projection{}}
+	pb := projBuilder{src: src, ex: ex, p: &projection{}, rawCode: o.rawCode}
 	ins := d.md.Inlines(idx)
 	if len(ins) == 0 {
 		pb.emit(0, len(src), 0, true)
@@ -122,12 +124,13 @@ func projectIdentity(text string) *projection {
 }
 
 type projBuilder struct {
-	src string
-	ex  expansion
-	p   *projection
-	pos int // 已处理到的原文偏移（相对片段起点）
-	b   strings.Builder
-	u16 int
+	src     string
+	ex      expansion
+	rawCode bool // 见 leafOpts.rawCode
+	p       *projection
+	pos     int // 已处理到的原文偏移（相对片段起点）
+	b       strings.Builder
+	u16     int
 }
 
 // emit 处理 [a, z)：可见时追加为显示片段，否则跳过。a 之前未被任何节点认领的
@@ -312,6 +315,10 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 			pb.emit(a+nl, a+nl+1, cur, true)
 			pb.emit(a+nl+1, z, cur, false)
 		case parser.Code:
+			if pb.rawCode {
+				pb.emit(a, z, cur, true)
+				break
+			}
 			n := 0
 			for a+n < z && pb.src[a+n] == '`' {
 				n++

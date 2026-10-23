@@ -60,6 +60,15 @@ type Tab struct {
 	stats    mdedit.Stats
 	outVer   uint64
 	outline  []mdedit.Heading
+	// outFold 记录大纲中与默认展开状态相反的标题（按标题序号）；标题数变化时清空。outRows 缓存可见标题序号，
+	// outRowsKey 为其依据的（大纲版本、折叠代数、默认层级）。
+	outFold    map[int]bool
+	outFoldGen uint64
+	// preview 表示预览标签（openPreview）：编辑、双击标题或打开另一预览后固定。
+	preview      bool
+	outRows      []int
+	outRowsKey   [3]uint64
+	outFoldCount int // outFold 记录时的标题数
 
 	lint lintState // Markdown 格式检查结果，见 lint.go
 }

@@ -3,6 +3,8 @@ package shell
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -30,6 +32,9 @@ func (s *Shell) view(c *ui.Context) {
 		c.Root().Background(ui.Transparent)
 	}
 	tab := s.activeTab()
+	if tab != nil && tab.preview && tab.Dirty() {
+		tab.preview = false // 编辑后固定预览标签
+	}
 	if tab != nil {
 		if s.mode() == modeSource {
 			tab.syncFromSource()
@@ -154,7 +159,13 @@ func (s *Shell) macTabs(c *ui.Context) {
 					if !selected {
 						txt.TextColor(s.ch.muted)
 					}
+					if tab.preview {
+						txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
+					}
 				})
+				if label.DoubleClicked() {
+					tab.preview = false // 双击标题固定预览标签
+				}
 				if label.Clicked() && !selected {
 					s.activate(i)
 				}
@@ -229,7 +240,13 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 						if !selected {
 							txt.TextColor(s.ch.muted)
 						}
+						if tab.preview {
+							txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
+						}
 					})
+					if label.DoubleClicked() {
+						tab.preview = false // 双击标题固定预览标签
+					}
 					if label.Clicked() && !selected {
 						s.activate(i)
 					}
@@ -440,7 +457,7 @@ func (s *Shell) document(c *ui.Context) {
 					el = editor.View(ck, st).Fill().MaxWidth(820)
 				})
 			} else {
-				el = tab.Ed.View(ck)
+				el = s.editorView(ck, tab)
 				if r := el.Bounds(); r.W > 0 {
 					s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
 				}
@@ -488,6 +505,7 @@ func (s *Shell) toolbar(c *ui.Context) {
 			[3]string{"link", s.tr("link"), "link"})
 		group([3]string{"list", s.tr("unorderedList"), "unorderedList"}, [3]string{"list-ordered", s.tr("orderedList"), "orderedList"},
 			[3]string{"square-check", s.tr("toggleTaskList"), "taskList"}, [3]string{"quote", s.tr("toggleQuote"), "quote"},
+			[3]string{"panel-top-close", s.tr("insertDetails"), "details"},
 			[3]string{"code-xml", s.tr("insertCodeBlock"), "codeBlock"}, [3]string{"table-2", s.tr("insertTable"), "table"},
 			[3]string{"minus", s.tr("horizontalRule"), "horizontalRule"})
 		// 表情按钮与原版一样位于工具栏右侧。
@@ -566,37 +584,51 @@ func (s *Shell) outline(c *ui.Context, tab *Tab) {
 			ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 14).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, s.tr("documentOutline")).FontSize(11).Bold().TextColor(s.ch.muted)
 			})
-			ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Padding(0, 6, 8, 6).Children(func() {
-					head := tab.Doc.Sel.Head
-					current := -1
-					hs := tab.Outline()
-					for i, h := range hs {
-						if h.Pos <= head {
-							current = i
+			// 虚拟列表：只为可见的标题建元素，万级标题的文档每帧成本与标题数无关。
+			hs := tab.Outline()
+			rows := s.outlineRows(tab, hs)
+			head := tab.Doc.Sel.Head
+			current := sort.Search(len(hs), func(i int) bool { return hs[i].Pos > head }) - 1
+			ui.List(c, &s.outlineList, len(rows), func(r int) {
+				i := rows[r]
+				h := hs[i]
+				ck := c.Key(i)
+				parent := i+1 < len(hs) && hs[i+1].Level > h.Level
+				ui.Row(ck).FillWidth().Padding(0, 6).AlignItems(ui.Center).Children(func() {
+					// 有下级标题时显示展开箭头（原版大纲树）；无下级时留出同宽空位，标题对齐。
+					indent := float32(h.Level-1) * 12
+					ui.Box(ck).Width(indent).Height(1)
+					toggle := ui.ButtonBase(ck).Size(18, 18).Justify(ui.Center).AlignItems(ui.Center).Radius(4)
+					toggle.Children(func() {
+						arrow := ui.Icon(ck, s.icon("chevron-right")).FontSize(12).TextColor(s.ch.muted)
+						if s.outlineExpanded(tab, hs, i) {
+							arrow.Rotate(90)
 						}
+						if !parent {
+							arrow.Opacity(0)
+						}
+					})
+					if parent && toggle.Clicked() {
+						s.toggleOutlineItem(tab, i)
 					}
-					for i, h := range hs {
-						ck := c.Key(i)
-						b := ui.ButtonBase(ck).FillWidth().Padding(4, 8, 4, 8+float32(h.Level-1)*12).Radius(c.Theme().Radius).Justify(ui.Start)
-						if i == current {
-							b.Background(s.ch.pressed)
-						} else if b.Hovered() {
-							b.Background(s.ch.hover)
+					b := ui.ButtonBase(ck).Grow(1).Padding(4, 6, 4, 4).Radius(c.Theme().Radius).Justify(ui.Start)
+					if i == current {
+						b.Background(s.ch.pressed)
+					} else if b.Hovered() {
+						b.Background(s.ch.hover)
+					}
+					b.Children(func() {
+						txt := ui.Text(ck, h.Text).FontSize(12).SingleLine()
+						if h.Level > 2 {
+							txt.TextColor(s.ch.muted)
 						}
-						b.Children(func() {
-							txt := ui.Text(ck, h.Text).FontSize(12).SingleLine()
-							if h.Level > 2 {
-								txt.TextColor(s.ch.muted)
-							}
-						})
-						if b.Clicked() {
-							tab.Ed.JumpTo(h.Pos)
-							s.focusEditor = true
-						}
+					})
+					if b.Clicked() {
+						tab.Ed.JumpTo(h.Pos)
+						s.focusEditor = true
 					}
 				})
-			})
+			}).Grow(1).FillWidth().Padding(0, 0, 8, 0)
 		})
 	})
 }
@@ -630,13 +662,20 @@ func (s *Shell) statsText(words, chars, lines int) string {
 	w := fmt.Sprintf("%d %s", words, s.tr("wordUnit"))
 	ch := fmt.Sprintf("%d %s", chars, s.tr("charUnit"))
 	l := fmt.Sprintf("%d %s", lines, s.tr("lineUnit"))
+	var out string
 	switch s.prefs.WritingStatsMetric {
 	case "chars", "visibleChars":
-		return ch + " · " + w + " · " + l
+		out = ch + " · " + w + " · " + l
 	case "lines":
-		return l + " · " + w + " · " + ch
+		out = l + " · " + w + " · " + ch
+	default:
+		out = w + " · " + ch + " · " + l
 	}
-	return w + " · " + ch + " · " + l
+	if s.prefs.ReadingTimeVisible {
+		// 原版 writingStats：每分钟 280 词，至少 1 分钟。
+		out += " · " + s.tr("estimatedReadingMinutes", "minutes", strconv.Itoa(max(1, (words+279)/280)))
+	}
+	return out
 }
 
 // empty 是没有打开文档时的空白工作区，对应原版 EmptyWorkspace。

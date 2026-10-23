@@ -121,7 +121,7 @@ func (s *Shell) comparisonView(c *ui.Context, left, right *Tab) (active ui.Eleme
 					})
 					return
 				}
-				els[k] = t.Ed.View(ck)
+				els[k] = s.editorView(ck, t)
 				if t.Ed.Focused() {
 					s.focusComparisonMember(t)
 				}

@@ -26,6 +26,8 @@ type Block struct {
 // 被新的 [First, First+Inserted) 取代，其余块内容不变（偏移可能整体平移）。
 type Change struct {
 	First, Removed, Inserted int
+	// At、OldLen、NewLen 为原文层面的替换：字节起点、被替换长度与新文本长度（视图据此平移按偏移记录的状态）。
+	At, OldLen, NewLen int
 }
 
 // Selection 是字节偏移表示的选区；Anchor 固定端，Head 为光标所在端。
@@ -56,6 +58,13 @@ type Document struct {
 	fm          int
 	headings    []Heading
 	headingsVer uint64
+	// detailsIdx 缓存折叠框架（见 details.go），按版本失效。
+	detailsIdx *detailsIndex
+	// detailsCache 缓存标记块原文的解析结果（detailsParsed），条目数有上限。
+	detailsCache map[string]detailsMarkerParse
+	// stats 为写作统计，statsOK 为 false 时尚未计算；计算后由 replace 增量维护（statsEdit）。
+	stats   Stats
+	statsOK bool
 	// inputVer 是最近一次键盘输入（键入、删除、输入法）后的版本；撤销、粘贴与命令不更新它。
 	inputVer uint64
 
@@ -229,9 +238,12 @@ func (d *Document) replace(from, to int, text string) Change {
 	old := d.blocks
 	oldLen := d.md.Len()
 	d.md.Edit(from, to, text)
+	d.statsEdit(src, from, to, text)
 	if ch, ok := d.recollect(src, from, to, delta, u16Delta, d.md.Len()-oldLen); ok {
 		d.u16Total += u16Delta
 		d.version++
+		ch.At, ch.OldLen, ch.NewLen = from, to-from, len(text)
+		d.shiftDetails(ch, d.version-1)
 		return ch
 	}
 	nb := d.collect(d.spare[:0])
@@ -265,7 +277,9 @@ func (d *Document) replace(from, to int, text string) Change {
 	d.spare, d.blocks = old, nb
 	d.u16Total += u16Delta
 	d.version++
-	return Change{First: p, Removed: len(old) - p - s, Inserted: mid - p}
+	ch := Change{First: p, Removed: len(old) - p - s, Inserted: mid - p, At: from, OldLen: to - from, NewLen: len(text)}
+	d.shiftDetails(ch, d.version-1)
+	return ch
 }
 
 // recollect 在编辑后只重建受影响的顶层块，避免每次按键遍历全部顶层子块。解析器只重解析编辑点附近，其后的块

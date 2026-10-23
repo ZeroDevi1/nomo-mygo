@@ -116,7 +116,7 @@ func (s *Shell) miniLayout(c *ui.Context) {
 		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 		ck := c.Key(tab.ID)
 		ui.Column(ck).Grow(1).Fill().Children(func() {
-			el := tab.Ed.View(ck)
+			el := s.editorView(ck, tab)
 			if r := el.Bounds(); r.W > 0 {
 				s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
 			}

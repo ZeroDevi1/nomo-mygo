@@ -136,6 +136,12 @@ type htmlBlockPreview struct {
 	layW   float32
 	layGen uint64
 	hasImg bool
+	// details 为 true 表示折叠块标记：dblock 为所在顶层块序号，dver、dgen 为创建时的原文版本与折叠状态代数
+	// （任一过期即重建，见 detailsStale），dtok 为排版后各标记的纵向范围。
+	details    bool
+	dblock     int
+	dver, dgen uint64
+	dtok       []detailsTok
 }
 
 // hpLayout 是预览的排版结果：一组绘制操作，坐标相对预览左上角。
@@ -189,6 +195,11 @@ func (e *Editor) htmlLayout(b *htmlBlockPreview, w float32) *hpLayout {
 	base := hpStyle{size: bodySize * e.scale}
 	var h float32
 	switch {
+	case b.details:
+		h = ctx.detailsMarker(b, w)
+		ctx.lay.w, ctx.lay.h = w, h // 结束标记只占卡片底部内边距，不按一行留高
+		b.lay, b.layW, b.layGen = ctx.lay, w, gen
+		return b.lay
 	case b.toc:
 		h = ctx.tocCard(b, w)
 	case b.comment:
@@ -806,6 +817,7 @@ const (
 	previewToc
 	previewMath    // 公式块（$$…$$）
 	previewMermaid // ```mermaid 代码块
+	previewDetails // 折叠块标记（details.go）
 )
 
 // projectHTMLPreview 生成 HTML 块、公式块与 Mermaid 块收起时的投影：整块为一个对象。
@@ -822,7 +834,7 @@ func projectHTMLPreview(text string, kind uint8) *projection {
 		pb.object(0, len(text), imgObj{render: RenderMermaid, src: code, alt: code}, 0)
 		return pb.finish()
 	}
-	pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: text, comment: kind == previewComment, toc: kind == previewToc}}, 0)
+	pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: text, comment: kind == previewComment, toc: kind == previewToc, details: kind == previewDetails}}, 0)
 	return pb.finish()
 }
 

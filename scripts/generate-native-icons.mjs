@@ -22,6 +22,10 @@ const names = [
   'lightbulb', 'star', 'triangle-alert', 'check', 'loader-circle', 'octagon-alert', 'file-json-2', 'file-type-2', 'image', 'keyboard',
   'type', 'upload', 'list-checks', 'zap', 'history', 'file-down', 'columns-2', 'picture-in-picture-2',
   'rotate-ccw', 'download',
+  // 折叠块（原版 EditorToolbar 的 PanelTopClose 按钮）
+  'panel-top-close',
+  // 快捷插入的图表与注释（原版 quickInsert 的 diagram、comment）
+  'workflow', 'message-square-text',
   // 表情（原版 EditorToolbar 的 Smile 按钮）
   'smile',
   // Markdown 小窗（原版 AppTitleBar）
