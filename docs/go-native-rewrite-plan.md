@@ -484,3 +484,9 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - 原生界面对 WebView 版的缺口见 9.20 清单；其中第 1 项（Windows 文件关联/右键菜单）的后端已随 WebView 删除，补做时从 git 历史（`desktop/windows_integration_windows.go`）恢复。
 - 验证：Go `vet` / `test`（macOS、`GOOS=windows`、`GOOS=linux` 编译）、`pnpm check`、前端保留的 18 个测试文件（228 个用例通过 227 个；失败的 1 个 `htmlClassifier` 用例在删除前已失败）、`mygo build`（.app 47 MB → 31 MB）。未做真机验证：另一会话当时正用 `/Applications/Nomo MyGo.app` 跑测且占用单实例锁。`scripts/msix/Build-Msix.ps1` 仍读取 Tauri 时期的 `src-tauri` 配置，迁移到 MyGo 时已失效，未改。
 
+### 9.23 修复 PDF 与 Word 导出超时（2026-10-23）
+
+- **原因**：WebKit / WebView2 在隐藏窗口中暂停 `requestAnimationFrame`。PDF 导出页面的排版运行时与表格列宽调度（`src/lib/table-layout/dom.ts`）、Word 导出栅格化公式与图表用的 html-to-image（图片解码后等一帧）都依赖它，回调永远不来：PDF 在打印前的就绪等待里 30 秒超时（连纯文本文档也失败），Word 在含图表的文档上 2 分钟超时、公式退回原文。移除 WebView 前的构建（f9fbe8a）同样失败，不是本轮回归。
+- **修复**：两个只在隐藏窗口中使用的页面把 `requestAnimationFrame` / `cancelAnimationFrame` 换成 16 ms 定时器——离屏渲染页在 `render.html` 头部内联脚本，PDF 打印用的临时 HTML 由 `withFrameShim`（`desktop/export.go`）插到 `<head>` 开头。PDF 导出各阶段（页面加载、就绪、打印）加了日志，超时时能看出卡在哪一步。
+- **实机验证**（macOS，release，隔离 HOME）：纯文本 PDF 394 ms；“全部节点图鉴” PDF 500 ms、7 页、9 项书签，公式与 Mermaid 正确。Word：纯文本、公式与节点图鉴（含 Mermaid 与本地图片）均几秒完成；节点图鉴的 .docx 嵌入 15 张图片（行内与块级公式、流程图、本地 JPG/PNG/WebP 等），仅提示 HTML 块保留为原文。编辑区公式与图表照常显示。
+

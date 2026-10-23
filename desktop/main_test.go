@@ -18,3 +18,14 @@ func TestWebView2BrowserArgs(t *testing.T) {
 		}
 	}
 }
+
+// TestWithFrameShim 动画帧替换脚本放在 <head> 开头（先于页面脚本），没有 <head> 时放在最前。
+func TestWithFrameShim(t *testing.T) {
+	got := withFrameShim("<!doctype html><html><head><script>run()</script></head></html>")
+	if want := "<!doctype html><html><head>" + frameShim + "<script>run()</script>"; got[:len(want)] != want {
+		t.Fatalf("应插在 <head> 之后：%s", got)
+	}
+	if got := withFrameShim("<p>正文</p>"); got != frameShim+"<p>正文</p>" {
+		t.Fatalf("无 <head> 时应放在最前：%s", got)
+	}
+}

@@ -79,7 +79,7 @@ func runPDFExport(input exportPDFInput) (*exportResult, error) {
 	}
 	defer os.RemoveAll(tempDir)
 	htmlPath := filepath.Join(tempDir, "index.html")
-	if err := os.WriteFile(htmlPath, []byte(input.HTMLContent), 0o644); err != nil {
+	if err := os.WriteFile(htmlPath, []byte(withFrameShim(input.HTMLContent)), 0o644); err != nil {
 		return nil, fmt.Errorf("写入临时 HTML 失败：%w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), pdfExportTimeout)
@@ -119,6 +119,20 @@ func runPDFExport(input exportPDFInput) (*exportResult, error) {
 }
 
 var errPDFExportTimeout = errors.New("PDF 导出超时，请稍后重试。")
+
+// frameShim 让隐藏打印窗口里的 requestAnimationFrame 由定时器驱动：WebKit / WebView2 在隐藏窗口中暂停动画帧，
+// 导出页面的排版运行时与表格列宽调度会一直等不到回调，打印前的就绪等待因此超时。只注入打印用的临时副本。
+const frameShim = `<script>window.requestAnimationFrame=function(cb){return setTimeout(function(){cb(performance.now())},16)};` +
+	`window.cancelAnimationFrame=function(id){clearTimeout(id)};</script>`
+
+// withFrameShim 把 frameShim 放到 <head> 开头（没有 <head> 时放在最前），先于页面自己的脚本执行。
+func withFrameShim(html string) string {
+	if i := strings.Index(html, "<head>"); i >= 0 {
+		i += len("<head>")
+		return html[:i] + frameShim + html[i:]
+	}
+	return frameShim + html
+}
 
 // renderHTMLToPDF 用隐藏窗口加载导出 HTML，等排版运行时、字体与图片就绪后原生打印为 PDF。
 func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput) ([]byte, error) {
@@ -167,8 +181,10 @@ func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput)
 			return nil, err
 		}
 	case <-ctx.Done():
+		applog.Warn("Export", "PDF 页面未完成加载："+fileURL)
 		return nil, errPDFExportTimeout
 	}
+	applog.Debug("Export", "PDF 页面加载完成："+page.URL())
 	contentWidth := (pageWidth - margins.Left - margins.Right) * millimetersPerInch
 	contentHeight := (pageHeight - margins.Top - margins.Bottom) * millimetersPerInch
 	script := strings.NewReplacer(
@@ -186,8 +202,10 @@ func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput)
 			return nil, fmt.Errorf("等待 PDF 页面字体和图片完成失败：%w", err)
 		}
 	case <-ctx.Done():
+		applog.Warn("Export", "PDF 页面等待字体、图片或排版超时")
 		return nil, errPDFExportTimeout
 	}
+	applog.Debug("Export", "PDF 页面就绪，开始打印")
 	background := input.PrintBackground == nil || *input.PrintBackground
 	type printResult struct {
 		data []byte
@@ -211,6 +229,7 @@ func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput)
 		}
 		return result.data, nil
 	case <-ctx.Done():
+		applog.Warn("Export", "PDF 原生打印超时")
 		return nil, errPDFExportTimeout
 	}
 }
