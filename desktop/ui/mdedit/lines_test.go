@@ -74,3 +74,29 @@ func TestEditorLineHeightSetting(t *testing.T) {
 		t.Fatalf("代码块不受正文行高影响：%v → %v", code175, h)
 	}
 }
+
+// TestVerticalMoveWithLeading 加了行距的多行段落中，上下移动逐行前进（光标下方 1 DIP 落在本行行距内，不能当作下一行）。
+func TestVerticalMoveWithLeading(t *testing.T) {
+	src := strings.Repeat("这是一段会换行的正文，用来检查加行距后上下移动。", 12) + "\n"
+	ed, tt := newTester(t, src, 600, 800)
+	d := ed.Doc
+	d.SetSelection(Selection{})
+	tt.Frame()
+	lines := len(ed.segOf(0, 0).layout.bands)
+	if lines < 3 {
+		t.Fatalf("应排成多行：%d", lines)
+	}
+	moved := 0
+	for moved < lines+2 {
+		before := d.Sel.Head
+		ed.setHead(ed.moveV(d.Sel.Head, 1), false)
+		tt.Frame()
+		if d.Sel.Head <= before {
+			break
+		}
+		moved++
+	}
+	if moved < lines-1 {
+		t.Fatalf("下移 %d 次，段落 %d 行", moved, lines)
+	}
+}

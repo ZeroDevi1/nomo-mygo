@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
@@ -58,6 +59,8 @@ type Document struct {
 	fm          int
 	headings    []Heading
 	headingsVer uint64
+	// u16cp 缓存最近换算过的大块的 UTF-16 检查点（见 checkpoints）。
+	u16cp *u16Checkpoints
 	// detailsIdx 缓存折叠框架（见 details.go），按版本失效。
 	detailsIdx *detailsIndex
 	// detailsCache 缓存标记块原文的解析结果（detailsParsed），条目数有上限。
@@ -365,8 +368,19 @@ func (d *Document) recollect(oldSrc string, from, to, delta, u16Delta, shift int
 		q--
 	}
 	inserted, removed := len(mid), q-p
+	// 只替换了一个起点不变的块（块内编辑）：UTF-16 坐标按长度差更新，不重新数整块（大代码块、大表格中为 O(块长)）。
+	same := inserted == 1 && removed == 1 && mid[0].Start == old[p].Start && from >= old[p].Start && to <= old[p].End &&
+		mid[0].End == old[p].End+delta
+	var keep Block
+	if same {
+		keep = old[p]
+	}
 	nb := slices.Replace(old, p, q, mid...)
-	d.fillU16(nb[:p+inserted], p)
+	if same {
+		nb[p].U16Start, nb[p].U16Len = keep.U16Start, keep.U16Len+u16Delta
+	} else {
+		d.fillU16(nb[:p+inserted], p)
+	}
 	for k := p + inserted; k < len(nb); k++ {
 		b := &nb[k]
 		b.Index += shift
@@ -402,7 +416,13 @@ func (d *Document) ByteToU16(b int) int {
 	if i < 0 {
 		return u16Len(src[:b])
 	}
-	return d.blocks[i].U16Start + u16Len(src[d.blocks[i].Start:b])
+	blk := d.blocks[i]
+	if b-blk.Start > u16Big {
+		pts := d.checkpoints(i)
+		k := sort.Search(len(pts), func(k int) bool { return pts[k][0] > b-blk.Start }) - 1
+		return blk.U16Start + pts[k][1] + u16Len(src[blk.Start+pts[k][0]:b])
+	}
+	return blk.U16Start + u16Len(src[blk.Start:b])
 }
 
 // U16ToByte 把 UTF-16 偏移换算为字节偏移，落在代理对中间时取到完整 rune 之后。
@@ -414,7 +434,48 @@ func (d *Document) U16ToByte(u int) int {
 		return u16ToByte(src, u)
 	}
 	b := d.blocks[i]
+	if u-b.U16Start > u16Big/2 && b.End-b.Start > u16Big {
+		pts := d.checkpoints(i)
+		k := sort.Search(len(pts), func(k int) bool { return pts[k][1] > u-b.U16Start }) - 1
+		return b.Start + pts[k][0] + u16ToByte(src[b.Start+pts[k][0]:], u-b.U16Start-pts[k][1])
+	}
 	return b.Start + u16ToByte(src[b.Start:], u-b.U16Start)
+}
+
+// 大块内换算的检查点参数：块内偏移超过 u16Big 字节时改用检查点，每 u16Stride 字节一个。经验值：4 KB 一个检查点
+// 时单次换算至多数 4 KB，1.8 MB 的块约 450 个检查点（约 7 KB）。
+const (
+	u16Big    = 16 << 10
+	u16Stride = 4 << 10
+)
+
+// u16Checkpoints 是一个大块内的 UTF-16 检查点：pts[k] 为（字节偏移，UTF-16 偏移），均相对块起点，pts[0] 为 (0, 0)。
+// 按原文版本只缓存一个块，编辑后首次换算时重建（O(块长)，每个版本一次）。
+type u16Checkpoints struct {
+	ver   uint64
+	start int
+	pts   [][2]int
+}
+
+// checkpoints 返回块 i 的 UTF-16 检查点。
+func (d *Document) checkpoints(i int) [][2]int {
+	blk := d.blocks[i]
+	if c := d.u16cp; c != nil && c.ver == d.version && c.start == blk.Start {
+		return c.pts
+	}
+	s := d.md.Source()[blk.Start:blk.End]
+	pts := make([][2]int, 1, len(s)/u16Stride+2)
+	for pos, u := 0, 0; pos < len(s); {
+		next := min(len(s), pos+u16Stride)
+		for next < len(s) && !utf8.RuneStart(s[next]) {
+			next++
+		}
+		u += u16Len(s[pos:next])
+		pos = next
+		pts = append(pts, [2]int{pos, u})
+	}
+	d.u16cp = &u16Checkpoints{ver: d.version, start: blk.Start, pts: pts}
+	return pts
 }
 
 // firstChildStart 返回解析器块 i 的第一个子块的起点（脚注定义的正文起点）。

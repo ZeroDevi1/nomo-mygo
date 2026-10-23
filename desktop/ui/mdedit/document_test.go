@@ -269,3 +269,26 @@ func TestStatsIncremental(t *testing.T) {
 		}
 	}
 }
+
+// TestU16CheckpointsInLargeBlock 大块内的字节与 UTF-16 换算（检查点路径）与直接计数一致，编辑后同样一致。
+func TestU16CheckpointsInLargeBlock(t *testing.T) {
+	src := "开头\n\n```\n" + strings.Repeat("ab中😀c\n", 6000) + "```\n\n结尾\n"
+	d := NewDocument(src)
+	rng := rand.New(rand.NewSource(9))
+	for round := 0; round < 20; round++ {
+		s := d.Source()
+		for n := 0; n < 200; n++ {
+			b := runeStartBefore(s, rng.Intn(len(s)+1))
+			if got, want := d.ByteToU16(b), u16Len(s[:b]); got != want {
+				t.Fatalf("ByteToU16(%d) = %d，期望 %d", b, got, want)
+			}
+			u := rng.Intn(d.U16Len() + 1)
+			if got, want := d.U16ToByte(u), u16ToByte(s, u); got != want {
+				t.Fatalf("U16ToByte(%d) = %d，期望 %d", u, got, want)
+			}
+		}
+		at := runeStartBefore(s, len("开头\n\n```\n")+rng.Intn(len(s)-40))
+		d.Replace(at, at, []string{"x", "中", "😀"}[rng.Intn(3)], editOther)
+		checkIndex(t, d)
+	}
+}

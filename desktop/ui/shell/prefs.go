@@ -94,7 +94,7 @@ func defaultPrefs() Prefs {
 		ThemeMode: "system", InterfaceLanguage: "system", EditorMode: modeSemantic,
 		SplitViewLayout: "semantic-source", SplitLeftPercent: 50,
 		AutoSaveDelayMs: 1000, CreateSnapshotBeforeSave: true, FontSize: 16, LineHeight: 1.75,
-		TypographyEnabled: true, ContentWidthPercent: 60, LargeDocumentLimit: 500_000, DocumentStyleID: "nomo-modern",
+		TypographyEnabled: false /* 原版发布关卡：默认关闭 */, ContentWidthPercent: 60, LargeDocumentLimit: 500_000, DocumentStyleID: "nomo-modern",
 		OpenDefaultBehavior: "ask-every-time", FilePreviewEnabled: true, CloseWindowBehavior: "ask-every-time",
 		ExternalFileChangeBehavior: "reload-external", OutlineVisible: true, WritingStatsVisible: true,
 		WritingStatsMetric: "words", DefaultCodeBlockLanguage: "ts", DefaultDiagramType: "flowchart", ZoomPercent: 100, CtrlWheelZoomEnabled: true,

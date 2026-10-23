@@ -46,6 +46,8 @@ type renderService struct {
 	mu   sync.Mutex
 	win  *mygo.Window
 	idle *time.Timer
+	// kpRuntime 缓存精细排版运行时脚本（typographyRuntime），受 mu 保护。
+	kpRuntime string
 
 	themeMu sync.Mutex
 	theme   [2]renderTheme // [0] 浅色、[1] 深色
@@ -323,6 +325,30 @@ func (r *renderService) markup(reqs []mdedit.RenderRequest, dark bool) ([]markup
 }
 
 // word 在离屏页面中生成 .docx（复用原版 Word 导出），返回文件字节与降级说明。在后台调用，大文档可能耗时数十秒。
+// typographyRuntime 返回原版精细排版的离线运行时脚本（导出时内联）；首次取得后缓存（单个字符串，约百 KB）。
+func (r *renderService) typographyRuntime() (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.kpRuntime != "" {
+		return r.kpRuntime, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout*3)
+	defer cancel()
+	if err := r.ensureLocked(ctx); err != nil {
+		return "", err
+	}
+	res, err := r.evalLocked(ctx, "return await window.nomoTypographyRuntime()")
+	if err != nil {
+		return "", err
+	}
+	s, _ := res.(string)
+	if s == "" {
+		return "", errors.New("精细排版运行时为空")
+	}
+	r.kpRuntime = s
+	return s, nil
+}
+
 func (r *renderService) word(markdown, title string) ([]byte, []string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

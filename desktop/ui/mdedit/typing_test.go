@@ -10,7 +10,7 @@ import (
 )
 
 // TestTypingLatency 在大文档中部连续键入，报告每键耗时（含一帧绘制）与其中原文替换（解析与块索引）的耗时。
-// 设 NOMO_TYPE_DOC=<文件> 运行；无头 CPU 渲染，只用于同环境前后对照。
+// 设 NOMO_TYPE_DOC=<文件> 运行，NOMO_TYPE_KP=1 时开启精细排版；无头 CPU 渲染，只用于同环境前后对照。
 func TestTypingLatency(t *testing.T) {
 	path := os.Getenv("NOMO_TYPE_DOC")
 	if path == "" {
@@ -22,6 +22,9 @@ func TestTypingLatency(t *testing.T) {
 	}
 	doc := NewDocument(string(data))
 	ed := NewEditor(doc)
+	if os.Getenv("NOMO_TYPE_KP") != "" {
+		ed.SetOptions(Options{Typography: true})
+	}
 	tt := ui.NewTester(func(c *ui.Context) { ed.View(c).AutoFocus() }, 1200, 800)
 	tt.Frame()
 	ed.JumpTo(len(data) / 2)

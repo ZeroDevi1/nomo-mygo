@@ -192,6 +192,15 @@ async function nomoExportWord(markdown: string, title: string): Promise<{ data: 
 }
 (window as unknown as { nomoExportWord: typeof nomoExportWord }).nomoExportWord = nomoExportWord;
 
+/**
+ * 导出用：原版精细排版的离线运行时（exportRuntime.ts 的 IIFE 构建，含第三方许可说明），原生导出 HTML/PDF 时内联到
+ * 文档中，与原版导出的排版一致。按需加载，平时不进入渲染页。
+ */
+async function nomoTypographyRuntime(): Promise<string> {
+  return (await import('virtual:nomo-typography-runtime')).default;
+}
+(window as unknown as { nomoTypographyRuntime: typeof nomoTypographyRuntime }).nomoTypographyRuntime = nomoTypographyRuntime;
+
 // 一批渲染至多 20 秒（如 Mermaid 卡在超大图上），超时按失败返回，不让原生侧的串行队列一直等待。
 (window as unknown as { nomoRenderBatch: typeof nomoRenderBatch }).nomoRenderBatch = (requests, viewport) =>
   Promise.race([

@@ -325,6 +325,26 @@ func inlineImage(dir, src string) string {
 	return "data:" + typ + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
+// withTypography 在开启精细排版时把原版的离线排版运行时与选项内联到导出文档（与原版 exportService 的
+// buildExportHtml 相同）：HTML 打开时按窗口宽度精排，PDF 打印前由主程序调用 __NOMO_PREPARE_PRINT__ 按版心重排
+// （desktop/export.go）。在后台写出任务中调用；取得运行时失败时导出不含精排并记日志，不阻止导出。
+func (s *Shell) withTypography(doc string, enabled bool) string {
+	if !enabled || s.win == nil {
+		return doc
+	}
+	runtime, err := s.rend.typographyRuntime()
+	if err != nil {
+		applog.Warn("Export", "精细排版运行时不可用，导出不含精细排版："+err.Error())
+		return doc
+	}
+	script := `<script id="nomo-typography-options" type="application/json">{"enabled":true,"profile":"zh-CN","hanging":true}</script>
+  <script>` + strings.ReplaceAll(runtime, "</script", `<\/script`) + "</script>\n"
+	if i := strings.LastIndex(doc, "</body>"); i >= 0 {
+		return doc[:i] + script + doc[i:]
+	}
+	return doc + script
+}
+
 // exportHTML 选择保存位置后写出 HTML（配色跟随当前明暗外观）。
 func (s *Shell) exportHTML() {
 	tab := s.activeTab()
@@ -332,9 +352,11 @@ func (s *Shell) exportHTML() {
 		return
 	}
 	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() error {
-		dark := s.dark
+		dark, kp := s.dark, s.prefs.TypographyEnabled
 		doc, _ := s.exportDocument(tab, dark, false)
-		return func() error { return docfs.WriteFileAtomically(path, []byte(s.renderExportMarkup(doc, dark))) }
+		return func() error {
+			return docfs.WriteFileAtomically(path, []byte(s.withTypography(s.renderExportMarkup(doc, dark), kp)))
+		}
 	})
 }
 
@@ -346,8 +368,11 @@ func (s *Shell) exportPDF() {
 		return
 	}
 	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() error {
+		kp := s.prefs.TypographyEnabled
 		doc, outline := s.exportDocument(tab, false, true)
-		return func() error { return s.pdfExporter(s.renderExportMarkup(doc, false), path, outline) }
+		return func() error {
+			return s.pdfExporter(s.withTypography(s.renderExportMarkup(doc, false), kp), path, outline)
+		}
 	})
 }
 

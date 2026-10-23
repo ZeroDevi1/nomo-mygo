@@ -20,7 +20,7 @@ var codeLanguagePattern = regexp.MustCompile(`^[A-Za-z0-9_+#.-]{0,32}$`)
 
 // settingsWindow 是原生设置窗口，分类与文案对应原版 SettingsWindow.svelte。
 //
-// 只列出原生外壳已生效的设置；尚未实现的功能（精细排版）不展示无效的开关。
+// 只列出原生外壳已生效的设置；未实现的功能不展示无效的开关。
 // 读写与主窗口共享的 Shell.prefs，键与 WebView 版相同。
 // 生命周期：openSettings 创建，关闭窗口即销毁（Shell.settings 置空）。
 type settingsWindow struct {
@@ -149,6 +149,9 @@ func (sw *settingsWindow) page(c *ui.Context) {
 				[]string{"system", "zh-CN", "zh-TW", "en-US"}, []string{s.tr("themeSystem"), "简体中文", "繁體中文", "English"})
 		})
 	case "editor":
+		sw.section(c, "typographySettings", func() {
+			sw.toggle(c, "typographyEnabled", "typographyEnabled", &p.TypographyEnabled)
+		})
 		sw.section(c, "editorScale", func() {
 			sw.slider(c, "fontSize", "fontSize", &p.FontSize, 14, 22, 1, "%.0f px", false)
 			sw.slider(c, "lineHeight", "lineHeight", &p.LineHeight, 1.4, 2.1, 0.05, "%.2f", false)
@@ -279,8 +282,15 @@ func (sw *settingsWindow) section(c *ui.Context, title string, fn func()) {
 	})
 }
 
+// descriptionKeys 是说明文案键不等于“标题键 + Description”的设置（沿用原版文案键）。
+var descriptionKeys = map[string]string{"typographyEnabled": "typographyDescription"}
+
 func (sw *settingsWindow) describe(f ui.Element, label string) {
-	if d := sw.s.tr(label + "Description"); d != label+"Description" {
+	key := label + "Description"
+	if k, ok := descriptionKeys[label]; ok {
+		key = k
+	}
+	if d := sw.s.tr(key); d != key {
 		f.Description(d)
 	}
 }

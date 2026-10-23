@@ -24,7 +24,7 @@ import (
 //   - 内存：处理完该文件后的 Go 堆与布局缓存估算。
 //
 // 设 NOMO_CORPUS=<目录> 运行；NOMO_CORPUS_OUT=<目录> 输出 report.md 与首屏截图；NOMO_CORPUS_MATCH 只跑路径
-// 含该子串的文件；NOMO_CORPUS_MAX=<字节> 跳过更大的文件（默认不限）。无头 CPU 渲染，不代表 GPU 窗口实测。
+// 含该子串的文件；NOMO_CORPUS_MAX=<字节> 跳过更大的文件（默认不限）；NOMO_CORPUS_KP=1 开启精细排版。无头 CPU 渲染，不代表 GPU 窗口实测。
 func TestCorpus(t *testing.T) {
 	root := os.Getenv("NOMO_CORPUS")
 	if root == "" {
@@ -80,6 +80,9 @@ func corpusFile(t *testing.T, path, rel string, data []byte, out string) string 
 	start := time.Now()
 	doc := NewDocument(text)
 	ed := NewEditor(doc)
+	if os.Getenv("NOMO_CORPUS_KP") != "" {
+		ed.SetOptions(Options{Typography: true})
+	}
 	tt := ui.NewTester(func(c *ui.Context) { ed.View(c).AutoFocus() }, 1200, 800)
 	tp := &testPost{}
 	im := NewImages(tp.post, DefaultImageBudget)

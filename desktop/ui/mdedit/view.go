@@ -4,6 +4,7 @@ import (
 	"hash/maphash"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
@@ -44,6 +45,9 @@ type entry struct {
 	// inset、rinset 为展开时应用的折叠块缩进（detailsInset），scale 为展开时的字号缩放（标记行内边距与代码行号栏
 	// 宽度随之变化）；任一与当前值不同时重新展开。
 	inset, rinset, scale float32
+	// pspan 为展开时块在解析结果中的后代跨度（Next − Index），lines 为代码块展开时的换行数；单行修补
+	// （patchRowEdit）据此判断块结构是否未变。
+	pspan, lines int
 }
 
 // vseg 是一个可见行：y 为行框顶部相对元素顶部的位置。
@@ -238,6 +242,8 @@ type Editor struct {
 	dsyncVer uint64
 	// opts 为外壳设置中影响编辑区的选项（SetOptions）。
 	opts Options
+	// kpWidths 缓存精细排版用的空格与连字符宽度（按字体，kpGlyphWidths）。
+	kpWidths map[ui.Font][2]float64
 	// ctxPos 为最近一次右键的原文位置，ctxDetails 为右键落在折叠块标题行时该块的键（否则 -1），供 ContextTarget 使用。
 	ctxPos, ctxDetails int
 }
@@ -294,6 +300,7 @@ func (e *Editor) SetStyle(fontSize, zoomPercent, widthPercent float32) {
 		return
 	}
 	e.scale, e.widthPct = scale, widthPercent
+	e.kpWidths = nil
 	e.measureLine()
 	e.contentW, e.viewW = 0, 0 // 下次 prepare 按新宽度重算
 	e.layoutGen++
@@ -333,6 +340,7 @@ func (e *Editor) SetFonts(body, mono string) {
 		return
 	}
 	e.fontBody, e.fontMono = body, mono
+	e.kpWidths = nil
 	e.measureLine()
 	e.layoutGen++
 	e.dirty = true
@@ -403,6 +411,12 @@ func (e *Editor) applyEdit(ed Edit) {
 		return
 	}
 	e.remapFolds(ed.Change)
+	if ed.Removed == 1 && ed.Inserted == 1 && e.patchRowEdit(ed.First, ed.Change) {
+		e.hasGoal = false
+		e.reveal = true
+		e.dirty = true
+		return
+	}
 	var reuse []row
 	var oldFrames []frame
 	if ed.Removed == 1 && ed.Inserted == 1 && e.entries[ed.First].split {
@@ -458,6 +472,10 @@ func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 		}
 	}
 	en.inset, en.rinset, en.scale = inset, rinset, e.scale
+	en.pspan = e.Doc.md.next(top.Index) - top.Index
+	if top.Kind == parser.CodeBlock {
+		en.lines = strings.Count(e.Doc.Source()[top.Start:top.End], "\n")
+	}
 	// 同一块重新展开（块内编辑）时保留表格的横向滚动位置。
 	for k := range frames {
 		if k < len(oldFrames) && oldFrames[k].kind == frames[k].kind {
@@ -666,7 +684,13 @@ func (e *Editor) ensureRow(i, k int) bool {
 	} else {
 		spans = e.spans(p, sizes)
 	}
-	l := newLineLayout(ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align}), e.rowLead(r, font))
+	var l *lineLayout
+	if fr == nil {
+		l = e.typeset(top, r, p, spans, font, w, e.rowLead(r, font))
+	}
+	if l == nil {
+		l = newLineLayout(ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align}), e.rowLead(r, font))
+	}
 	r.objSizes, r.objRects, r.shapeW = sizes, objRects(l, p), w
 	_, lh := l.Size()
 	m := font.Metrics()

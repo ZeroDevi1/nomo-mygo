@@ -19,6 +19,7 @@ type Options struct {
 	HideLineNumbers bool   // 代码块不显示行号（codeBlockLineNumbersVisible 取反）
 	RawInlineCode   bool   // 不渲染行内代码，显示原始反引号文本（inlineCodeRenderingEnabled 取反）
 	PlainCopy       bool   // 复制、剪切时纯文本不保留 Markdown 语法（copyMarkdownSyntaxEnabled 取反）
+	Typography      bool   // 精细排版（typographyEnabled，原版默认关闭）：段落按 Knuth–Plass 断行（kp.go）
 }
 
 // defaultDiagram 是原版 DIAGRAM_TEMPLATES 的流程图模板。
@@ -29,7 +30,7 @@ func (e *Editor) SetOptions(o Options) {
 	if o == e.opts {
 		return
 	}
-	relayout := o.HideLineNumbers != e.opts.HideLineNumbers || o.RawInlineCode != e.opts.RawInlineCode
+	relayout := o.HideLineNumbers != e.opts.HideLineNumbers || o.RawInlineCode != e.opts.RawInlineCode || o.Typography != e.opts.Typography
 	e.opts = o
 	if !relayout {
 		return

@@ -68,6 +68,9 @@
 | 正文行高（行距排版） | `desktop/ui/mdedit/lines.go` | `view.go`（`ensureRow`）, `blocks.go`（`rowLead`）, `draw.go` | 修改行距规则、加行距后的命中测试、选区与逐行绘制 |
 | 折叠块（details） | `desktop/ui/mdedit/details.go`（识别与配对）、`detailsview.go`（视图与命令） | `blocks.go`（标记行）、`htmlpreview.go`（`previewDetails`）、`desktop/ui/shell/editormenu.go` | 修改折叠标记语法、配对与增量平移、卡片绘制、折叠隐藏与自动展开、插入/默认展开/取消折叠 |
 | 编辑区选项（代码块行号、Tab 缩进、行内代码、复制语法、默认插入） | `desktop/ui/mdedit/options.go` | `desktop/ui/shell/editoroptions.go`（设置到选项、图表模板、Ctrl 滚轮） | 修改原版 editor.updateOptions 对应的显示与插入行为 |
+| 精细排版（Knuth–Plass 断行，纯计算） | `desktop/ui/typography`（`knuthplass.go`、`rules.go`、`hyphenation.go`） | `scripts/generate-native-hyphenation.mjs`（生成 `hyphen_en_us_gen.go`）、`testdata/crosscheck.json`（原版依赖对照数据） | 修改 KP 求解、标点禁则/压缩/悬挂、中西文空白、英文断词；移植自 `src/lib/typography` |
+| 精细排版接入编辑区 | `desktop/ui/mdedit/kp.go`（测量、规则输入、逐行排版）、`kplines.go`（多行布局映射） | `view.go`（`ensureRow`）、`lines.go`（`adjacentY`）、`desktop/ui/shell/export.go`（`withTypography`） | 修改精排适用范围、测量与绘制、导出时内联原版运行时 |
+| 单行修补（大表格/长代码块按键） | `desktop/ui/mdedit/patch.go` | `view.go`（`applyEdit`）、`document.go`（`checkpoints`） | 修改块内编辑的增量路径与 UTF-16 检查点 |
 | 原文到显示的投影 | `desktop/ui/mdedit/projection.go` | `view.go` | 修改行内标记就地展开/隐藏、行内 HTML 标签样式、实体解码、提示块标记、显示与原文偏移映射 |
 | 块组件（列表、任务、引用、提示块、表格、代码块、分割线、front matter） | `desktop/ui/mdedit/blocks.go` | `draw.go`, `view.go`, `document.go` | 修改块展开为行的规则、容器前缀、缩进与间距、装饰范围 |
 | 可见区布局与缓存 | `desktop/ui/mdedit/view.go` | `blocks.go`, `input.go` | 修改行虚拟化、阅读锚点、布局缓存预算与淘汰、命中测试、主题配色 |

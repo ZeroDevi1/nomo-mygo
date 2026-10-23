@@ -178,11 +178,7 @@ func (e *Editor) moveV(pos, dir int) int {
 		if !e.hasGoal {
 			e.goalX, e.hasGoal = s.x+r.X, true
 		}
-		y := r.Y + r.H + 1
-		if dir < 0 {
-			y = r.Y - 1
-		}
-		if _, lh := s.layout.Size(); y >= 0 && y < lh {
+		if y, ok := s.layout.adjacentY(r, dir); ok {
 			return s.toSrc(s.layout.IndexAt(ui.Point{X: e.goalX - s.x, Y: y}), false)
 		}
 		if target, ok = e.neighborV(s, dir, e.goalX); !ok {

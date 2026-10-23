@@ -15,6 +15,8 @@ type lineLayout struct {
 	l     *ui.TextLayout
 	bands []lineBand // 原排版中的各视觉行，自上而下、首尾相接；为空表示没有加行距
 	w, h  float32    // 加行距后的尺寸
+	// kp 非空表示精细排版结果（kplines.go）：每个视觉行单独排版，此时 l 与 bands 不使用。
+	kp []kpLine
 }
 
 // lineBand 是原排版中一个视觉行的纵向区间 [y, y+h)；该行文字下移 off，上下各加 half 的行距。
@@ -82,13 +84,32 @@ func (ll *lineLayout) shift(r ui.Rect) ui.Rect {
 func (ll *lineLayout) Size() (float32, float32) { return ll.w, ll.h }
 
 // Caret 返回 index 处的光标矩形，高度为文字行高（不含行距），与浏览器一致。
-func (ll *lineLayout) Caret(index int) ui.Rect { return ll.shift(ll.l.Caret(index)) }
+func (ll *lineLayout) Caret(index int) ui.Rect {
+	if ll.kp != nil {
+		return ll.kpCaret(index)
+	}
+	return ll.shift(ll.l.Caret(index))
+}
 
-func (ll *lineLayout) PreviousBoundary(index int) int { return ll.l.PreviousBoundary(index) }
-func (ll *lineLayout) NextBoundary(index int) int     { return ll.l.NextBoundary(index) }
+func (ll *lineLayout) PreviousBoundary(index int) int {
+	if ll.kp != nil {
+		return ll.kpBoundary(index, -1)
+	}
+	return ll.l.PreviousBoundary(index)
+}
+
+func (ll *lineLayout) NextBoundary(index int) int {
+	if ll.kp != nil {
+		return ll.kpBoundary(index, 1)
+	}
+	return ll.l.NextBoundary(index)
+}
 
 // IndexAt 把加行距后的点映射回原排版：落在行距中的点归入该行。
 func (ll *lineLayout) IndexAt(pt ui.Point) int {
+	if ll.kp != nil {
+		return ll.kpIndexAt(pt)
+	}
 	if ll.bands != nil {
 		b := ll.viewBand(pt.Y)
 		pt.Y = min(max(pt.Y-b.off, b.y), b.y+max(b.h-0.01, 0))
@@ -98,6 +119,9 @@ func (ll *lineLayout) IndexAt(pt ui.Point) int {
 
 // SelectionRects 返回文字范围的矩形，高度为文字行高（查找高亮、输入法下划线用）。
 func (ll *lineLayout) SelectionRects(r ui.TextInputRange) []ui.Rect {
+	if ll.kp != nil {
+		return ll.kpRects(r, false)
+	}
 	out := ll.l.SelectionRects(r)
 	for i := range out {
 		out[i] = ll.shift(out[i])
@@ -107,6 +131,9 @@ func (ll *lineLayout) SelectionRects(r ui.TextInputRange) []ui.Rect {
 
 // LineRects 与 SelectionRects 相同，但矩形扩展到整个行框（含行距），相邻行的选区连成一片。
 func (ll *lineLayout) LineRects(r ui.TextInputRange) []ui.Rect {
+	if ll.kp != nil {
+		return ll.kpRects(r, true)
+	}
 	out := ll.l.SelectionRects(r)
 	if ll.bands == nil {
 		return out
@@ -121,6 +148,9 @@ func (ll *lineLayout) LineRects(r ui.TextInputRange) []ui.Rect {
 
 // Objects 返回行内对象的位置（已按所在行平移）。
 func (ll *lineLayout) Objects() []ui.TextObject {
+	if ll.kp != nil {
+		return ll.kpObjects()
+	}
 	out := ll.l.Objects()
 	for i := range out {
 		out[i].Rect = ll.shift(out[i].Rect)
@@ -131,6 +161,10 @@ func (ll *lineLayout) Objects() []ui.TextObject {
 // paint 在 (x, y) 处绘制。加了行距时逐个可见视觉行裁剪到该行原有的行框后平移绘制；Painter 对裁剪区外的行
 // 只做一次纵向比较即跳过，每个视觉行的绘制只提交本行字形。超出行框的字形墨迹（极少数字体的上标符号）会被裁掉。
 func (ll *lineLayout) paint(p *ui.Painter, x, y float32, color ui.Color) {
+	if ll.kp != nil {
+		ll.kpPaint(p, x, y, color)
+		return
+	}
 	if ll.bands == nil {
 		p.TextLayout(ll.l, x, y, color)
 		return
@@ -144,4 +178,36 @@ func (ll *lineLayout) paint(p *ui.Painter, x, y float32, color ui.Color) {
 		}
 		p.Clip(ui.Rect{X: vis.X, Y: top, W: vis.W, H: b.h}, 0, func() { p.TextLayout(ll.l, x, y+b.off, color) })
 	}
+}
+
+// adjacentY 返回光标矩形 r 所在视觉行之下（dir>0）或之上一行的中线纵坐标；已是首行或末行时 ok 为 false。行距与
+// 精细排版的行框都比文字高，光标下方 1 DIP 仍落在本行的行距内，上下移动须以相邻行框为目标。
+func (ll *lineLayout) adjacentY(r ui.Rect, dir int) (float32, bool) {
+	mid := r.Y + r.H/2
+	switch {
+	case ll.kp != nil:
+		j := sort.Search(len(ll.kp), func(j int) bool { return ll.kp[j].y+ll.kp[j].h > mid })
+		j += dir
+		if j < 0 || j >= len(ll.kp) {
+			return 0, false
+		}
+		return ll.kp[j].y + ll.kp[j].h/2, true
+	case ll.bands != nil:
+		b := ll.viewBand(mid)
+		k := 0
+		for k < len(ll.bands) && &ll.bands[k] != b {
+			k++
+		}
+		k += dir
+		if k < 0 || k >= len(ll.bands) {
+			return 0, false
+		}
+		nb := &ll.bands[k]
+		return nb.y + nb.off + nb.h/2, true
+	}
+	y := r.Y + r.H + 1
+	if dir < 0 {
+		y = r.Y - 1
+	}
+	return y, y >= 0 && y < ll.h
 }

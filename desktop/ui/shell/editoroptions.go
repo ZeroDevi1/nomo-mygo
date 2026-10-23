@@ -31,6 +31,7 @@ func (s *Shell) editorOptions() mdedit.Options {
 		HideLineNumbers: !p.CodeBlockLineNumbersVisible,
 		RawInlineCode:   !p.InlineCodeRenderingEnabled,
 		PlainCopy:       !p.CopyMarkdownSyntaxEnabled,
+		Typography:      p.TypographyEnabled,
 	}
 }
 
