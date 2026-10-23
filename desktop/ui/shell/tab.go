@@ -24,6 +24,10 @@ type Tab struct {
 	Path     string // 空串表示未保存的新文档
 	Untitled int    // 新文档的序号，用于“无标题 2.md”
 	Encoding docfs.Encoding
+	// eol 为文件的换行风格（"\n"、"\r\n" 或 "\r"）：编辑器内一律用 LF，保存时还原。mixedRaw 只在
+	// 文件混用多种换行时保存原文（罕见、通常很小），未编辑就保存时原样写回，保证字节不变。
+	eol      string
+	mixedRaw string
 
 	Doc *mdedit.Document
 	Ed  *mdedit.Editor
@@ -51,13 +55,51 @@ type Tab struct {
 }
 
 func newTab(id int, path, text string, enc docfs.Encoding) *Tab {
+	t := &Tab{ID: id, Path: path, Encoding: enc}
+	text = t.adoptLineEndings(text)
 	doc := mdedit.NewDocument(text)
-	t := &Tab{ID: id, Path: path, Encoding: enc, Doc: doc, Ed: mdedit.NewEditor(doc)}
+	t.Doc, t.Ed = doc, mdedit.NewEditor(doc)
 	t.markSaved(text)
 	if path != "" {
 		t.diskModified = docfs.ModifiedAt(path)
 	}
 	return t
+}
+
+// adoptLineEndings 记录 raw 的换行风格并返回统一为 LF 的文本（编辑器、解析器与结构编辑只处理 LF）。
+func (t *Tab) adoptLineEndings(raw string) string {
+	crlf := strings.Count(raw, "\r\n")
+	cr := strings.Count(raw, "\r") - crlf
+	lf := strings.Count(raw, "\n") - crlf
+	t.eol, t.mixedRaw = "\n", ""
+	switch {
+	case crlf == 0 && cr == 0:
+		return raw
+	case crlf > 0 && cr == 0 && lf == 0:
+		t.eol = "\r\n"
+	case cr > 0 && crlf == 0 && lf == 0:
+		t.eol = "\r"
+	default:
+		// 混用：保存编辑后的内容时取出现最多的风格；未编辑时原样写回。
+		t.mixedRaw = raw
+		if crlf >= lf && crlf >= cr {
+			t.eol = "\r\n"
+		} else if cr > lf {
+			t.eol = "\r"
+		}
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
+}
+
+// diskText 返回要写入磁盘的文本：LF 换回文件原有的换行风格；混用换行且内容未改时返回原文。
+func (t *Tab) diskText(text string) string {
+	if t.mixedRaw != "" && text == t.savedText {
+		return t.mixedRaw
+	}
+	if t.eol == "\n" || t.eol == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, "\n", t.eol)
 }
 
 func (t *Tab) markSaved(text string) {

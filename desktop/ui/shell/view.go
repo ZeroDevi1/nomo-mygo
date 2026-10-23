@@ -49,6 +49,8 @@ func (s *Shell) view(c *ui.Context) {
 		}
 	})
 	s.dialogs(c)
+	w, h := c.Size()
+	s.emojiPicker(c, ui.Rect{W: w, H: h})
 	if s.status != "" {
 		c.Toast(s.status)
 		s.status = ""
@@ -401,7 +403,11 @@ func (s *Shell) document(c *ui.Context) {
 				})
 			} else {
 				el = tab.Ed.View(ck)
+				if r := el.Bounds(); r.W > 0 {
+					s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
+				}
 				s.quickInsert(c, tab, el)
+				s.emojiSuggest(c, tab, el)
 			}
 			if files := el.DroppedFiles(); len(files) > 0 {
 				s.dropFiles(tab, files)
@@ -446,6 +452,18 @@ func (s *Shell) toolbar(c *ui.Context) {
 			[3]string{"square-check", s.tr("toggleTaskList"), "taskList"}, [3]string{"quote", s.tr("toggleQuote"), "quote"},
 			[3]string{"code-xml", s.tr("insertCodeBlock"), "codeBlock"}, [3]string{"table-2", s.tr("insertTable"), "table"},
 			[3]string{"minus", s.tr("horizontalRule"), "horizontalRule"})
+		// 表情按钮与原版一样位于工具栏右侧。
+		ui.Box(c).Grow(1)
+		if s.loadEmoji != nil {
+			b := s.toolButton(c, "smile", s.tr("emojiInsert"), s.emo.picker).Disabled(disabled)
+			if disabled {
+				b.Opacity(0.4)
+			}
+			if b.Clicked() {
+				r := b.Bounds()
+				s.openEmojiPicker(ui.Point{X: r.X + r.W - emojiPickerW, Y: r.Y + r.H + 6})
+			}
+		}
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 }

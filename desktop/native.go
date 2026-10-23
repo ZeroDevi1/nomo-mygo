@@ -12,6 +12,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
+	"nomo/desktop/internal/emoji"
 	"nomo/desktop/ui/shell"
 )
 
@@ -58,7 +59,8 @@ func runNativeShell(args []string) {
 		}
 		sh = shell.New(shell.Options{Config: app.config, Locale: effectiveLocale(), SystemLocale: system, Version: appVersion(),
 			Files: targets.markdownPaths, Folders: targets.folderPaths, IconLight: appIconLight, IconDark: appIconDark,
-			ExportPDF: exportNativePDF, CheckUpdate: checkNativeUpdate})
+			ExportPDF: exportNativePDF, CheckUpdate: checkNativeUpdate,
+			LoadEmoji: func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appIdentifier, retry) }})
 		win = sh.Open()
 		applyAppIcon(win)
 		applog.Info("Native", "原生外壳已启动")

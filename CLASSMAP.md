@@ -69,7 +69,11 @@
 | 可见区布局与缓存 | `desktop/ui/mdedit/view.go` | `blocks.go`, `input.go` | 修改行虚拟化、阅读锚点、布局缓存预算与淘汰、命中测试、主题配色 |
 | 绘制 | `desktop/ui/mdedit/draw.go` | `view.go` | 修改装饰（引用条、提示块标题、代码卡片、表格网格）、列表符号与任务框绘制 |
 | 代码块语法高亮 | `desktop/ui/mdedit/highlight.go` | `view.go`, `blocks.go` | 修改代码块着色、Tokenizer 跨行状态缓存 |
-| 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载 |
+| 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载、GIF 动画 |
+| 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `view.go`（`rowBox`）, `draw.go`, `input.go` | 修改列宽策略（原版 widths.ts）、超宽表格横向滚动、单元格裁剪 |
+| HTML 块预览、注释卡片、目录卡片 | `desktop/ui/mdedit/htmlpreview.go` | `blocks.go`, `document.go`（`KindToc`）, `imageview.go` | 修改可预览的 HTML 白名单与排版、注释/目录卡片样式、目录点击跳转 |
+| 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go` | `render.html`, `src/render/render-entry.ts`, `desktop/ui/mdedit/images.go`（`RenderFunc`） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线 |
+| 测试集跑测 | `desktop/ui/mdedit/corpus_test.go`, `desktop/ui/shell/corpus_test.go` | `NOMO_CORPUS` 环境变量 | 修改测试集逐文件检查项（保真、耗时、内存）与外壳场景（编码、四标签、目录树） |
 | 输入法、键盘与命令 | `desktop/ui/mdedit/input.go` | `view.go`, `edit.go`, `structure.go` | 修改 TextInputClient、光标移动、删除、剪贴板与加粗等命令 |
 | 结构编辑 | `desktop/ui/mdedit/structure.go` | `input.go`, `blocks.go` | 修改列表/引用内回车与退出、行首退格提出容器、Tab 缩进与表格单元格切换、任务勾选 |
 | 编辑器对外接口（格式命令、查找、大纲、统计、源码同步） | `desktop/ui/mdedit/api.go` | `structure.go`, `edit.go` | 修改工具栏/菜单命令的原文事务、查找匹配、大纲与写作统计 |
@@ -90,6 +94,7 @@
 | 资源管理器目录树 | `desktop/ui/shell/explorer.go` | `desktop/internal/docfs/tree.go` | 修改目录懒加载、刷新与点击打开 |
 | 颜色主题、字体与用户主题导入导出 | `desktop/ui/shell/appearance.go` | `desktop/ui/themes`, `settings.go` | 修改主题到编辑器配色的映射、字体应用、用户主题文件读写 |
 | 快捷插入菜单 | `desktop/ui/shell/quickinsert.go` | `desktop/ui/mdedit/api.go`（`CaretRect`、`Delete`、`Intercept`） | 修改触发条件、菜单项与键盘操作 |
+| 原生表情建议与选择器 | `desktop/ui/shell/emoji.go` | `desktop/internal/emoji`, `desktop/ui/mdedit/api.go`（`CaretContext`、`Replace`）, `Document.InputVersion` | 修改冒号建议的弹出与排除条件、键盘操作、选择器分类/网格/搜索、插入目标校验 |
 | 图片粘贴、拖放与插入 | `desktop/ui/shell/images.go` | `desktop/internal/imageasset`, `mdedit` `PasteData` | 修改图片导入策略、PicGo 上传、插入的 Markdown / HTML |
 | Markdown 格式检查（状态栏与问题列表） | `desktop/ui/shell/lint.go` | `desktop/ui/mdlint` | 修改检查调度、防抖、问题弹层与跳转 |
 | 导出 HTML / PDF | `desktop/ui/shell/export.go` | `desktop/ui/themes/export.go`, `desktop/native.go`（`exportNativePDF`）, `desktop/export.go` | 修改导出文档结构、图片内联、PDF 书签标记 |
@@ -141,7 +146,7 @@
 | 编辑器上下文菜单插件 | `src/lib/editor-core/plugins/contextMenu.ts` | `src/app/App.svelte`, `src/app/components/ContextMenu.svelte` | 语义编辑区目标命中、选区定位与右键菜单事件分发 |
 | 快捷插入菜单 | `src/lib/editor-core/plugins/quickInsert.ts` | `src/lib/editor-core/quickInsert.ts`, `editorCommands.ts`, `src/app/styles/editor-quick-insert.css` | 行首/空格后触发、类别/样式键盘导航、浮层定位与生命周期，无搜索 |
 | Emoji 短代码建议 | `src/lib/editor-core/plugins/emojiSuggestions.ts`, `src/lib/emoji/sourceSuggestions.ts` | `src/lib/emoji/suggestions.ts`, `sourceContext.ts`, `ProseMirrorEditorCore.ts`, `MarkdownSourceEditor.svelte` | 语义/源码的冒号补全、代码与公式排除、组字保护、确认与撤销、浮层生命周期 |
-| Emoji 搜索与联网缓存 | `src/app/services/emojiCatalog.ts`, `desktop/emoji.go` | `src/lib/emoji/catalog.ts`, `src/app/i18n.emoji.ts` | 固定版本元数据、双语搜索索引、三源错峰获取、SHA-256 校验、4 MiB 原子缓存与共享加载 |
+| Emoji 搜索与联网缓存 | `src/app/services/emojiCatalog.ts`, `desktop/internal/emoji`（`desktop/emoji.go` 注册命令） | `src/lib/emoji/catalog.ts`, `src/app/i18n.emoji.ts` | 固定版本元数据、双语搜索索引（Go 版 `catalog.go` 供原生外壳，规则与前端一致）、三源错峰获取、SHA-256 校验、4 MiB 原子缓存与共享加载 |
 | Emoji 选择器与插入目标 | `src/app/components/EmojiPicker.svelte`, `src/app/services/emojiInsertion.ts` | `src/app/App.svelte`, `EditorToolbar.svelte`, `src/app/styles/editor-emoji.css` | 九类分类/虚拟网格、键盘选择、双栏/组合标签目标、修订校验与纯文本插入 |
 | 行内代码语法高亮装饰 | `src/lib/editor-core/plugins/codeHighlightDecorationPlugin.ts` | `InlineSourceCodec.ts`, `plugins/inlineCodeSelectionBridge.ts` | 派生代码范围的 token 着色与选区背景 |
 | 正文与行内对象选区背景 | `src/lib/editor-core/plugins/inlineCodeSelectionBridge.ts` | `src/lib/typography/selectionPaint.ts`, `src/app/styles/editor-document.css`, `plugins/typography.ts` | 修改正文/行内代码选区背景、原子对象及其外边距背景包裹；桥接样式与行绘制共享浏览器选区有效性，保留工具栏所需的模型选区 |
@@ -364,11 +369,14 @@
 - `Editor` 视图：只布局可见行，块级阅读锚点，按估算字节的 LRU 布局缓存；`ReleaseLayouts` 供后台标签释放
 - `TextInputClient` 实现（原文 UTF-16 坐标）、键盘导航、删除/回车、剪贴板、加粗/斜体/删除线命令与结构编辑（列表/引用续写与退出、Tab 缩进、表格单元格切换、任务勾选）
 - 代码块语法高亮（MyGo editor Tokenizer）
-- 图片：Markdown 图片与 `<img>` 作为行内对象排版，只含图片的 HTML 块整块显示；`Images` 为窗口共用的按需加载缓存（本地、data URI、远程，后台解码、超大图缩小、字节预算 LRU）
+- 图片：Markdown 图片与 `<img>` 作为行内对象排版，只含图片的 HTML 块整块显示；`Images` 为窗口共用的按需加载缓存（本地、data URI、远程，后台解码、超大图缩小、字节预算 LRU、GIF 动画）
+- 公式与 Mermaid：作为渲染对象，经外壳注入的 `RenderFunc` 生成位图，结果进入同一缓存
+- HTML 块静态预览（白名单与原版 sanitizeHtml 一致，含合并单元格表格）、注释卡片、目录卡片（`KindToc` 合成块）、脚注引用标签与跳转
+- 表格列宽（原版 widths.ts 策略）与超宽表格横向滚动；超长行分段排版
 
 **Does not own:**
-- 公式、Mermaid、脚注引用、一般 HTML 块的渲染（P3，按计划 D3 走按需渲染服务）
-- 精细排版与行高（P0 第 3 项）、表格按内容自动列宽
+- 公式与图表的实际渲染（外壳 `render.go` 的离屏 WebView）
+- 精细排版与行高（P0 第 3 项）
 - 文件读写（由调用方经 `desktop/internal/docfs` 完成）
 
 **Called by:** `desktop/ui/shell`

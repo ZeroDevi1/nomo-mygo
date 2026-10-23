@@ -27,6 +27,12 @@ export default defineConfig({
     // 避免开发模式把 markdownlint 预打包成仍引用 document 的浏览器版本。
     exclude: ['markdownlint', 'markdownlint/sync'],
   },
+  build: {
+    rollupOptions: {
+      // render.html 是原生外壳的离屏渲染页（公式与 Mermaid），与主界面共享依赖分块。
+      input: { main: 'index.html', render: 'render.html' },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

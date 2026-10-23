@@ -6,6 +6,7 @@ import (
 	"hash/maphash"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
@@ -22,9 +23,17 @@ const (
 	codePadY      = 10
 	cellPadX      = 10
 	cellPadY      = 6
-	minCellW      = 90
 	calloutTitleH = 26
 	taskBox       = 18 // 任务复选框边长，约 1.15em
+)
+
+// 超长行分段：排版耗时随文字长度超线性增长（实测等宽 13 px、宽 700：4 KB 约 1.5 ms，16 KB 约 15 ms，
+// 64 KB 约 200 ms），超过 maxRowBytes 的原文行拆成多个行片段分别排版，视觉上在片段边界处换行。
+// 超过 maxLeafBytes（约 5000 个汉字的单段，正常文档罕见）的段落/标题不做行内投影，按原样行（分段）显示，
+// 避免单段落整段重排；投影排版的单段上限因此约为 15 ms。
+const (
+	maxRowBytes  = 4096
+	maxLeafBytes = 16 << 10
 )
 
 type rowKind uint8
@@ -80,8 +89,16 @@ type row struct {
 	blockA, blockB int
 	// htmlImg 为 true 表示只含图片的 HTML 块：整块一行，光标严格位于块内时显示原文，否则显示图片。
 	htmlImg bool
+	// htmlKind 非 previewNone 表示可预览的 HTML 块或注释块（见 htmlpreview.go），显示规则同 htmlImg。
+	htmlKind uint8
 	// empty 为 true 表示空列表项或空引用的占位行（没有叶子块），编辑时按文本行处理。
 	empty bool
+	// 表格单元格：cellX、cellW 为所在列相对表格左边的位置与宽度，shift 为表格横向滚动偏移（见 layoutTables）。
+	cellX, cellW, shift float32
+	// shapeW 为当前布局排版时的文字宽度；行宽变化（列宽重算、窗口缩放）时布局作废。
+	shapeW float32
+	// cont 为 true 表示超长原文行的后续片段（见 maxRowBytes），行首不是原文的行首。
+	cont bool
 
 	hash uint64 // 原文与几何的哈希，编辑后据此复用布局
 
@@ -126,6 +143,10 @@ type frame struct {
 	indent      float32
 	tone        int // 提示块类型
 	lang        string
+	// 表格（frameTable）：cols 为各列宽度，tableW 为总宽，viewW 为可见宽度（内容区去掉缩进），scrollX 为
+	// 横向滚动偏移（0 ≤ scrollX ≤ tableW−viewW），由 layoutTables 计算、scrollTable 修改。
+	cols                   []float32
+	tableW, viewW, scrollX float32
 	// tok 为代码块语言的 Tokenizer（nil 不高亮）；hlUpTo 为已求出 Tokenizer 状态的行号上界
 	// （rows[first, hlUpTo) 有效），块重新展开时从 first 开始。
 	tok    editor.Tokenizer
@@ -157,7 +178,13 @@ type container struct {
 
 func buildRows(d *Document, top Block, seed maphash.Seed) ([]row, []frame) {
 	bb := &blockBuilder{d: d, top: top, src: d.Source(), seed: seed}
-	if top.Kind == KindFrontMatter {
+	if top.Kind == KindToc {
+		// 整个目录区一行：收起时为目录卡片（见 htmlpreview.go），光标严格位于区内时显示原文。
+		z := top.End
+		bb.pending += 8
+		bb.add(row{kind: rowLine, role: roleHTML, htmlKind: previewToc, a: 0, b: z - top.Start, tone: -1})
+		bb.closePad(blockMargin)
+	} else if top.Kind == KindFrontMatter {
 		f := len(bb.rows)
 		bb.pending += codePadY
 		bb.lines(top.Start, top.End, roleFront, container{tone: -1}, codePadX)
@@ -223,11 +250,18 @@ func (bb *blockBuilder) block(i int, c container) {
 	b := bb.d.md.Block(i)
 	base := row{rel: i - bb.top.Index, a: bb.rel(b.Start), b: bb.rel(b.End), indent: c.indent, quoteFg: c.quote, tone: c.tone}
 	switch b.Kind {
-	case parser.Paragraph:
-		base.callout = c.tone >= 0 && bb.isFirstInCallout(i)
-		base.after = paraSpacing(c)
-		bb.add(base)
-	case parser.Heading:
+	case parser.Paragraph, parser.Heading:
+		if b.End-b.Start > maxLeafBytes {
+			bb.lines(b.Start, b.End, roleBody, c, 0)
+			bb.closePad(paraSpacing(c))
+			return
+		}
+		if b.Kind == parser.Paragraph {
+			base.callout = c.tone >= 0 && bb.isFirstInCallout(i)
+			base.after = paraSpacing(c)
+			bb.add(base)
+			return
+		}
 		base.role, base.level = roleHeading, b.Level
 		base.before = headingBefore(b.Level)
 		base.after = headingAfter(b.Level)
@@ -241,6 +275,14 @@ func (bb *blockBuilder) block(i int, c container) {
 	case parser.CodeBlock, parser.HTMLBlock, parser.MathBlock:
 		role := map[parser.Kind]rowRole{parser.CodeBlock: roleCode, parser.HTMLBlock: roleHTML, parser.MathBlock: roleMath}[b.Kind]
 		f := len(bb.rows)
+		// 公式块与 Mermaid 代码块整块一行：收起时显示渲染结果（居中），光标严格位于块内时显示原文。
+		if kind := renderBlockKind(b); kind != previewNone {
+			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
+			bb.pending += blockMargin - paraAfter
+			bb.add(row{kind: rowLine, role: role, htmlKind: kind, align: ui.Center, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
+			bb.closePad(blockMargin)
+			return
+		}
 		if b.Kind == parser.CodeBlock {
 			bb.pending += blockMargin - paraAfter + codePadY
 			bb.lines(b.Start, b.End, role, c, codePadX)
@@ -256,6 +298,10 @@ func (bb *blockBuilder) block(i int, c container) {
 			// 作为一行显示图片，光标进入时展开为原文。
 			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
 			bb.add(row{kind: rowLine, role: roleHTML, htmlImg: true, align: align, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
+			bb.closePad(paraSpacing(c))
+		} else if kind := htmlBlockKind(bb.src[b.Start:b.End]); kind != previewNone && b.Kind == parser.HTMLBlock {
+			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
+			bb.add(row{kind: rowLine, role: roleHTML, htmlKind: kind, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
 			bb.closePad(paraSpacing(c))
 		} else {
 			bb.lines(b.Start, b.End, role, c, 0)
@@ -392,9 +438,45 @@ func (bb *blockBuilder) lines(start, end int, role rowRole, c container, padX fl
 		if a > 0 {
 			skip = a + prefixLen(s[a:z], c, spaces)
 		}
-		bb.add(row{kind: rowLine, role: role, a: bb.rel(start + skip), b: bb.rel(start + z), indent: c.indent + padX, quoteFg: c.quote, tone: c.tone})
+		for cont, from := false, start+skip; ; cont = true {
+			to := start + z
+			if to-from > maxRowBytes {
+				to = chunkCut(bb.src, from, from+maxRowBytes)
+			}
+			bb.add(row{kind: rowLine, role: role, cont: cont, a: bb.rel(from), b: bb.rel(to), indent: c.indent + padX, quoteFg: c.quote, tone: c.tone})
+			if to >= start+z {
+				break
+			}
+			from = to
+		}
 		a = z + 1
 	}
+}
+
+// renderBlockKind 返回需要渲染显示的块种类：公式块、Mermaid 围栏代码块（已闭合），其余返回 previewNone。
+func renderBlockKind(b *parser.Block) uint8 {
+	switch {
+	case b.Kind == parser.MathBlock:
+		return previewMath
+	case b.Kind == parser.CodeBlock && b.Fenced && strings.EqualFold(b.Language(), "mermaid"):
+		return previewMermaid
+	}
+	return previewNone
+}
+
+// chunkCut 返回超长行片段 [from, limit) 的切分点：优先取窗口末 256 字节内最后一个空白之后，否则退到
+// limit 之前的字符边界。保证 from < 返回值 <= limit。
+func chunkCut(src string, from, limit int) int {
+	for k := limit; k > max(from+1, limit-256); k-- {
+		if c := src[k-1]; c == ' ' || c == '\t' {
+			return k
+		}
+	}
+	k := limit
+	for k > from+1 && !utf8.RuneStart(src[k]) {
+		k--
+	}
+	return k
 }
 
 // prefixLen 返回续行开头属于容器的前缀长度：引用的“>”（含其后一个空格）与至多 spaces 个缩进空格。

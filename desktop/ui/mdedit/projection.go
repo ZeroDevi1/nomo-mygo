@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
@@ -23,6 +24,7 @@ const (
 	stUnderline // <u>、<ins>
 	stMark      // <mark>
 	stComment   // HTML 注释
+	stFootRef   // 脚注引用：显示为标签（原版 sup.footnote-ref 显示 id）
 )
 
 // run 是一段可见原文。src 偏移相对所在行（片段）的起点，块整体平移时投影仍然有效。
@@ -52,6 +54,10 @@ const objChar = "\uFFFC"
 type imgObj struct {
 	u16             int
 	src, width, alt string
+	// html 非空时对象是 HTML 块预览或注释卡片（见 htmlpreview.go），src 等字段不用。
+	html *htmlBlockPreview
+	// render 非空时对象是公式或 Mermaid 图表（RenderMathInline 等），src 为 TeX 或 Mermaid 源码。
+	render string
 }
 
 // expansion 描述投影时哪些标记就地展开：caret 为相对片段起点的光标字节偏移，
@@ -389,8 +395,20 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 				pb.emit(z-1, z, cur, true)
 				break
 			}
+			// $…$ 与 $$…$$：光标严格位于原文内时显示原文，否则显示渲染结果（原版 math_inline）。
+			if tex, kind := inlineMath(pb.src[a:z]); tex != "" && !pb.inside(a, z) {
+				pb.object(a, z, imgObj{render: kind, src: tex, alt: tex}, cur)
+				break
+			}
 			pb.emit(a, z, cur|stRaw, true)
-		default: // FootnoteRef：P3 渲染，当前原样显示
+		case parser.FootnoteRef:
+			// 光标触及时显示原文 [^label]，否则显示标签（整体映射，光标不能停在标签中间）。
+			if pb.expanded(a, z) || in.Text == "" {
+				pb.emit(a, z, cur|stMarker, true)
+			} else {
+				pb.replace(a, z, in.Text, cur|stFootRef)
+			}
+		default:
 			pb.emit(a, z, cur|stRaw, true)
 		}
 		i = in.Next
@@ -527,4 +545,48 @@ func (p *projection) toSrc(u int, preferEnd bool) int {
 	}
 	off := u16ToByte(p.text[r.dispByte:p.runEnd(k)], u-r.disp)
 	return r.srcA + off
+}
+
+// inlineMath 返回行内公式原文的 TeX 内容与渲染种类（$$…$$ 为行间样式）；不是 $ 定界的公式时返回空串。
+func inlineMath(src string) (string, string) {
+	switch {
+	case len(src) >= 4 && strings.HasPrefix(src, "$$") && strings.HasSuffix(src, "$$"):
+		return strings.TrimSpace(src[2 : len(src)-2]), RenderMathDisplay
+	case len(src) >= 2 && src[0] == '$' && src[len(src)-1] == '$':
+		return strings.TrimSpace(src[1 : len(src)-1]), RenderMathInline
+	}
+	return "", ""
+}
+
+// footnoteHit 报告 pt 是否点在显示为标签的脚注引用上，是则返回对应脚注定义的内容起点（原版点击引用跳到定义）。
+// 引用正以原文显示（光标触及）或找不到定义时返回 false，点击按普通文字处理。
+func (e *Editor) footnoteHit(pt ui.Point) (int, bool) {
+	pos := e.hit(pt)
+	s, ok := e.segAt(pos)
+	if !ok || s.kind != rowText {
+		return 0, false
+	}
+	r := &e.entries[s.i].rows[s.k]
+	label := ""
+	for _, run := range s.proj.runs {
+		if run.st&stFootRef != 0 && s.base+run.srcA <= pos && pos <= s.base+run.srcB {
+			for _, in := range e.Doc.md.Inlines(e.Doc.blocks[s.i].Index + r.rel) {
+				if in.Kind == parser.FootnoteRef && in.Start == s.base+run.srcA {
+					label = in.Text
+				}
+			}
+		}
+	}
+	if label == "" {
+		return 0, false
+	}
+	for _, b := range e.Doc.blocks {
+		if pb := e.Doc.md.Block(b.Index); pb.Kind == parser.FootnoteDefinition && strings.EqualFold(pb.Label(), label) {
+			if first, ok := e.Doc.firstChildStart(b.Index); ok {
+				return first, true
+			}
+			return b.Start, true
+		}
+	}
+	return 0, false
 }

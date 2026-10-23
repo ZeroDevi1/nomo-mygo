@@ -144,3 +144,18 @@ func TestProjectionHidesMarkersOutsideCaret(t *testing.T) {
 		}
 	}
 }
+
+func TestCRLineEndingsDoNotOverlapBlocks(t *testing.T) {
+	for _, src := range []string{"# 标题\r\r段落一\r段落续\r\r- 列表\r", "# 标题\r\n\r\n段落\r\n"} {
+		d := NewDocument(src)
+		bs := d.Blocks()
+		for i := 1; i < len(bs); i++ {
+			if bs[i-1].End > bs[i].Start {
+				t.Fatalf("%q 块 %d 与 %d 重叠：%+v %+v", src, i-1, i, bs[i-1], bs[i])
+			}
+		}
+		if d.Source() != src {
+			t.Fatal("原文应不变")
+		}
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
 	"nomo/desktop/internal/docfs"
+	"nomo/desktop/internal/emoji"
 	"nomo/desktop/internal/i18n"
 	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
@@ -81,10 +82,17 @@ type Shell struct {
 	// post 把后台任务（对话框、文件写入）的结果交回 UI 线程；默认为 win.Update，测试中可替换。
 	post func(func())
 
+	// rend 是公式与 Mermaid 的离屏渲染服务（见 render.go），窗口打开后接入图片缓存。
+	rend renderService
 	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
 	images *mdedit.Images
 
 	quick quickState // 快捷插入菜单，见 quickinsert.go
+	emo   emojiState // 表情建议与选择器，见 emoji.go
+	// editorOrigin 为语义编辑区左上角（窗口坐标），每帧更新；按键回调中定位浮层用。
+	editorOrigin ui.Point
+	// loadEmoji 加载表情目录（主程序提供，可能耗时十余秒，在后台调用）；为空时不提供表情功能。
+	loadEmoji func(retry bool) ([]emoji.Entry, error)
 
 	pdfExporter func(html, path string, outline []PDFOutlineEntry) error
 	checkUpdate func() (UpdateInfo, error)
@@ -109,8 +117,10 @@ type Options struct {
 	ExportPDF func(html, path string, outline []PDFOutlineEntry) error
 	// CheckUpdate 检查新版本（主程序提供，可能耗时数秒，在后台调用）；为空时不显示检查更新。
 	CheckUpdate func() (UpdateInfo, error)
-	Files       []string // 启动时打开的文档
-	Folders     []string // 启动时打开的文件夹（取第一个）
+	// LoadEmoji 加载表情目录（主程序提供，读缓存或下载，在后台调用）；retry 为 true 时忽略失败冷却。为空时不提供表情功能。
+	LoadEmoji func(retry bool) ([]emoji.Entry, error)
+	Files     []string // 启动时打开的文档
+	Folders   []string // 启动时打开的文件夹（取第一个）
 }
 
 // UpdateInfo 是检查更新的结果：Supported 为 false 表示当前安装方式不支持自动更新（如免安装版、
@@ -123,7 +133,7 @@ type UpdateInfo struct {
 // New 读取偏好与最近记录，并打开启动参数中的文档。
 func New(o Options) *Shell {
 	s := &Shell{cfg: o.Config, locale: o.Locale, active: -1, sidebarW: 240,
-		prefs: loadPrefs(o.Config), pf: currentPlatform(), systemLocale: o.SystemLocale, version: o.Version, pdfExporter: o.ExportPDF, checkUpdate: o.CheckUpdate}
+		prefs: loadPrefs(o.Config), pf: currentPlatform(), systemLocale: o.SystemLocale, version: o.Version, pdfExporter: o.ExportPDF, checkUpdate: o.CheckUpdate, loadEmoji: o.LoadEmoji}
 	s.loadThemes()
 	s.images = mdedit.NewImages(func(fn func()) {
 		if s.post != nil {
@@ -185,6 +195,7 @@ func (s *Shell) Open() *mygo.Window {
 		StateKey: "native-main", TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
 	})
 	s.post = s.win.Update
+	s.images.SetRenderer(s.rend.render)
 	s.win.OnClose(func(e *mygo.CloseEvent) {
 		if s.closingAll && len(s.closing) == 0 {
 			return
@@ -203,6 +214,7 @@ func (s *Shell) Open() *mygo.Window {
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
 		s.images.Close()
+		s.rend.close()
 		if s.settings != nil {
 			s.settings.win.Close()
 		}
@@ -420,16 +432,17 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 		return
 	}
 	text, ver, path, enc := t.Doc.Source(), t.Doc.Version(), t.Path, t.Encoding
+	disk := t.diskText(text)
 	snapshot := s.prefs.CreateSnapshotBeforeSave
 	t.saving = true
 	go func() {
 		// 保存前快照（createSnapshotBeforeSave）：与原版一致，快照失败不阻止保存，只记日志。
 		if snapshot {
-			if err := s.cfg.CreateSnapshot(path, text, "before-save"); err != nil {
+			if err := s.cfg.CreateSnapshot(path, disk, "before-save"); err != nil {
 				applog.Warn("Native", "创建保存前快照失败："+err.Error())
 			}
 		}
-		_, err := docfs.WriteDocument(path, text, enc)
+		_, err := docfs.WriteDocument(path, disk, enc)
 		s.post(func() {
 			t.saving = false
 			if err != nil {
@@ -539,11 +552,12 @@ func (s *Shell) checkExternalChanges() {
 		return
 	}
 	t.syncFromSource()
-	t.Ed.SetSource(doc.Markdown)
+	text := t.adoptLineEndings(doc.Markdown)
+	t.Ed.SetSource(text)
 	if t.source != nil {
 		t.syncToSource()
 	}
-	t.markSaved(doc.Markdown)
+	t.markSaved(text)
 	t.diskModified = mod
 }
 

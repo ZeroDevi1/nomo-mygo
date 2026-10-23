@@ -10,6 +10,7 @@ import (
 	"hash/maphash"
 	"image"
 	"image/draw"
+	"image/gif"
 	"io"
 	"math"
 	"net/http"
@@ -50,13 +51,68 @@ type Images struct {
 	dims map[string][2]float32
 
 	mu     sync.Mutex    // 保护 queues
-	queues [2]imageQueue // 0 本地文件与 data URI，1 远程下载
+	queues [3]imageQueue // 0 本地文件与 data URI，1 远程下载，2 公式与图表渲染（串行，见 enqueue）
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	closed bool
 	// fetch 读取远程图片；测试中可替换。
 	fetch func(ctx context.Context, u string) ([]byte, error)
+	// render 渲染公式与图表（外壳经 SetRenderer 注入，离屏 WebView 实现）；为空时渲染对象按加载失败显示原文。
+	render RenderFunc
+}
+
+// 渲染对象的种类（RenderRequest.Kind）。
+const (
+	RenderMathInline  = "math-inline"
+	RenderMathDisplay = "math-display"
+	RenderMermaid     = "mermaid"
+)
+
+// RenderRequest 是一个公式或 Mermaid 图表的渲染请求：Src 为 TeX 或 Mermaid 源码，Dark 与 FontSize（CSS 像素）
+// 决定配色与字号，参与缓存键。
+type RenderRequest struct {
+	Kind, Src string
+	Dark      bool
+	FontSize  float32
+}
+
+// RenderFunc 把请求渲染为位图，返回位图、显示尺寸（CSS 像素，按 DIP 显示）与基线以下的深度（行内公式用于
+// 与正文基线对齐，其余为 0）。在后台 worker 中调用，可能耗时数百毫秒；渲染失败（如 Mermaid 语法错误）返回 error。
+type RenderFunc func(req RenderRequest) (img image.Image, w, h, depth float32, err error)
+
+// SetRenderer 设置公式与图表的渲染函数；在 UI 线程调用。
+func (im *Images) SetRenderer(f RenderFunc) { im.render = f }
+
+// InvalidateRenders 丢弃全部渲染结果（配色主题变化后调用），下次绘制时按新主题重新渲染；在 UI 线程调用。
+func (im *Images) InvalidateRenders() {
+	for k, en := range im.m {
+		if en.req != nil && en.state != imageLoading {
+			delete(im.m, k)
+			im.bytes -= en.bytes
+		}
+	}
+	im.gen++
+}
+
+// requestRender 返回渲染请求的缓存项并标记本帧使用；不存在时创建并排队渲染。
+func (im *Images) requestRender(req RenderRequest) *imageEntry {
+	key := fmt.Sprintf("render:%s:%t:%.1f:%x:%d", req.Kind, req.Dark, req.FontSize, maphash.String(im.seed, req.Src), len(req.Src))
+	en := im.m[key]
+	if en == nil || en.state == imageFailed && time.Since(en.failedAt) > imageRetryAfter && im.render != nil {
+		if en != nil {
+			im.bytes -= en.bytes
+		}
+		en = &imageEntry{key: key, req: &req}
+		im.m[key] = en
+		if im.render == nil {
+			en.state, en.failedAt = imageFailed, time.Now()
+		} else {
+			im.enqueue(en)
+		}
+	}
+	en.used = im.clock
+	return en
 }
 
 type imageQueue struct {
@@ -79,11 +135,19 @@ type imageEntry struct {
 	state    imageState
 	bmp      *ui.Bitmap
 	svg      *ui.SVG
+	// frames/delays 为动画 GIF 的各帧（已按处置方式合成）与停留时间，len(frames) > 1 时按时间播放；
+	// period 为一轮总时长。静态图片为空。
+	frames   []*ui.Bitmap
+	delays   []time.Duration
+	period   time.Duration
 	w, h     float32 // 原始尺寸（像素，按 DIP 显示，与原版 CSS 像素一致）；EXIF 旋转后的方向。加载中为 dims 中记住的尺寸，未知为 0
 	bytes    int
 	used     uint64
 	failedAt time.Time
-	modTime  time.Time // 本地文件加载时的修改时间，Revalidate 据此发现外部改动；其他来源为零
+	// req 非空表示公式或图表的渲染结果（见 RenderRequest），depth 为其基线以下的深度（CSS 像素）。
+	req     *RenderRequest
+	depth   float32
+	modTime time.Time // 本地文件加载时的修改时间，Revalidate 据此发现外部改动；其他来源为零
 }
 
 const (
@@ -182,13 +246,17 @@ func (im *Images) enqueue(en *imageEntry) {
 	if im.closed {
 		return
 	}
-	k := 0
-	if isRemote(en.src) {
+	k, limit := 0, imageWorkers
+	switch {
+	case en.req != nil:
+		// 渲染在同一个离屏窗口里串行进行，多开 worker 只会排队等锁；单独一条队列，慢渲染不拖住图片。
+		k, limit = 2, 1
+	case isRemote(en.src):
 		k = 1
 	}
 	q := &im.queues[k]
 	q.items = append(q.items, en)
-	if q.workers < imageWorkers {
+	if q.workers < limit {
 		q.workers++
 		go im.work(q)
 	}
@@ -223,7 +291,12 @@ func (im *Images) work(q *imageQueue) {
 		q.items = q.items[1:]
 		im.mu.Unlock()
 
-		res := im.load(en.src)
+		var res imageResult
+		if en.req != nil {
+			res = im.renderEntry(*en.req)
+		} else {
+			res = im.load(en.src)
+		}
 		im.post(func() { im.finish(en, res) })
 	}
 }
@@ -232,10 +305,26 @@ func (im *Images) work(q *imageQueue) {
 type imageResult struct {
 	bmp     *ui.Bitmap
 	svg     *ui.SVG
+	frames  []*ui.Bitmap
+	delays  []time.Duration
 	w, h    float32
 	bytes   int
 	modTime time.Time
+	depth   float32
 	err     error
+}
+
+// renderEntry 调用渲染函数并把结果转为位图（在 worker 中运行）。
+func (im *Images) renderEntry(req RenderRequest) imageResult {
+	img, w, h, depth, err := im.render(req)
+	if err != nil {
+		return imageResult{err: err}
+	}
+	if img == nil || w <= 0 || h <= 0 {
+		return imageResult{err: errors.New("empty render")}
+	}
+	b := img.Bounds()
+	return imageResult{bmp: ui.NewBitmap(img), w: w, h: h, depth: depth, bytes: b.Dx() * b.Dy() * 4 * 4 / 3}
 }
 
 // finish 在 UI 线程写入加载结果；缓存项已被替换或缓存已关闭时丢弃。
@@ -247,6 +336,10 @@ func (im *Images) finish(en *imageEntry, res imageResult) {
 		en.state, en.failedAt = imageFailed, time.Now()
 	} else {
 		en.state, en.bmp, en.svg, en.w, en.h, en.bytes, en.modTime = imageReady, res.bmp, res.svg, res.w, res.h, res.bytes, res.modTime
+		en.frames, en.delays, en.depth = res.frames, res.delays, res.depth
+		for _, d := range res.delays {
+			en.period += d
+		}
 		im.bytes += res.bytes
 		if len(im.dims) >= maxImageDims {
 			clear(im.dims)
@@ -404,9 +497,14 @@ func decodeImage(data []byte, svgExt bool) imageResult {
 		}
 		return imageResult{svg: s, w: w, h: h, bytes: len(data) + 16<<10}
 	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return imageResult{err: err}
+	}
+	if format == "gif" {
+		if res, ok := decodeAnimatedGIF(data); ok {
+			return res
+		}
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > maxSourcePixels {
 		return imageResult{err: errors.New("image dimensions out of range")}
@@ -437,6 +535,69 @@ func decodeImage(data []byte, svgExt bool) imageResult {
 	}
 	b := dst.Bounds()
 	return imageResult{bmp: ui.NewBitmap(dst), w: nw, h: nh, bytes: b.Dx() * b.Dy() * 4 * 4 / 3}
+}
+
+// maxGIFBytes 是动画 GIF 全部帧解码后的像素字节上限；超出时只保留首帧（静态显示），避免长动画占满缓存。
+const maxGIFBytes = 32 << 20
+
+// decodeAnimatedGIF 解码多帧 GIF：按各帧的处置方式（保留、清除为透明、恢复上一帧）合成完整画面。停留时间
+// 小于等于 10 ms 的帧按 100 ms 处理（与浏览器一致）。单帧、超出 maxGIFBytes 或解码失败时返回 false。
+func decodeAnimatedGIF(data []byte) (imageResult, bool) {
+	g, err := gif.DecodeAll(bytes.NewReader(data))
+	if err != nil || len(g.Image) < 2 {
+		return imageResult{}, false
+	}
+	w, h := g.Config.Width, g.Config.Height
+	if w <= 0 || h <= 0 || len(g.Image)*w*h*4 > maxGIFBytes || w > maxDecodeDim || h > maxDecodeDim {
+		return imageResult{}, false
+	}
+	canvas := image.NewRGBA(image.Rect(0, 0, w, h))
+	res := imageResult{w: float32(w), h: float32(h)}
+	for k, fr := range g.Image {
+		var prev *image.RGBA
+		disposal := byte(0)
+		if k < len(g.Disposal) {
+			disposal = g.Disposal[k]
+		}
+		if disposal == gif.DisposalPrevious {
+			prev = image.NewRGBA(canvas.Bounds())
+			copy(prev.Pix, canvas.Pix)
+		}
+		draw.Draw(canvas, fr.Bounds(), fr, fr.Bounds().Min, draw.Over)
+		snap := image.NewRGBA(canvas.Bounds())
+		copy(snap.Pix, canvas.Pix)
+		res.frames = append(res.frames, ui.NewBitmap(snap))
+		d := 100 * time.Millisecond
+		if k < len(g.Delay) && g.Delay[k] > 1 {
+			d = time.Duration(g.Delay[k]) * 10 * time.Millisecond
+		}
+		res.delays = append(res.delays, d)
+		switch disposal {
+		case gif.DisposalBackground:
+			draw.Draw(canvas, fr.Bounds(), image.Transparent, image.Point{}, draw.Src)
+		case gif.DisposalPrevious:
+			canvas = prev
+		}
+	}
+	res.bmp = res.frames[0]
+	res.bytes = len(res.frames) * w * h * 4
+	return res, true
+}
+
+// frameAt 返回动画在 now 时刻应显示的帧及距下一帧的时间；静态图片返回 bmp 与 0。所有动画共用墙钟相位，
+// 同一张图片的多处引用同步播放。
+func (en *imageEntry) frameAt(now time.Time) (*ui.Bitmap, time.Duration) {
+	if len(en.frames) < 2 || en.period <= 0 {
+		return en.bmp, 0
+	}
+	t := time.Duration(now.UnixNano()) % en.period
+	for k, d := range en.delays {
+		if t < d {
+			return en.frames[k], d - t
+		}
+		t -= d
+	}
+	return en.frames[0], en.delays[0]
 }
 
 // jpegOrientation 返回 JPEG EXIF 的方向标签（1–8），没有时返回 0。

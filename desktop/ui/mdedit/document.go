@@ -49,6 +49,12 @@ type Document struct {
 	// u16Total 是原文的 UTF-16 长度，编辑时增量维护。
 	u16Total int
 	version  uint64
+	// hasToc 表示文档含目录区（collect 时更新）；headings/headingsVer 缓存 Headings 的结果。
+	hasToc      bool
+	headings    []Heading
+	headingsVer uint64
+	// inputVer 是最近一次键盘输入（键入、删除、输入法）后的版本；撤销、粘贴与命令不更新它。
+	inputVer uint64
 
 	Sel Selection
 	// marked 是输入法组字区间（字节），hasMarked 为 false 时无组字。
@@ -81,6 +87,10 @@ func (d *Document) Parser() *parser.Document { return d.md }
 // Version 每次原文变化时递增。
 func (d *Document) Version() uint64 { return d.version }
 
+// InputVersion 返回最近一次键盘输入（键入、删除、输入法组字）后的原文版本；等于 Version 时表示最近的
+// 修改来自键盘输入，撤销、重做、粘贴与格式命令之后则不相等。表情建议等只在键入时弹出的功能据此判断。
+func (d *Document) InputVersion() uint64 { return d.inputVer }
+
 // U16Len 返回原文的 UTF-16 长度。
 func (d *Document) U16Len() int { return d.u16Total }
 
@@ -91,10 +101,52 @@ func (d *Document) Marked() (Selection, bool) { return d.marked, d.hasMarked }
 // front matter，会把它拆成分割线、段落或 Setext 标题；collect 把这些块合并成一块。
 const KindFrontMatter parser.Kind = 200
 
+// KindToc 是正文目录区（<!-- toc --> … <!-- /toc -->）的合成块类型，对应原版 toc_block 节点。
+const KindToc parser.Kind = 201
+
+const (
+	tocStartMarker = "<!-- toc -->"
+	tocEndMarker   = "<!-- /toc -->"
+)
+
 func (d *Document) collect(dst []Block) []Block {
-	fm := frontMatterEnd(d.md.Source())
+	src := d.md.Source()
+	fm := frontMatterEnd(src)
+	// 目录区：成对的 <!-- toc --> 与 <!-- /toc --> 注释块之间（含两端）合并为一个 KindToc 合成块；
+	// 未配对的标记按普通注释块处理。先找出配对的起止子块序号，再在主循环中合并。
+	tocEnd := map[int]int{}
+	open := -1
 	for c := range d.md.Children(0) {
 		b := d.md.Block(c)
+		if b.Kind != parser.HTMLBlock || b.Start < fm {
+			continue
+		}
+		switch strings.TrimSpace(src[b.Start:b.End]) {
+		case tocStartMarker:
+			open = c
+		case tocEndMarker:
+			if open >= 0 {
+				tocEnd[open] = c
+				open = -1
+			}
+		}
+	}
+	d.hasToc = len(tocEnd) > 0
+	inToc := -1 // 正在合并的目录区的结束子块序号
+	for c := range d.md.Children(0) {
+		b := d.md.Block(c)
+		if inToc >= 0 {
+			dst[len(dst)-1].End = max(dst[len(dst)-1].End, trailingEnd(src, b.End))
+			if c == inToc {
+				inToc = -1
+			}
+			continue
+		}
+		if end, ok := tocEnd[c]; ok {
+			dst = append(dst, Block{Index: c, Kind: KindToc, Start: b.Start, End: trailingEnd(src, b.End)})
+			inToc = end
+			continue
+		}
 		if fm > 0 && b.Start < fm {
 			// 与 front matter 相交的块并入合成块；跨过结束行的块整体并入，保持区间不重叠。
 			if n := len(dst); n > 0 && dst[n-1].Kind == KindFrontMatter {
@@ -105,6 +157,10 @@ func (d *Document) collect(dst []Block) []Block {
 			continue
 		}
 		dst = append(dst, Block{Index: c, Kind: b.Kind, Start: b.Start, End: trailingEnd(d.md.Source(), b.End)})
+	}
+	// 块区间不得重叠：原文含 CR 换行（外壳打开时会统一为 LF，这里只是防御）时，延伸到行尾可能越过下一块的起点。
+	for i := 1; i < len(dst); i++ {
+		dst[i-1].End = min(dst[i-1].End, dst[i].Start)
 	}
 	return dst
 }
@@ -236,4 +292,12 @@ func (d *Document) U16ToByte(u int) int {
 	}
 	b := d.blocks[i]
 	return b.Start + u16ToByte(src[b.Start:], u-b.U16Start)
+}
+
+// firstChildStart 返回解析器块 i 的第一个子块的起点（脚注定义的正文起点）。
+func (d *Document) firstChildStart(i int) (int, bool) {
+	for c := range d.md.Children(i) {
+		return d.md.Block(c).Start, true
+	}
+	return 0, false
 }

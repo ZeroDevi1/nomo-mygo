@@ -36,7 +36,9 @@ type entry struct {
 	// height 为块总高度；含未布局行的估算值，用于滚动条与阅读锚点。
 	height float32
 	ydirty bool // 行高变化后需要重新计算 rows[].y 与 height
-	used   uint64
+	// tablesW 为计算表格列宽时的内容区宽度，变化后重算。
+	tablesW float32
+	used    uint64
 }
 
 // vseg 是一个可见行：y 为行框顶部相对元素顶部的位置。
@@ -213,7 +215,11 @@ type Editor struct {
 	// 文档目录（未保存的新文档为空）；由外壳通过 SetImages 设置。
 	images  *Images
 	baseDir string
+	labels  Labels
 	imgSeen uint64 // 上次绘制时的图片缓存代数
+	// tocVer/tocHash 为上次检查目录卡片时的原文版本与标题摘要；标题变化后目录卡片重新排版。
+	tocVer  uint64
+	tocHash uint64
 }
 
 type dragMode uint8
@@ -354,7 +360,7 @@ func (e *Editor) estimate(b Block) entry {
 	lines += int(textWidth(s, fs) / e.width())
 	h := float32(lines)*fs*1.4 + paraAfter
 	switch b.Kind {
-	case parser.CodeBlock, parser.Table, parser.Quote, KindFrontMatter:
+	case parser.CodeBlock, parser.Table, parser.Quote, KindFrontMatter, KindToc:
 		h += 2 * blockMargin
 	}
 	return entry{height: h}
@@ -367,8 +373,9 @@ func (e *Editor) applyEdit(ed Edit) {
 		return
 	}
 	var reuse []row
+	var oldFrames []frame
 	if ed.Removed == 1 && ed.Inserted == 1 && e.entries[ed.First].split {
-		reuse = e.entries[ed.First].rows
+		reuse, oldFrames = e.entries[ed.First].rows, e.entries[ed.First].frames
 	}
 	for _, en := range e.entries[ed.First : ed.First+ed.Removed] {
 		for _, r := range en.rows {
@@ -381,7 +388,7 @@ func (e *Editor) applyEdit(ed Edit) {
 	}
 	e.entries = slices.Replace(e.entries, ed.First, ed.First+ed.Removed, fresh...)
 	if reuse != nil {
-		e.split(ed.First, reuse)
+		e.split(ed.First, reuse, oldFrames)
 	}
 	switch {
 	case e.anchor >= ed.First+ed.Removed:
@@ -396,10 +403,18 @@ func (e *Editor) applyEdit(ed Edit) {
 
 // split 把顶层块 i 展开为行并估算行高；reuse 非空时按行哈希做前后缀匹配，
 // 继承未变行的投影、布局与实测高度。
-func (e *Editor) split(i int, reuse []row) {
+func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 	en := &e.entries[i]
 	top := e.Doc.blocks[i]
 	rows, frames := buildRows(e.Doc, top, e.seed)
+	// 同一块重新展开（块内编辑）时保留表格的横向滚动位置。
+	for k := range frames {
+		if k < len(oldFrames) && oldFrames[k].kind == frames[k].kind {
+			frames[k].scrollX = oldFrames[k].scrollX
+		}
+	}
+	e.layoutTables(e.Doc.Source(), top.Start, rows, frames, e.width())
+	en.tablesW = e.width()
 	for k := range rows {
 		r := &rows[k]
 		_, w := e.rowBox(r)
@@ -433,7 +448,7 @@ func inherit(n, o row) row {
 	n.proj, n.layout, n.gen, n.sig = o.proj, o.layout, o.gen, o.sig
 	n.height, n.measured, n.bytes, n.used = o.height, o.measured, o.bytes, o.used
 	n.hlIn, n.hlOut, n.hlKnown = o.hlIn, o.hlOut, o.hlKnown
-	n.objSizes, n.objRects, n.imgGen = o.objSizes, o.objRects, o.imgGen
+	n.objSizes, n.objRects, n.imgGen, n.shapeW = o.objSizes, o.objRects, o.imgGen, o.shapeW
 	return n
 }
 
@@ -463,19 +478,13 @@ func (e *Editor) layoutRows(en *entry) {
 func (e *Editor) rowBox(r *row) (x, w float32) {
 	cw := e.width()
 	if r.ncol > 0 {
-		colW := max(minCellW, (cw-r.indent)/float32(r.ncol))
-		return r.indent + float32(r.col)*colW + cellPadX, colW - 2*cellPadX
+		return r.indent + r.cellX - r.shift + cellPadX, max(1, r.cellW-2*cellPadX)
 	}
 	w = cw - r.indent
 	if r.role == roleCode || r.role == roleFront {
 		w -= codePadX
 	}
 	return r.indent, max(40, w)
-}
-
-// tableCol 返回表格列宽。
-func (e *Editor) tableCol(indent float32, ncol int) float32 {
-	return max(minCellW, (e.width()-indent)/float32(max(1, ncol)))
 }
 
 // expansionFor 返回行的展开状态：光标位于行内时就地展开光标处的标记。
@@ -522,7 +531,11 @@ func (e *Editor) ensure(i int) *entry {
 	en := &e.entries[i]
 	en.used = e.tick
 	if !en.split {
-		e.split(i, nil)
+		e.split(i, nil, nil)
+	} else if en.tablesW != e.width() {
+		// 内容区宽度变化：重算表格列宽（单元格行宽变化后，其布局在 ensureRow 中按 shapeW 作废）。
+		e.layoutTables(e.Doc.Source(), e.Doc.blocks[i].Start, en.rows, en.frames, e.width())
+		en.tablesW = e.width()
 	}
 	if en.ydirty {
 		e.layoutRows(en)
@@ -546,8 +559,8 @@ func (e *Editor) ensureRow(i, k int) bool {
 	r.used = e.tick
 	top := e.Doc.blocks[i]
 	ex := e.expansionFor(top, r)
-	if r.htmlImg {
-		// 图片块只在光标严格位于块内时展开（与行内图片一致，见 projBuilder.inside）。
+	if r.htmlImg || r.htmlKind != previewNone {
+		// 图片块、HTML 预览与注释卡片只在光标严格位于块内时展开（与行内图片一致，见 projBuilder.inside）。
 		ex.inBlock = ex.inBlock && ex.caret > 0 && ex.caret < r.b-r.a
 	}
 	sig := e.signature(top, r, ex)
@@ -567,7 +580,7 @@ func (e *Editor) ensureRow(i, k int) bool {
 	_, w := e.rowBox(r)
 	p := r.proj
 	var sizes [][2]float32
-	if r.layout != nil && r.gen == e.layoutGen && r.sig == sig {
+	if r.layout != nil && r.gen == e.layoutGen && r.sig == sig && r.shapeW == w {
 		// 投影有效：只有行内图片的尺寸变化（加载完成）时按原投影重排。
 		if len(p.objs) == 0 || r.imgGen == e.imageGen() {
 			return false
@@ -581,6 +594,8 @@ func (e *Editor) ensureRow(i, k int) bool {
 			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout})
 		} else if r.htmlImg && !ex.inBlock {
 			p = projectHTMLImages(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
+		} else if r.htmlKind != previewNone && !ex.inBlock {
+			p = projectHTMLPreview(e.Doc.Source()[top.Start+r.a:top.Start+r.b], r.htmlKind)
 		} else {
 			p = projectIdentity(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
 		}
@@ -596,7 +611,7 @@ func (e *Editor) ensureRow(i, k int) bool {
 		spans = e.spans(p, sizes)
 	}
 	l := ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align})
-	r.objSizes, r.objRects = sizes, objRects(l, p)
+	r.objSizes, r.objRects, r.shapeW = sizes, objRects(l, p), w
 	_, lh := l.Size()
 	m := font.Metrics()
 	h := r.padTop + max(lh, m.Ascent+m.Descent+m.LineGap) + r.padBottom
@@ -611,6 +626,9 @@ func (e *Editor) ensureRow(i, k int) bool {
 	r.bytes = 512 + len(p.text) + 96*p.u16 + 48*max(len(p.runs), len(spans)) + 64*len(p.objs)
 	for _, o := range p.objs {
 		r.bytes += len(o.src) + len(o.alt)
+		if o.html != nil && o.html.lay != nil {
+			r.bytes += len(o.html.src) + o.html.lay.bytes
+		}
 	}
 	e.cacheBytes += r.bytes
 	return true
@@ -642,6 +660,10 @@ func (e *Editor) spans(p *projection, sizes [][2]float32) []ui.Span {
 		if r.st&stMark != 0 {
 			sp.Background = e.pal.mark
 			sp.Radius = 2
+		}
+		if r.st&stFootRef != 0 {
+			sp.Size = bodySize * e.scale * 0.75
+			sp.Color, sp.Background, sp.Radius = e.pal.link, e.pal.codeBg, 3
 		}
 		switch {
 		case r.st&(stMarker|stComment) != 0:
@@ -981,6 +1003,8 @@ func (e *Editor) revealCaret() {
 	var bi int
 	var cy, ch float32 // 光标相对块 bi 顶部的位置与高度
 	if s, ok := e.segAt(pos); ok {
+		e.revealCell(s)
+		s = e.segOf(s.i, s.k)
 		r := e.caretIn(s, pos)
 		en := e.ensure(s.i)
 		bi, cy, ch = s.i, en.rows[s.k].y+s.padTop+r.Y, r.H

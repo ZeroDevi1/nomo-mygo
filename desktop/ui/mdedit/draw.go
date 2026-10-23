@@ -18,6 +18,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 			e.imgSeen, e.dirty = e.images.gen, true
 		}
 	}
+	e.syncToc()
 	busy := e.dirty
 	e.prepare(r.W, r.H)
 	x0 := r.X + e.left()
@@ -43,19 +44,34 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		if row.role == roleRule && !(head >= s.base && head <= s.end) || row.bandH == 0 {
 			continue
 		}
-		e.paintHighlights(p, s, tx, ty)
-		if selA < selB && selA <= s.end && selB >= s.base {
-			e.paintRange(p, s, selA, selB, tx, ty, func(rc ui.Rect) { p.Fill(rc, e.pal.selection, 0) })
+		paint := func() {
+			e.paintHighlights(p, s, tx, ty)
+			if selA < selB && selA <= s.end && selB >= s.base {
+				e.paintRange(p, s, selA, selB, tx, ty, func(rc ui.Rect) { p.Fill(rc, e.pal.selection, 0) })
+			}
+			p.TextLayout(s.layout, tx, ty, e.rowColor(row))
+			if len(row.objRects) > 0 {
+				e.drawImages(p, row, tx, ty)
+			}
+			if marked && mark.Anchor <= s.end && mark.Head >= s.base {
+				e.paintRange(p, s, mark.Anchor, mark.Head, tx, ty, func(rc ui.Rect) {
+					p.Fill(ui.Rect{X: rc.X, Y: rc.Y + rc.H - 1.5, W: rc.W, H: 1.5}, e.pal.text, 0)
+				})
+			}
 		}
-		p.TextLayout(s.layout, tx, ty, e.rowColor(row))
-		if len(row.objRects) > 0 {
-			e.drawImages(p, row, tx, ty)
+		if row.ncol > 0 {
+			// 单元格裁剪到所在列与表格视口的交集，横向滚出视口的部分不画。
+			if f := tableFrame(en, v.k); f != nil {
+				left := x0 + row.indent
+				cell := ui.Rect{X: max(left, left+row.cellX-row.shift), Y: r.Y + v.y, W: 0, H: row.bandH}
+				cell.W = min(left+f.viewW, left+row.cellX-row.shift+row.cellW) - cell.X
+				if cell.W > 0 {
+					p.Clip(cell, 0, paint)
+				}
+				continue
+			}
 		}
-		if marked && mark.Anchor <= s.end && mark.Head >= s.base {
-			e.paintRange(p, s, mark.Anchor, mark.Head, tx, ty, func(rc ui.Rect) {
-				p.Fill(ui.Rect{X: rc.X, Y: rc.Y + rc.H - 1.5, W: rc.W, H: 1.5}, e.pal.text, 0)
-			})
-		}
+		paint()
 	}
 	if e.focused && e.caretOK && selA == selB {
 		c := e.caret
@@ -173,22 +189,40 @@ func (e *Editor) drawFrame(p *ui.Painter, en *entry, f frame, x0, top float32, v
 			p.RichText(box.X+box.W-lw-10, box.Y+6, 0, ui.Span{Text: f.lang, Size: 12, Color: e.pal.muted})
 		}
 	case frameTable:
-		ncol := max(1, first.ncol)
-		colW := e.tableCol(f.indent, ncol)
-		tw := colW * float32(ncol)
-		box := ui.Rect{X: x, Y: y0, W: tw, H: y1 - y0}
-		if first.role == roleCellHead {
-			p.Fill(ui.Rect{X: x, Y: y0, W: tw, H: first.bandH}, e.pal.tableHead, 0)
-		}
-		for k := f.first; k <= f.last; k++ {
-			if r := &en.rows[k]; r.col == 0 && k > f.first {
-				p.Fill(ui.Rect{X: x, Y: top + r.y, W: tw, H: 1}, e.pal.tableBorder, 0)
+		// 超宽表格只显示 viewW 宽的视口，按 scrollX 平移；网格与底色在视口内裁剪。
+		tw := f.tableW
+		vw := min(tw, f.viewW)
+		clip := ui.Rect{X: x, Y: y0, W: vw, H: y1 - y0}
+		p.Clip(clip, 6, func() {
+			tx := x - f.scrollX
+			if first.role == roleCellHead {
+				p.Fill(ui.Rect{X: tx, Y: y0, W: tw, H: first.bandH}, e.pal.tableHead, 0)
 			}
+			// 只画可见范围内的横线：万行表格的装饰不随行数线性增长。
+			for k := f.first + 1; k <= f.last; k++ {
+				r := &en.rows[k]
+				if r.col != 0 {
+					continue
+				}
+				if ry := top + r.y; ry > view.Y+view.H {
+					break
+				} else if ry >= view.Y-1 {
+					p.Fill(ui.Rect{X: tx, Y: ry, W: tw, H: 1}, e.pal.tableBorder, 0)
+				}
+			}
+			cx := tx
+			for c := 0; c+1 < len(f.cols); c++ {
+				cx += f.cols[c]
+				p.Fill(ui.Rect{X: cx, Y: y0, W: 1, H: y1 - y0}, e.pal.tableBorder, 0)
+			}
+		})
+		p.Stroke(clip, e.pal.tableBorder, 6, 1)
+		if tw > vw+0.5 {
+			// 横向滚动条：画在表格视口底边内侧，长度与位置按可见比例。
+			bw := max(24, vw*vw/tw)
+			bx := x + (vw-bw)*f.scrollX/max(1, tw-vw)
+			p.Fill(ui.Rect{X: bx, Y: y1 - tableScrollbarH - 2, W: bw, H: tableScrollbarH - 1}, e.pal.scrollbar, 2.5)
 		}
-		for c := 1; c < ncol; c++ {
-			p.Fill(ui.Rect{X: x + colW*float32(c), Y: y0, W: 1, H: y1 - y0}, e.pal.tableBorder, 0)
-		}
-		p.Stroke(box, e.pal.tableBorder, 6, 1)
 	case frameRule:
 		mid := (y0 + y1) / 2
 		p.Fill(ui.Rect{X: x, Y: mid, W: w, H: 1}, e.pal.border, 0)

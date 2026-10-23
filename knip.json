@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/quicklook/preview-entry.ts"],
+  "entry": ["src/quicklook/preview-entry.ts", "src/render/render-entry.ts"],
   "ignoreDependencies": ["@inlang/plugin-message-format"],
   "ignoreBinaries": ["pwsh", "gofmt"],
   "ignoreExportsUsedInFile": {

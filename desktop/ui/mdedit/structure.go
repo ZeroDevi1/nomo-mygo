@@ -81,8 +81,17 @@ func (m itemPrefix) continuation() string {
 
 // rowPrefix 返回行 s 所在原文行的行首前缀。
 func (e *Editor) rowPrefix(s seg) string {
+	s = e.lineHead(s)
 	src := e.Doc.Source()
 	return src[lineStart(src, s.base):s.base]
+}
+
+// lineHead 返回超长原文行被分段时的首个片段（s 本身不是后续片段时返回 s）。
+func (e *Editor) lineHead(s seg) seg {
+	for s.k > 0 && e.entries[s.i].rows[s.k].cont {
+		s = e.segOf(s.i, s.k-1)
+	}
+	return s
 }
 
 // enterInRow 处理容器内的回车，返回是否已处理。
@@ -106,7 +115,8 @@ func (e *Editor) enterInRow(pos int, soft bool) bool {
 	src := e.Doc.Source()
 	m := parsePrefix(prefix)
 	if r.kind == rowLine && !r.empty {
-		indent := src[s.base:s.end]
+		h := e.lineHead(s)
+		indent := src[h.base:h.end]
 		indent = indent[:len(indent)-len(strings.TrimLeft(indent, " \t"))]
 		e.replaceSel("\n"+m.continuation()+indent, editOther)
 		return true

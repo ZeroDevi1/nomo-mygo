@@ -26,6 +26,23 @@ const (
 	imageAltPad  = 8 + imageAltIcon + 6 + 8
 )
 
+// Labels 是编辑区内需要界面语言的文字，由外壳按当前语言设置。
+type Labels struct {
+	Comment    string // 注释卡片的标签，原版 t.comment()
+	Toc        string // 目录卡片的标题，原版 t.toc()
+	NoHeadings string // 目录卡片无标题时的提示，原版 t.documentHasNoHeadings()
+}
+
+// SetLabels 设置界面文字；变化时全部布局作废（注释卡片含标签文字）。
+func (e *Editor) SetLabels(l Labels) {
+	if l == e.labels {
+		return
+	}
+	e.labels = l
+	e.layoutGen++
+	e.dirty = true
+}
+
 // SetImages 设置图片缓存与解析相对路径的文档目录；与当前值相同时不做任何事。目录变化（另存为到
 // 别处）后全部布局作废，按新目录重新解析。
 func (e *Editor) SetImages(im *Images, dir string) {
@@ -48,6 +65,9 @@ func (e *Editor) imageEntry(o imgObj) *imageEntry {
 	if e.images == nil {
 		return nil
 	}
+	if o.render != "" {
+		return e.images.requestRender(RenderRequest{Kind: o.render, Src: o.src, Dark: e.dark, FontSize: bodySize * e.scale})
+	}
 	return e.images.request(o.src, e.baseDir)
 }
 
@@ -58,6 +78,10 @@ func (e *Editor) objSizes(p *projection, maxW float32) [][2]float32 {
 	}
 	out := make([][2]float32, len(p.objs))
 	for k, o := range p.objs {
+		if o.html != nil {
+			out[k] = [2]float32{maxW, e.htmlLayout(o.html, maxW).h}
+			continue
+		}
 		out[k] = e.objSize(o, e.imageEntry(o), maxW)
 	}
 	return out
@@ -66,6 +90,9 @@ func (e *Editor) objSizes(p *projection, maxW float32) [][2]float32 {
 // objSize 按原版规则计算显示尺寸：width 属性为像素数或百分比（相对行宽），否则用原始尺寸；
 // 宽度不超过行宽（CSS max-width: 100%），高度按比例。
 func (e *Editor) objSize(o imgObj, en *imageEntry, maxW float32) [2]float32 {
+	if o.render != "" {
+		return e.renderSize(o, en, maxW)
+	}
 	want, hasWant := parseImageWidth(o.width, maxW)
 	switch {
 	case en == nil || en.state == imageFailed:
@@ -86,6 +113,41 @@ func (e *Editor) objSize(o imgObj, en *imageEntry, maxW float32) [2]float32 {
 		h, w = h*maxW/w, maxW
 	}
 	return [2]float32{max(1, w), max(1, h)}
+}
+
+// renderSize 返回公式或图表对象的排版尺寸：已渲染时为渲染尺寸（宽度超过行宽时等比缩小）；行内公式的对象
+// 高度只算基线以上部分（对象立在基线上），基线以下的深度在绘制时向下延伸。渲染中按源码估算占位，失败时显示
+// 原文框（与原版错误隔离一致：不影响其余内容）。
+func (e *Editor) renderSize(o imgObj, en *imageEntry, maxW float32) [2]float32 {
+	switch {
+	case en == nil || en.state == imageFailed:
+		return e.objSize(imgObj{alt: firstLine(o.src)}, nil, maxW)
+	case en.state == imageLoading:
+		if o.render == RenderMathInline {
+			return [2]float32{min(maxW, max(16, textWidth(o.src, bodySize*e.scale)*0.7)), e.lineH}
+		}
+		return [2]float32{min(maxW, 240), 48}
+	}
+	w, h, depth := en.w, en.h, en.depth
+	if w > maxW {
+		f := maxW / w
+		w, h, depth = maxW, h*f, depth*f
+	}
+	if o.render == RenderMathInline {
+		return [2]float32{max(1, w), max(1, h-depth)}
+	}
+	return [2]float32{max(1, w), max(1, h)}
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i] + " …"
+	}
+	if len(s) > 80 {
+		s = s[:80] + "…"
+	}
+	return s
 }
 
 // parseImageWidth 解析 width 属性："600"、"600px" 为像素，"60%" 相对 maxW。
@@ -143,22 +205,48 @@ func (e *Editor) drawImages(p *ui.Painter, r *row, tx, ty float32) {
 		}
 		rc.X += tx
 		rc.Y += ty
-		en := e.imageEntry(o) // 同时标记本帧使用，防止可见图片被淘汰
-		switch {
-		case en != nil && en.state == imageReady && en.bmp != nil:
-			p.Image(en.bmp, rc, ui.FillBox)
-		case en != nil && en.state == imageReady && en.svg != nil:
-			p.Image(en.svg, rc, ui.Contain)
-		case en != nil && en.state == imageLoading:
-			p.Fill(rc, e.pal.codeBg, 4)
-		default:
-			p.StrokeDashed(rc, e.pal.muted, 4, 1)
-			if ic := icons.Get("image"); ic != nil {
-				p.Icon(ic, ui.Rect{X: rc.X + 8, Y: rc.Y + (rc.H-imageAltIcon)/2, W: imageAltIcon, H: imageAltIcon}, e.pal.muted)
+		if o.html != nil {
+			if o.html.lay != nil {
+				e.drawHTML(p, o.html, rc)
 			}
-			_, th := p.MeasureText(0, ui.Span{Text: "国", Font: e.fontBody, Size: imageAltSize})
-			p.RichText(rc.X+8+imageAltIcon+6, rc.Y+(rc.H-th)/2, max(1, rc.W-imageAltPad), ui.Span{Text: altLabel(o), Font: e.fontBody, Size: imageAltSize, Color: e.pal.muted})
+			continue
 		}
+		if o.render == RenderMathInline {
+			// 行内公式的对象框只含基线以上部分，按渲染比例补回基线以下的深度。
+			if en := e.imageEntry(o); en != nil && en.state == imageReady && en.h > en.depth && en.depth > 0 {
+				rc.H = rc.H * en.h / (en.h - en.depth)
+			}
+		}
+		e.drawImageAt(p, o, rc)
+	}
+}
+
+// drawImageAt 在 rc 处绘制一张图片：已加载时画位图或 SVG，加载中画占位底色，失败画替代文字框。
+func (e *Editor) drawImageAt(p *ui.Painter, o imgObj, rc ui.Rect) {
+	en := e.imageEntry(o) // 同时标记本帧使用，防止可见图片被淘汰
+	switch {
+	case en != nil && en.state == imageReady && en.bmp != nil:
+		// 动画只在被绘制（可见、窗口可见）时预约下一帧，屏幕外与后台标签自然暂停。
+		bmp, next := en.frameAt(p.Now())
+		p.Image(bmp, rc, ui.FillBox)
+		if next > 0 {
+			p.After(next)
+		}
+	case en != nil && en.state == imageReady && en.svg != nil:
+		p.Image(en.svg, rc, ui.Contain)
+	case en != nil && en.state == imageLoading:
+		p.Fill(rc, e.pal.codeBg, 4)
+	default:
+		p.StrokeDashed(rc, e.pal.muted, 4, 1)
+		if ic := icons.Get("image"); ic != nil {
+			p.Icon(ic, ui.Rect{X: rc.X + 8, Y: rc.Y + (rc.H-imageAltIcon)/2, W: imageAltIcon, H: imageAltIcon}, e.pal.muted)
+		}
+		label := altLabel(o)
+		if o.render != "" {
+			label = firstLine(o.src) // 公式、图表渲染失败时只显示源码首行，与尺寸计算一致
+		}
+		_, th := p.MeasureText(0, ui.Span{Text: "国", Font: e.fontBody, Size: imageAltSize})
+		p.RichText(rc.X+8+imageAltIcon+6, rc.Y+(rc.H-th)/2, max(1, rc.W-imageAltPad), ui.Span{Text: label, Font: e.fontBody, Size: imageAltSize, Color: e.pal.muted})
 	}
 }
 
@@ -176,6 +264,12 @@ func (e *Editor) imageHit(pt ui.Point) (int, bool) {
 		for k, rc := range r.objRects {
 			if x < rc.X || x >= rc.X+rc.W || y < rc.Y || y >= rc.Y+rc.H {
 				continue
+			}
+			// 目录卡片：点击条目跳到对应标题（原版 scrollToHeading），点击卡片其余部分进入原文。
+			if b := s.proj.objs[k].html; b != nil && b.toc {
+				if h, ok := e.tocItemAt(b, x-rc.X, y-rc.Y); ok {
+					return -1 - h.Pos, true
+				}
 			}
 			for _, run := range s.proj.runs {
 				if run.atomic && run.disp == s.proj.objs[k].u16 {

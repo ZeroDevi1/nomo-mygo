@@ -22,7 +22,10 @@ type Heading struct {
 // Headings 返回顶层标题（含 Setext 标题），按文档顺序。每次调用重新收集，
 // 只解析标题块的行内节点；调用方按 Version 缓存。
 func (d *Document) Headings() []Heading {
-	var out []Heading
+	if d.headings != nil && d.headingsVer == d.version {
+		return d.headings
+	}
+	out := []Heading{}
 	for _, b := range d.blocks {
 		if b.Kind != parser.Heading {
 			continue
@@ -35,6 +38,7 @@ func (d *Document) Headings() []Heading {
 		}
 		out = append(out, Heading{Level: pb.Level, Text: strings.TrimSpace(parser.PlainText(ins)), Pos: pos})
 	}
+	d.headings, d.headingsVer = out, d.version
 	return out
 }
 
@@ -471,4 +475,44 @@ func (e *Editor) InsertText(text string) { e.replaceSel(text, editOther); e.Doc.
 func (e *Editor) Delete(a, z int) {
 	e.applyEdit(e.Doc.Replace(a, z, "", editOther))
 	e.Doc.hist.seal()
+}
+
+// Replace 以一次独立的撤销步把原文 [a, z) 替换为 text，光标置于其后（插入表情等）；前后都结束可合并的
+// 撤销步，不与之前或之后的键入合并。
+func (e *Editor) Replace(a, z int, text string) {
+	e.Doc.hist.seal()
+	e.applyEdit(e.Doc.Replace(a, z, text, editOther))
+	e.Doc.hist.seal()
+}
+
+// CaretContext 返回光标所在行在光标之前的原文（至多 limit 字节，不跨出该行），以及光标是否位于不应自动
+// 补全的字面内容中：代码块、公式块、HTML 块等原样行，或行内代码、行内公式、链接、图片、行内 HTML 之内。
+// 有选区、正在组字或光标不在任何行内时 ok 为 false。
+func (e *Editor) CaretContext(limit int) (before string, literal, ok bool) {
+	head := e.Doc.Sel.Head
+	if !e.Doc.Sel.Empty() {
+		return "", false, false
+	}
+	if _, marked := e.Doc.Marked(); marked {
+		return "", false, false
+	}
+	s, found := e.segAt(head)
+	if !found {
+		return "", false, false
+	}
+	r := &e.entries[s.i].rows[s.k]
+	before = e.Doc.Source()[max(s.base, head-limit):head]
+	if r.kind != rowText {
+		return before, true, true
+	}
+	top := e.Doc.blocks[s.i]
+	for _, in := range e.Doc.md.Inlines(top.Index + r.rel) {
+		switch in.Kind {
+		case parser.Code, parser.Math, parser.Link, parser.Image, parser.HTML:
+			if in.Start < head && head < in.End {
+				return before, true, true
+			}
+		}
+	}
+	return before, false, true
 }

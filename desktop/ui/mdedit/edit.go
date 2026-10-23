@@ -23,6 +23,9 @@ func (d *Document) Replace(from, to int, text string, kind editKind) Edit {
 	ch := d.replace(from, to, text)
 	d.Sel = Selection{Anchor: from + len(text), Head: from + len(text)}
 	d.hist.record(kind, from, old, text, before, d.Sel)
+	if kind != editOther {
+		d.inputVer = d.version
+	}
 	return Edit{Change: ch, Applied: true}
 }
 

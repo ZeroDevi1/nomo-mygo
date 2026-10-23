@@ -31,6 +31,7 @@ func (s *Shell) quickItems() []quickItem {
 		{s.tr("quickInsertTable"), "table-2", "table"},
 		{s.tr("horizontalRule"), "minus", "horizontalRule"},
 		{s.tr("image"), "image", "image"},
+		{s.tr("emojiInsert"), "smile", "emoji"},
 	}
 }
 
@@ -163,9 +164,18 @@ func (s *Shell) applyQuick(tab *Tab, it quickItem) {
 	if head > at {
 		tab.Ed.Delete(at, head)
 	}
-	if it.command == "image" {
+	switch it.command {
+	case "image":
 		s.pickImages()
-	} else {
+	case "emoji":
+		// 选择器取代编辑区焦点；位置在光标下方（原版 openEmojiPicker 的 caret 锚点）。
+		at := ui.Point{X: 200, Y: 120}
+		if r, ok := tab.Ed.CaretRect(); ok {
+			at = ui.Point{X: s.editorOrigin.X + r.X, Y: s.editorOrigin.Y + r.Y + r.H + 6}
+		}
+		s.openEmojiPicker(at)
+		return
+	default:
 		tab.Ed.Run(it.command)
 	}
 	s.focusEditor = true

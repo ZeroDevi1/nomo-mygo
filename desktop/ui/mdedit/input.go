@@ -594,6 +594,18 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 	case ui.InputCommand:
 		return e.command(ev.Text)
 	case ui.InputScroll:
+		// 横向滚轮（或 Shift+滚轮）在超宽表格上横向滚动表格，其余纵向滚动文档。
+		dx := ev.DX
+		if ev.Mods&ui.Shift != 0 && dx == 0 {
+			dx = ev.DY
+		}
+		if dx != 0 && abs32(dx) >= abs32(ev.DY) || ev.Mods&ui.Shift != 0 {
+			e.sync()
+			if en, f := e.tableAt(ui.Point{X: ev.X, Y: ev.Y}); f != nil {
+				e.scrollTable(en, f, dx)
+				return true
+			}
+		}
 		e.scrollBy(ev.DY)
 		return true
 	case ui.InputPointerDown:
@@ -613,8 +625,16 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			return true
 		}
 		if at, ok := e.imageHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {
+			if at < 0 { // 目录条目：跳到标题（imageHit 以 -1-pos 表示）
+				e.JumpTo(-1 - at)
+				return true
+			}
 			e.setHead(at, false)
 			e.hasGoal = false
+			return true
+		}
+		if def, ok := e.footnoteHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {
+			e.JumpTo(def)
 			return true
 		}
 		pos := e.hit(ui.Point{X: ev.X, Y: ev.Y})

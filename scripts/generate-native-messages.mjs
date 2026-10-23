@@ -1,6 +1,7 @@
 // 从前端的界面文案生成原生外壳的 Go 文案表（计划 D5：文案只维护一处）。
 //
-// 来源与优先级与 src/app/i18n.ts 的 t() 一致：先 EXTRA_TRANSLATIONS，再 inlang 消息；
+// 来源与优先级与 src/app/i18n.ts 的 t() 一致：先 EMOJI_TRANSLATIONS（i18n.emoji.ts），再 EXTRA_TRANSLATIONS，
+// 再 inlang 消息；
 // 另附 Markdown 检查规则标题（src/lib/markdown-lint/ruleTitles.ts，键为 lintRule.MDxxx）。
 // 用法：node scripts/generate-native-messages.mjs
 // 输出：desktop/ui/shell/messages_gen.go（勿手改；修改文案后重新运行本脚本）
@@ -12,10 +13,10 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const locales = ['zh-CN', 'zh-TW', 'en-US'];
 
-/** 解析 i18n.ts 中 EXTRA_TRANSLATIONS 的某个语言块：`    key: '值',`（值可换行书写）。 */
+/** 解析 EXTRA_TRANSLATIONS（i18n.ts）或 EMOJI_TRANSLATIONS（i18n.emoji.ts）的某个语言块：`    key: '值',`（值可换行书写）。 */
 function extraTranslations(source, locale) {
   const start = source.indexOf(`  '${locale}': {`);
-  if (start < 0) throw new Error(`i18n.ts 中没有 ${locale} 翻译块`);
+  if (start < 0) throw new Error(`${locale} 翻译块缺失`);
   const end = source.indexOf('\n  },', start);
   const block = source.slice(start, end);
   const table = {};
@@ -45,6 +46,7 @@ function lintRuleTitles(source, name) {
 }
 
 const source = readFileSync(join(root, 'src/app/i18n.ts'), 'utf8');
+const emojiSource = readFileSync(join(root, 'src/app/i18n.emoji.ts'), 'utf8');
 const ruleSource = readFileSync(join(root, 'src/lib/markdown-lint/ruleTitles.ts'), 'utf8');
 const ruleTables = { 'zh-CN': 'ZH_CN_TITLES', 'zh-TW': 'ZH_TW_TITLES', 'en-US': 'EN_TITLES' };
 const tables = {};
@@ -52,6 +54,7 @@ for (const locale of locales) {
   tables[locale] = {
     ...inlangMessages(locale),
     ...extraTranslations(source, locale),
+    ...extraTranslations(emojiSource, locale),
     ...lintRuleTitles(ruleSource, ruleTables[locale]),
   };
 }

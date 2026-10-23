@@ -356,3 +356,77 @@ func TestImageHeavyScroll(t *testing.T) {
 		t.Fatalf("缓存 %d 字节，超出预算加一屏图片", maxBytes)
 	}
 }
+
+func TestAnimatedGIFFrames(t *testing.T) {
+	data, err := os.ReadFile("/Users/zhangweihao/Downloads/Nomo性能测试集_2026-10-22/assets/formats/animated.gif")
+	if err != nil {
+		t.Skip("缺少测试集 GIF")
+	}
+	res := decodeImage(data, false)
+	if res.err != nil || len(res.frames) < 2 || len(res.delays) != len(res.frames) {
+		t.Fatalf("应解码出多帧：%d 帧 err=%v", len(res.frames), res.err)
+	}
+	en := &imageEntry{bmp: res.bmp, frames: res.frames, delays: res.delays}
+	for _, d := range res.delays {
+		en.period += d
+	}
+	a, next := en.frameAt(time.Unix(0, 0))
+	b, _ := en.frameAt(time.Unix(0, 0).Add(next))
+	if a == b || next <= 0 {
+		t.Fatal("经过一帧停留时间后应切到下一帧")
+	}
+}
+
+func TestRenderObjectsMathAndMermaid(t *testing.T) {
+	src := "行内 $a^2$ 公式。\n\n$$\nx=1\n$$\n\n```mermaid\nflowchart TD\n  A-->B\n```\n"
+	ed, tt := newTester(t, src, 900, 700)
+	tp := &testPost{}
+	im := NewImages(tp.post, DefaultImageBudget)
+	defer im.Close()
+	var reqs []RenderRequest
+	var mu sync.Mutex
+	im.SetRenderer(func(req RenderRequest) (image.Image, float32, float32, float32, error) {
+		mu.Lock()
+		reqs = append(reqs, req)
+		mu.Unlock()
+		img := image.NewRGBA(image.Rect(0, 0, 80, 40))
+		return img, 40, 20, 5, nil
+	})
+	ed.SetImages(im, "")
+	ed.Doc.SetSelection(Selection{0, 0})
+	tt.Frame()
+	tp.drain(t, 3)
+	tt.Frame()
+	mu.Lock()
+	kinds := map[string]string{}
+	for _, r := range reqs {
+		kinds[r.Kind] = r.Src
+	}
+	mu.Unlock()
+	if kinds[RenderMathInline] != "a^2" || kinds[RenderMathDisplay] != "x=1" || kinds[RenderMermaid] != "flowchart TD\n  A-->B" {
+		t.Fatalf("渲染请求 %v", kinds)
+	}
+	// 行内公式对象只算基线以上的高度（20 − 深度 5）。
+	if got := ed.entries[0].rows[0].objSizes[0]; got != [2]float32{40, 15} {
+		t.Fatalf("行内公式尺寸 %v", got)
+	}
+	if r := &ed.entries[1].rows[0]; r.htmlKind != previewMath || r.objSizes[0] != [2]float32{40, 20} {
+		t.Fatalf("公式块 %+v", r.objSizes)
+	}
+	// 光标进入公式块原文：显示原文。
+	b := ed.Doc.Blocks()[1]
+	ed.Doc.SetSelection(Selection{b.Start + 3, b.Start + 3})
+	ed.dirty = true
+	tt.Frame()
+	if r := &ed.entries[1].rows[0]; len(r.proj.objs) != 0 {
+		t.Fatal("光标在公式块内应显示原文")
+	}
+	// 没有渲染函数时按原文框显示，不崩溃。
+	ed2, tt2 := newTester(t, "$x$\n", 400, 300)
+	ed2.SetImages(NewImages(func(func()) {}, DefaultImageBudget), "")
+	ed2.Doc.SetSelection(Selection{4, 4})
+	tt2.Frame()
+	if en := ed2.imageEntry(ed2.entries[0].rows[0].proj.objs[0]); en == nil || en.state != imageFailed {
+		t.Fatal("无渲染函数时应标记失败")
+	}
+}

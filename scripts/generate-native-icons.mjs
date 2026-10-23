@@ -22,6 +22,8 @@ const names = [
   'lightbulb', 'star', 'triangle-alert', 'check', 'loader-circle', 'octagon-alert', 'file-json-2', 'file-type-2', 'image', 'keyboard',
   'type', 'upload', 'list-checks', 'zap', 'history', 'file-down', 'columns-2', 'picture-in-picture-2',
   'rotate-ccw', 'download',
+  // 表情（原版 EditorToolbar 的 Smile 按钮）
+  'smile',
 ];
 
 // 读取图标源：v1 中部分旧名（如 file-json-2）只剩 .js 别名，指向改名后的 .svelte。
