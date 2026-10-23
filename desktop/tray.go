@@ -3,6 +3,8 @@ package main
 import (
 	"embed"
 	"encoding/json/v2"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -13,7 +15,7 @@ import (
 	"nomo/desktop/internal/i18n"
 )
 
-// 托盘与 Dock 图标的深浅色、托盘的创建与删除，以及主程序界面文字的语言。托盘菜单见 native.go 的 installNativeTray。
+// 托盘与 macOS Dock 图标的深浅色、托盘的删除，以及主程序界面文字的语言。托盘菜单见 native.go 的 installNativeTray。
 
 //go:embed packaging/icons/nomo/tray/*-48.png packaging/icons/nomo/macos/nomo-app-light-1024.png packaging/icons/nomo/macos/nomo-app-dark-1024.png
 var iconAssets embed.FS
@@ -31,7 +33,7 @@ var trayState struct {
 	appliedIconSet *bool // nil 表示尚未应用过桌面图标主题
 }
 
-// setDesktopIconTheme 让托盘与 macOS Dock 图标跟随应用深浅色；主题未变化时跳过。
+// setDesktopIconTheme 让托盘与 macOS Dock 图标跟随应用深浅色（应用主题默认跟随系统深色模式）；主题未变化时跳过。
 func setDesktopIconTheme(dark bool) {
 	trayState.mu.Lock()
 	trayState.dark = dark
@@ -44,15 +46,41 @@ func setDesktopIconTheme(dark bool) {
 		return
 	}
 	if runtime.GOOS == "darwin" {
-		name := "packaging/icons/nomo/macos/nomo-app-light-1024.png"
-		if dark {
-			name = "packaging/icons/nomo/macos/nomo-app-dark-1024.png"
-		}
-		if icon, err := iconAssets.ReadFile(name); err == nil {
-			mygo.App.Dock.SetIcon(icon)
-		}
+		applyDockIcon(dark)
 	}
 	applyTrayIcon()
+}
+
+// applyDockIcon 设置 macOS Dock 图标：深色时换成深色 Logo；浅色时打包运行恢复包内图标（Assets.car 的浅色变体，
+// 随 macOS 26 图标风格渲染），未打包运行（go run）没有包内图标，换成浅色 PNG。浅色不强制换平面 PNG：系统在
+// 深色模式下会把它压暗成灰底。
+func applyDockIcon(dark bool) {
+	var icon []byte
+	switch {
+	case dark:
+		icon, _ = iconAssets.ReadFile("packaging/icons/nomo/macos/nomo-app-dark-1024.png")
+	case !bundledIcon():
+		icon, _ = iconAssets.ReadFile("packaging/icons/nomo/macos/nomo-app-light-1024.png")
+	}
+	// icon 为空时 SetIcon 清除替换，恢复包内图标。
+	if err := mygo.App.Dock.SetIcon(icon); err != nil {
+		applog.Warn("Tray", "设置 Dock 图标失败："+err.Error())
+	}
+}
+
+// bundledIcon 报告是否从 .app 运行且包内有图标资源目录 Assets.car（scripts/compile-macos-appicon.sh 编译的浅色、
+// 深色与着色变体）。
+func bundledIcon() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	contents, ok := strings.CutSuffix(filepath.Dir(exe), string(filepath.Separator)+"MacOS")
+	if !ok || !strings.HasSuffix(contents, ".app"+string(filepath.Separator)+"Contents") {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(contents, "Resources", "Assets.car"))
+	return err == nil
 }
 
 // destroyAppTray 删除托盘图标。MyGo 的 App.Exit 与 Quit 都不删除通知区域图标：Windows 上进程结束后图标会残留，

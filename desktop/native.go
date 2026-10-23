@@ -68,8 +68,7 @@ func runNativeShell(args []string) {
 }
 
 // applyAppIcon 在 Windows / Linux 把应用图标设到窗口（标题栏与任务栏）。macOS 的 Dock 图标由外壳首帧经
-// setDesktopIconTheme 按应用明暗外观设置（同原版运行时 setApplicationIconImage）；应用未运行时 Finder / Dock
-// 仍用 Assets.car 按系统外观选图。
+// setDesktopIconTheme 按应用明暗设置（见 tray.go 的 applyDockIcon）；应用未运行时 Finder / Dock 用 Assets.car。
 func applyAppIcon(win *mygo.Window) {
 	if runtime.GOOS == "darwin" {
 		return

@@ -490,3 +490,9 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **修复**：两个只在隐藏窗口中使用的页面把 `requestAnimationFrame` / `cancelAnimationFrame` 换成 16 ms 定时器——离屏渲染页在 `render.html` 头部内联脚本，PDF 打印用的临时 HTML 由 `withFrameShim`（`desktop/export.go`）插到 `<head>` 开头。PDF 导出各阶段（页面加载、就绪、打印）加了日志，超时时能看出卡在哪一步。
 - **实机验证**（macOS，release，隔离 HOME）：纯文本 PDF 394 ms；“全部节点图鉴” PDF 500 ms、7 页、9 项书签，公式与 Mermaid 正确。Word：纯文本、公式与节点图鉴（含 Mermaid 与本地图片）均几秒完成；节点图鉴的 .docx 嵌入 15 张图片（行内与块级公式、流程图、本地 JPG/PNG/WebP 等），仅提示 HTML 块保留为原文。编辑区公式与图表照常显示。
 
+### 9.24 Dock 图标深色适配（2026-10-23）
+
+- 问题：应用浅色、系统深色时，运行时用 `setApplicationIconImage` 换上的浅色平面 PNG 被系统压暗成灰底（用户截图）；同时覆盖了包内 `Assets.car` 的浅色 / 深色 / 着色变体。
+- 修复（`desktop/tray.go` 的 `applyDockIcon`）：应用为深色（主题默认跟随系统深色模式）时换成深色 Logo；为浅色时清除替换、恢复包内图标（`Assets.car` 浅色变体，随 macOS 26 图标风格渲染）；未打包运行（没有 `Assets.car`）仍换成浅色 PNG。应用未运行时 Finder / Dock 照旧由 `Assets.car` 按系统图标风格选图。
+- 实机验证（macOS 26，系统深色、图标风格默认）：应用深色、跟随系统 → 深色 Logo；应用浅色 → 包内浅色图标，不再发灰。
+

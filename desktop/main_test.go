@@ -29,3 +29,10 @@ func TestWithFrameShim(t *testing.T) {
 		t.Fatalf("无 <head> 时应放在最前：%s", got)
 	}
 }
+
+// TestBundledIcon 测试进程不在 .app 包内运行，没有包内图标可恢复。
+func TestBundledIcon(t *testing.T) {
+	if bundledIcon() {
+		t.Fatal("go test 的可执行文件不在 .app 包内")
+	}
+}
