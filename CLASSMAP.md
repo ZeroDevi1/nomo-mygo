@@ -181,7 +181,9 @@
 | 标签跨窗口移交 | `src/app/services/workspaceTransferController.ts` | `src/app/services/tabTransfer.ts`, `desktop/tab_transfer.go`, `desktop/open_targets.go` | prepare / target-ready / commit / cancel、文档原子归属、异常恢复和空源窗口关闭 |
 | Windows 标签屏幕拖动 | `desktop/tab_drag.go` | `src/app/components/DocumentTabs.svelte`, `src/app/App.svelte`, `src/app/services/tabTransfer.ts` | Pointer 转原生鼠标追踪、DPI / 屏幕落点和拖动取消 |
 | 标签标题拖影 | `src/app/components/TabDragGhost.svelte` | `src/app/App.svelte`, `src/app/components/DocumentTabs.svelte`, `src/app/components/ComparisonPane.svelte`, `desktop/tab_drag.go` | 窗口内跟随原生鼠标逻辑坐标的普通 / 组合 / 成员标题预览及结束清理 |
-| 启动工作区与统一退出 | `desktop/lifecycle.go` | `src/app/App.svelte`, `desktop/windows.go`, `desktop/main.go` | 最后实际关闭窗口快照、跨窗口退出确认、保存失败与超时取消 |
+| 启动工作区与统一退出 | `desktop/lifecycle.go` | `src/app/App.svelte`, `desktop/windows.go`（`exitAfterLastDocumentWindow`）, `desktop/main.go` | 最后实际关闭窗口快照、跨窗口退出确认、保存失败与超时取消、Windows/Linux 关闭最后一个文档窗口即退出 |
+| 大文档正文协议传输 | `desktop/document_content.go` | `desktop/commands_files.go`（`read_markdown_file`）, `src/lib/desktop/runtime/core.ts`（`fetchDocumentContent`） | 修改改走 `nomodoc` 协议的阈值、令牌有效期与读取方式 |
+| 关闭大文档后归还内存 | `desktop/internal/memtrim` | `desktop/ui/shell/shell.go`（`removeTab`）, `desktop/lifecycle.go`, `desktop/commands_textdoc.go` | 修改主动归还的阈值与延时 |
 | 最近打开与空白页入口 | `src/app/components/RecentOpenPopover.svelte` | `src/app/components/EmptyWorkspace.svelte`, `src/app/components/AppTitleBar.svelte`, `desktop/commands_config.go` | 最近记录浮层、原子删除、跨窗口同步与主动打开排序 |
 | 工作区持久化 | `src/app/services/workspacePersistence.ts` | `src/app/App.svelte`, `src/lib/desktop/desktopStorage.ts` | 工作区 v4 元数据、组合项、草稿引用、v3/v2/旧 workspaceTabs 迁移 |
 | 阅读位置持久化 | `src/app/services/readingPosition.ts` | `src/app/App.svelte`, `src/app/services/outlineNavigation.ts` | Markdown 文件按路径保存/恢复统一阅读语义锚点 |
@@ -334,7 +336,7 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 原生菜单 | `desktop/menu.go` | `desktop/internal/i18n/i18n.go` | 菜单构建/快捷键/事件处理 |
-| 系统托盘与平台图标 | `desktop/tray.go` | `desktop/windows.go` | 托盘安装/刷新/关闭到托盘；仅 macOS 随主题替换窗口和 Dock 图标，其他平台保留打包图标 |
+| 系统托盘与平台图标 | `desktop/tray.go` | `desktop/windows.go` | 托盘安装/刷新/关闭到托盘、退出前删除托盘图标（`destroyAppTray`）；仅 macOS 随主题替换窗口和 Dock 图标，其他平台保留打包图标 |
 | 外部打开路由 | `desktop/external_open.go` | `desktop/main.go` | 单实例/启动参数/macOS open 事件、连续请求短暂合并、追加暂存及按窗口原子消费 |
 | Windows 文件关联 | `desktop/windows_integration.go` | — | 注册/注销默认打开方式和右键菜单 |
 | 平台适配 | `desktop/windows.go` | `desktop/windows.go`, `desktop/main.go` | macOS/Windows 窗口行为差异、Windows 无边框/阴影设置与应用窗口浏览器默认快捷键禁用 |

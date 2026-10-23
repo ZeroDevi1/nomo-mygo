@@ -228,6 +228,14 @@ func (t *Tab) text() string {
 }
 
 // version 返回原文版本（TXT/JSON 为缓冲版本），用于保存与自动保存判断修改。
+// size 返回文档原文的字节数（TXT/JSON 为源码缓冲区长度）。
+func (t *Tab) size() int {
+	if t.plain {
+		return t.source.Buffer.Len()
+	}
+	return len(t.Doc.Source())
+}
+
 func (t *Tab) version() uint64 {
 	if t.plain {
 		return t.source.Buffer.Version()

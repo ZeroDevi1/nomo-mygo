@@ -1,6 +1,9 @@
 package main
 
-import "nomo/desktop/internal/textdoc"
+import (
+	"nomo/desktop/internal/memtrim"
+	"nomo/desktop/internal/textdoc"
+)
 
 // 分段文档（TXT/JSON 大文件）命令：参数原样转交 textdoc.Manager，进度事件广播给所有页面，
 // 前端按 sessionId / taskId 过滤（与 Tauri window.emit 的投递范围一致）。
@@ -88,7 +91,10 @@ func init() {
 		SessionID      string `json:"sessionId"`
 		DiscardChanges *bool  `json:"discardChanges"`
 	}) (any, error) {
-		return nil, app.documents.CloseSession(args.SessionID, args.DiscardChanges != nil && *args.DiscardChanges)
+		err := app.documents.CloseSession(args.SessionID, args.DiscardChanges != nil && *args.DiscardChanges)
+		// 分段会话只为大文件创建，关闭标签后归还其占用的堆内存。
+		memtrim.Request()
+		return nil, err
 	})
 	register("check_segmented_external_change", func(_ *commandCall, args struct {
 		SessionID string `json:"sessionId"`

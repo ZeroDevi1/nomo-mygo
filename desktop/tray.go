@@ -285,6 +285,18 @@ func setDesktopIconTheme(dark bool) {
 	applyTrayIcon()
 }
 
+// destroyAppTray 删除托盘图标。MyGo 的 App.Exit 与 Quit 都不删除通知区域图标：Windows 上进程结束后图标会残留，
+// 直到鼠标经过才消失。退出前调用；可重复调用。
+func destroyAppTray() {
+	trayState.mu.Lock()
+	tray := trayState.tray
+	trayState.tray = nil
+	trayState.mu.Unlock()
+	if tray != nil {
+		tray.Destroy()
+	}
+}
+
 func trayIcon() []byte {
 	trayState.mu.Lock()
 	theme, state := "light", "active"

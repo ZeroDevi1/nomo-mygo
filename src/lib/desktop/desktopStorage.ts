@@ -1,5 +1,5 @@
 import type { UnlistenFn } from './runtime/event';
-import { createPerfTimer, logDebug, logInfo, perfAsync } from '../../lib/services/logger';
+import { createPerfTimer, logDebug, logError, logInfo, perfAsync } from '../../lib/services/logger';
 import { normalizeMarkdownEncoding, type MarkdownEncoding } from '../../lib/services/storage';
 
 export interface NativeDocument {
@@ -86,6 +86,8 @@ interface NativeDocumentPayload {
   path: string;
   file_name: string;
   markdown: string;
+  /** 正文过大时由协议另行读取（见 desktop/document_content.go），此时 markdown 为空。 */
+  content_token?: string;
   encoding?: MarkdownEncoding;
   modified_at: number;
   size_bytes: number;
@@ -232,10 +234,17 @@ export async function openFolderWithDialog(): Promise<string | null> {
 export async function readMarkdownFile(path: string): Promise<NativeDocument> {
   return perfAsync('desktopStorage', 'read_markdown_file', async () => {
     logInfo('desktopStorage', '开始读取 Markdown 文件', { path });
-    const { invoke } = await import('./runtime/core');
-    const document = normalizeDocumentPayload(
-      await invoke<NativeDocumentPayload>('read_markdown_file', { path }),
-    );
+    const { invoke, fetchDocumentContent } = await import('./runtime/core');
+    const payload = await invoke<NativeDocumentPayload>('read_markdown_file', { path });
+    if (payload.content_token) {
+      try {
+        payload.markdown = await fetchDocumentContent(payload.content_token);
+      } catch (error) {
+        logError('desktopStorage', '读取大文档正文失败', { path, error: String(error) });
+        throw error;
+      }
+    }
+    const document = normalizeDocumentPayload(payload);
     logInfo('desktopStorage', 'Markdown 文件读取完成', {
       path,
       sizeBytes: document.sizeBytes,

@@ -440,3 +440,13 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **文案生成**：`generate-native-messages.mjs` 支持一行多项的翻译写法（补上 `toggleSuperscript` / `toggleSubscript`）。
 - 未验证：新工具栏与弹层只经无头渲染与 Tester 点击验证（当时有一个用真实配置运行的实例占用单实例锁，未在真机窗口点击）。
 
+### 9.19 Windows 进程清理、大文档传输与内存归还（2026-10-23）
+
+- **关闭后进程残留**：WebView 外壳注册了空的 `OnWindowAllClosed`，在“关闭窗口”行为下关掉最后一个文档窗口后，进程与托盘一直留在后台（MyGo 只在包括隐藏窗口在内的全部窗口关闭后才触发该事件，隐藏的设置窗口、PDF 导出窗口也会挡住它）。改为 Windows/Linux 上最后一个文档窗口销毁后走统一退出事务（`exitAfterLastDocumentWindow`），事务失败时直接退出；“关闭到托盘”只隐藏窗口不受影响；macOS 保持驻留。原生外壳：隐藏的公式/图表渲染窗口在外壳关闭后不再被排队请求重建（`renderService.closed`），否则进程要等 30 秒空闲计时器。
+- **托盘图标残留**：MyGo 的 `App.Exit` 与 `Quit` 都不删除通知区域图标，Windows 上进程结束后图标留到鼠标经过才消失。退出事务、更新安装器退出与原生外壳 `OnWillQuit` 前先 `destroyAppTray`。
+- **WebView2 参数**：MyGo 不传附加浏览器参数；按 Tauri（wry）的 Windows 默认补上 `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`（关掉 SmartScreen 网址检查及其常驻进程、选中文字迷你菜单、PDF 界面），软件渲染时追加 GPU 参数；启动前已有同名环境变量时原样保留。
+- **大文档正文传输**：MyGo 把调用结果拼成 `__mygo.receive([...])` 经 `ExecuteScript` 投递，macOS 的 JavaScriptCore 按 JSON 快速解析，WebView2（V8）要整段转 UTF-16 并编译。`read_markdown_file` 超过 1 MiB 的正文改为暂存（一次性令牌、一分钟有效），页面经 `nomodoc` 协议 fetch。macOS 实测（WebView 外壳、10 MiB 混合、release、隔离 HOME）：页面计时 `read_markdown_file` 23 ms，打开到读取完成的日志 18.5 s（旧路径 21.6 s），两者都主要花在编辑器载入文档，WebContent 进程约 6.2 GB；Windows 上的收益未实测。
+- **关闭大文档后归还内存**：Go 后台回收器归还空闲页很慢，关闭 50 MiB 文档后约 299 MB 空闲堆仍计入进程提交内存。关闭 ≥ 4 MiB 的标签、释放分段会话后合并请求，2 秒后执行一次 `debug.FreeOSMemory`（`internal/memtrim`）；无头实测 2.5 秒后空闲未归还堆 299 MB → 0。
+- 验证：Go 全部测试、`GOOS=windows go vet ./...`、`pnpm check`、前端相关 vitest；上述 Windows 行为（退出、托盘、WebView2 参数）只做了交叉编译与静态检查，未在 Windows 实机验证。
+- 发现未改：WebView 外壳打开 10 MiB 混合文档时 WebContent 进程约 6.2 GB、载入约 18 秒（前端编辑器）；WebView 外壳收到 SIGTERM 后未退出（退出事务等待页面确认）。
+

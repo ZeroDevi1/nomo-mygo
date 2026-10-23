@@ -56,6 +56,7 @@ func runNativeShell(args []string) {
 	})
 	// 关闭最后一个窗口即退出；“关闭到托盘”时窗口只是隐藏，不触发此事件。
 	mygo.App.OnWindowAllClosed(func() { mygo.App.Quit() })
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { destroyAppTray() })
 	mygo.App.WhenReady(func() {
 		system := ""
 		if languages := mygo.App.PreferredLanguages(); len(languages) > 0 {

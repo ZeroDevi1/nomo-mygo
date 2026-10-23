@@ -46,6 +46,9 @@ type renderService struct {
 	mu   sync.Mutex
 	win  *mygo.Window
 	idle *time.Timer
+	// closed 为 true 表示所属外壳窗口已关闭：之后的渲染直接失败，不再创建隐藏窗口（否则排队中的请求会在主窗口
+	// 关闭后重建它，进程要等空闲计时器到期才退出）。受 mu 保护。
+	closed bool
 	// kpRuntime 缓存精细排版运行时脚本（typographyRuntime），受 mu 保护。
 	kpRuntime string
 
@@ -69,6 +72,7 @@ func (r *renderService) close() {
 	go func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		r.closed = true
 		r.destroyLocked()
 	}()
 }
@@ -86,6 +90,9 @@ func (r *renderService) destroyLocked() {
 
 // ensureLocked 创建并加载隐藏窗口（已存在时直接返回）。
 func (r *renderService) ensureLocked(ctx context.Context) error {
+	if r.closed {
+		return errors.New("窗口已关闭")
+	}
 	if r.win != nil {
 		return nil
 	}

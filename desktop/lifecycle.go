@@ -12,6 +12,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
+	"nomo/desktop/internal/memtrim"
 )
 
 // 启动快照与多窗口退出事务。普通自动保存不改变下次启动目标；只有窗口真正关闭或退出提交时，
@@ -73,6 +74,10 @@ func releaseSessions(sessions []closingSession) {
 		if err := app.documents.CloseSession(session.SessionID, session.DiscardChanges); err != nil {
 			applog.Error("Workspace", "关闭分段会话失败："+err.Error())
 		}
+	}
+	// 分段会话只为大文档创建，关闭后归还其占用的堆内存。
+	if len(sessions) > 0 {
+		memtrim.Request()
 	}
 }
 
@@ -290,6 +295,7 @@ func finishExit() error {
 	lifecycle.mu.Unlock()
 	go func() {
 		committedExit()
+		destroyAppTray()
 		mygo.App.Exit(0)
 	}()
 	return nil

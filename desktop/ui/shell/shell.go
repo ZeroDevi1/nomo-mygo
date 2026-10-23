@@ -25,6 +25,7 @@ import (
 	"nomo/desktop/internal/docfs"
 	"nomo/desktop/internal/emoji"
 	"nomo/desktop/internal/i18n"
+	"nomo/desktop/internal/memtrim"
 	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
 )
@@ -104,7 +105,7 @@ type Shell struct {
 	splitPct    float32
 	splitSave   *time.Timer
 	splitSync   splitScroll
-	emo         emojiState // 表情建议与选择器，见 emoji.go
+	emo         emojiState   // 表情建议与选择器，见 emoji.go
 	tbar        toolbarState // 工具栏的表格尺寸与内容宽度弹层，见 toolbar.go
 	// editorOrigin 为语义编辑区左上角（窗口坐标），每帧更新；按键回调中定位浮层用。
 	editorOrigin ui.Point
@@ -615,6 +616,9 @@ func (s *Shell) resolveClose(choice int) {
 
 func (s *Shell) removeTab(i int) {
 	s.ungroup(s.tabs[i])
+	if s.tabs[i].size() >= memtrim.Threshold {
+		memtrim.Request()
+	}
 	s.tabs[i].Ed.ReleaseLayouts()
 	s.tabs = slices.Delete(s.tabs, i, i+1)
 	switch {

@@ -67,12 +67,15 @@ func init() {
 	})
 	register("read_markdown_file", func(_ *commandCall, args struct {
 		Path string `json:"path"`
-	}) (docfs.DocumentPayload, error) {
+	}) (readDocumentResult, error) {
 		started := time.Now()
 		applog.Info("FileSystem", "开始打开文档："+args.Path)
 		payload, err := docfs.ReadDocument(args.Path)
 		applog.Perf("FileSystem", "文档打开", time.Since(started))
-		return payload, err
+		if err != nil {
+			return readDocumentResult{}, err
+		}
+		return deferLargeContent(payload), nil
 	})
 	register("write_markdown_file", func(_ *commandCall, args struct {
 		Path     string `json:"path"`

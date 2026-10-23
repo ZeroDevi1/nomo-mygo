@@ -7,17 +7,20 @@ import {
   openMarkdownWithDialog,
   parseNativeError,
   pickDocumentPathsWithDialog,
+  readMarkdownFile,
   takePendingExternalOpen,
   readWorkspaceDraft,
   writeWorkspaceDraft,
 } from './desktopStorage';
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const fetchContentMock = vi.hoisted(() => vi.fn());
 const openDialogMock = vi.hoisted(() => vi.fn());
 
 vi.mock('./runtime/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./runtime/core')>()),
   invoke: invokeMock,
+  fetchDocumentContent: fetchContentMock,
 }));
 
 vi.mock('./runtime/dialog', () => ({
@@ -26,7 +29,27 @@ vi.mock('./runtime/dialog', () => ({
 
 beforeEach(() => {
   invokeMock.mockReset();
+  fetchContentMock.mockReset();
   openDialogMock.mockReset();
+});
+
+describe('readMarkdownFile', () => {
+  const payload = { path: '/a.md', file_name: 'a.md', modified_at: 1, size_bytes: 3, readonly: false };
+
+  it('小文档直接使用调用结果中的正文', async () => {
+    invokeMock.mockResolvedValue({ ...payload, markdown: '# a' });
+    const document = await readMarkdownFile('/a.md');
+    expect(document.markdown).toBe('# a');
+    expect(fetchContentMock).not.toHaveBeenCalled();
+  });
+
+  it('大文档按 content_token 经协议读取正文', async () => {
+    invokeMock.mockResolvedValue({ ...payload, markdown: '', content_token: 'abc' });
+    fetchContentMock.mockResolvedValue('大文档正文');
+    const document = await readMarkdownFile('/a.md');
+    expect(fetchContentMock).toHaveBeenCalledWith('abc');
+    expect(document.markdown).toBe('大文档正文');
+  });
 });
 
 describe('document dialogs', () => {

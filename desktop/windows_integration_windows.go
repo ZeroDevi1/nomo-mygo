@@ -478,6 +478,9 @@ func launchInstallerAndExit(path string) error {
 	if result <= 32 {
 		return fmt.Errorf("启动更新安装器失败，系统错误码：%d", result)
 	}
-	go mygo.App.Exit(0)
+	go func() {
+		destroyAppTray()
+		mygo.App.Exit(0)
+	}()
 	return nil
 }

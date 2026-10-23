@@ -45,6 +45,22 @@ export function convertFileSrc(filePath: string): string {
   return desktopPlatform() === 'win32' ? `http://asset.localhost/${encoded}` : `asset://localhost/${encoded}`;
 }
 
+/**
+ * 读取 Go 侧暂存的大文档正文（`nomodoc` 协议，令牌一次性）。大正文不经调用结果返回：Windows 的 WebView2
+ * 会把结果整段编译为脚本，几十 MB 时很慢且占用数倍内存。
+ *
+ * @param token `read_markdown_file` 结果中的 `content_token`。
+ * @throws 令牌失效（已读取或超过一分钟）或读取失败时抛出错误。
+ */
+export async function fetchDocumentContent(token: string): Promise<string> {
+  const url = desktopPlatform() === 'win32' ? `http://nomodoc.localhost/${token}` : `nomodoc://localhost/${token}`;
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`读取文档正文失败：HTTP ${response.status}`);
+  }
+  return response.text();
+}
+
 /** 把二进制编码为 base64，用于经 JSON 调用传输文件内容；分块拼接避免参数个数超限。 */
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';

@@ -34,10 +34,11 @@ func main() {
 	}
 	applog.Init(logsDir, config.IsDeveloperMode(dataDir))
 
-	// WebView2 渲染模式必须在环境初始化前通过环境变量设置。
+	// WebView2 浏览器参数（含渲染模式）必须在环境初始化前通过环境变量设置；MyGo 不提供该选项。
 	if runtime.GOOS == "windows" {
-		if config.IsSoftwareRenderMode(dataDir) {
-			os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu --disable-gpu-compositing")
+		software := config.IsSoftwareRenderMode(dataDir)
+		os.Setenv(webview2ArgsEnv, webview2BrowserArgs(os.Getenv(webview2ArgsEnv), software))
+		if software {
 			applog.Info("App", "已启用软件渲染模式")
 		} else {
 			applog.Info("App", "已启用硬件加速渲染模式")
@@ -68,6 +69,9 @@ func main() {
 	mygo.Bind(Bridge{})
 	if err := mygo.Protocol.Handle("asset", http.HandlerFunc(serveAssetFile)); err != nil {
 		applog.Error("App", "注册 asset 协议失败："+err.Error())
+	}
+	if err := mygo.Protocol.Handle(docContentScheme, http.HandlerFunc(serveDocumentContent)); err != nil {
+		applog.Error("App", "注册文档正文协议失败："+err.Error())
 	}
 
 	startupTargets := collectExternalOpenTargets(os.Args[1:], mustGetwd())
@@ -139,6 +143,25 @@ func main() {
 		os.Exit(1)
 	}
 	committedExit()
+}
+
+const webview2ArgsEnv = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+
+// webview2DefaultArgs 同 Tauri（wry）在 Windows 上的默认参数：关闭选中文字时的“迷你菜单”、PDF 界面与 SmartScreen
+// 网址信誉检查。SmartScreen 会为每次导航发起网络查询并常驻额外进程，本地页面不需要它。
+const webview2DefaultArgs = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+
+// webview2BrowserArgs 返回 WebView2 附加浏览器参数：existing 为启动前已有的同名环境变量（用户或系统设置，原样保留且
+// 不再追加 --disable-features，因为 Chromium 只认最后一个该参数）；software 为软件渲染模式。
+func webview2BrowserArgs(existing string, software bool) string {
+	args := strings.TrimSpace(existing)
+	if args == "" {
+		args = webview2DefaultArgs
+	}
+	if software {
+		args += " --disable-gpu --disable-gpu-compositing"
+	}
+	return args
 }
 
 func mustGetwd() string {

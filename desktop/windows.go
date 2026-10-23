@@ -302,7 +302,27 @@ func handleWindowDestroyed(window *appWindow) {
 		openTargets.forgetWindow(label)
 		forgetMarkdownMiniModeWindow(label)
 		forgetTrayWindow(label)
+		exitAfterLastDocumentWindow()
 	}
+}
+
+// exitAfterLastDocumentWindow 在 Windows 与 Linux 上关闭最后一个文档窗口后退出进程（同原版 Tauri：所有窗口关闭即
+// 退出）。否则进程与托盘、隐藏的设置窗口或 PDF 导出窗口一起留在后台，用户只能去任务管理器结束。“关闭到托盘”只隐藏
+// 窗口，不会走到这里；macOS 保持应用驻留，由 Dock 唤回。关闭窗口时已保存其启动快照，退出事务不再覆盖。
+func exitAfterLastDocumentWindow() {
+	if runtime.GOOS == "darwin" || isExiting() || len(windows.documentWindows()) > 0 {
+		return
+	}
+	applog.Info("App", "最后一个文档窗口已关闭，退出应用")
+	go func() {
+		// 没有文档窗口时退出事务只需等设置窗口保存；它失败（如设置页尚未就绪）时没有需要确认的文档，直接退出，
+		// 不让进程留在后台。
+		if err := beginExit(); err != nil {
+			applog.Warn("App", "退出事务失败，直接退出："+err.Error())
+			destroyAppTray()
+			mygo.App.Exit(0)
+		}
+	}()
 }
 
 // showDocumentWindow 显示、还原并聚焦文档窗口。
