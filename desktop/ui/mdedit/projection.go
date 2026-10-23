@@ -1,6 +1,7 @@
 package mdedit
 
 import (
+	"html"
 	"sort"
 	"strings"
 
@@ -40,6 +41,17 @@ type projection struct {
 	text string
 	runs []run
 	u16  int // 显示文本的 UTF-16 长度
+	objs []imgObj
+}
+
+// objChar 是行内图片在显示文本中的占位字符（U+FFFC），布局时按图片尺寸成为行内对象。
+const objChar = "\uFFFC"
+
+// imgObj 是投影中的一张行内图片：u16 为占位字符的显示 UTF-16 偏移；src、width、alt 取自
+// Markdown 图片或 <img> 标签（width 为原样属性值，如 "600"、"60%"，空表示原始尺寸）。
+type imgObj struct {
+	u16             int
+	src, width, alt string
 }
 
 // expansion 描述投影时哪些标记就地展开：caret 为相对片段起点的光标字节偏移，
@@ -175,9 +187,67 @@ func (pb *projBuilder) finish() *projection {
 	return pb.p
 }
 
+// object 把图片节点 [a, z) 显示为一个行内对象占位字符。
+func (pb *projBuilder) object(a, z int, o imgObj, st style) {
+	pb.emit(a, a, st, true)
+	o.u16 = pb.u16
+	pb.replace(a, z, objChar, st|stImage)
+	pb.p.objs = append(pb.p.objs, o)
+}
+
+// htmlAttr 返回 HTML 开始标签中属性 name 的值（实体已解码），没有时返回空串。属性名不区分大小写，
+// 值可带单引号、双引号或不带引号。
+func htmlAttr(tag, name string) string {
+	s := tag[1 : len(tag)-1]
+	i := strings.IndexAny(s, " \t\n/")
+	if i < 0 {
+		return ""
+	}
+	s = s[i:]
+	for len(s) > 0 {
+		s = strings.TrimLeft(s, " \t\r\n/")
+		n := 0
+		for n < len(s) && !strings.ContainsRune(" \t\r\n=/>", rune(s[n])) {
+			n++
+		}
+		if n == 0 {
+			return ""
+		}
+		key := s[:n]
+		s = strings.TrimLeft(s[n:], " \t\r\n")
+		val := ""
+		if strings.HasPrefix(s, "=") {
+			s = strings.TrimLeft(s[1:], " \t\r\n")
+			if len(s) > 0 && (s[0] == '"' || s[0] == '\'') {
+				end := strings.IndexByte(s[1:], s[0])
+				if end < 0 {
+					return ""
+				}
+				val, s = s[1:1+end], s[2+end:]
+			} else {
+				end := strings.IndexAny(s, " \t\r\n>")
+				if end < 0 {
+					end = len(s)
+				}
+				val, s = s[:end], s[end:]
+			}
+		}
+		if strings.EqualFold(key, name) {
+			return html.UnescapeString(val)
+		}
+	}
+	return ""
+}
+
 // expanded 报告光标是否触及 [a, z]（含两端，光标贴着标记也展开）。
 func (pb *projBuilder) expanded(a, z int) bool {
 	return pb.ex.inBlock && pb.ex.caret >= a && pb.ex.caret <= z
+}
+
+// inside 报告光标是否严格位于 (a, z) 内。图片只在此时展开原文：光标贴在图片前后（方向键经过、
+// 点击图片旁边）时仍显示图片，避免大图反复变成原文造成版面跳动；点击图片本身进入原文（imageHit）。
+func (pb *projBuilder) inside(a, z int) bool {
+	return pb.ex.inBlock && pb.ex.caret > a && pb.ex.caret < z
 }
 
 // htmlStyles 是原版可编辑 HTML 中按样式渲染的行内标签。
@@ -244,7 +314,19 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 			pb.emit(a, a+n, cur|stMarker, show)
 			pb.emit(a+n, z-n, cur|stCode, true)
 			pb.emit(z-n, z, cur|stMarker, show)
-		case parser.Emphasis, parser.Strong, parser.Strikethrough, parser.Link, parser.Image:
+		case parser.Image:
+			if in.Dest != "" && !pb.inside(a, z) {
+				var alt strings.Builder
+				for j := i + 1; j < in.Next; j++ {
+					if ins[j].Kind == parser.Text {
+						alt.WriteString(ins[j].Text)
+					}
+				}
+				pb.object(a, z, imgObj{src: in.Dest, alt: alt.String()}, cur)
+				break
+			}
+			fallthrough
+		case parser.Emphasis, parser.Strong, parser.Strikethrough, parser.Link:
 			if i+1 >= in.Next {
 				pb.emit(a, z, cur|stRaw, true)
 				break
@@ -267,6 +349,8 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 			name, closing, selfClosing, ok := htmlTag(src)
 			show := pb.expanded(a, z)
 			switch {
+			case ok && name == "img" && !closing && !pb.inside(a, z) && htmlAttr(src, "src") != "":
+				pb.object(a, z, imgObj{src: htmlAttr(src, "src"), width: htmlAttr(src, "width"), alt: htmlAttr(src, "alt")}, cur)
 			case ok && name == "br":
 				if show {
 					pb.emit(a, z, cur|stMarker, true)

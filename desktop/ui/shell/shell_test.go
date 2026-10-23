@@ -455,3 +455,21 @@ func TestTextAndJSONDocumentsUseSourceEditor(t *testing.T) {
 		t.Fatalf("源码编辑未写回：%q", tab.Doc.Source())
 	}
 }
+
+func TestHighlightCodeHTML(t *testing.T) {
+	in := "<p>x</p>\n<pre><code class=\"language-go\">s := &quot;&lt;b&gt;&quot; /* a\nb */ x\n</code></pre>\n<pre><code class=\"language-nope\">a &lt; b\n</code></pre>\n"
+	out := highlightCodeHTML(in, false)
+	if !strings.Contains(out, `<span style="color:#`) {
+		t.Fatalf("go 代码块应着色：%s", out)
+	}
+	if strings.Contains(out, "<b>") || !strings.Contains(out, "&lt;b&gt;") {
+		t.Fatalf("代码文字应保持转义：%s", out)
+	}
+	// 块注释跨行：第二行开头的“b */”整体为注释色。
+	if !strings.Contains(out, "\n<span style=\"color:#") {
+		t.Fatalf("块注释续行应着色：%s", out)
+	}
+	if !strings.Contains(out, "<pre><code class=\"language-nope\">a &lt; b\n</code></pre>") {
+		t.Fatalf("未知语言应原样保留：%s", out)
+	}
+}

@@ -612,6 +612,11 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			e.toggleTask(at)
 			return true
 		}
+		if at, ok := e.imageHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {
+			e.setHead(at, false)
+			e.hasGoal = false
+			return true
+		}
 		pos := e.hit(ui.Point{X: ev.X, Y: ev.Y})
 		switch ev.Clicks {
 		case 2:

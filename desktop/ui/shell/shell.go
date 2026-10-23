@@ -23,6 +23,7 @@ import (
 	"nomo/desktop/internal/config"
 	"nomo/desktop/internal/docfs"
 	"nomo/desktop/internal/i18n"
+	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
 )
 
@@ -80,6 +81,9 @@ type Shell struct {
 	// post 把后台任务（对话框、文件写入）的结果交回 UI 线程；默认为 win.Update，测试中可替换。
 	post func(func())
 
+	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
+	images *mdedit.Images
+
 	quick quickState // 快捷插入菜单，见 quickinsert.go
 
 	pdfExporter func(html, path string, outline []PDFOutlineEntry) error
@@ -121,6 +125,11 @@ func New(o Options) *Shell {
 	s := &Shell{cfg: o.Config, locale: o.Locale, active: -1, sidebarW: 240,
 		prefs: loadPrefs(o.Config), pf: currentPlatform(), systemLocale: o.SystemLocale, version: o.Version, pdfExporter: o.ExportPDF, checkUpdate: o.CheckUpdate}
 	s.loadThemes()
+	s.images = mdedit.NewImages(func(fn func()) {
+		if s.post != nil {
+			s.post(fn)
+		}
+	}, mdedit.DefaultImageBudget)
 	for i, png := range [][]byte{o.IconLight, o.IconDark} {
 		if len(png) > 0 {
 			s.appIcon[i], _ = ui.DecodeBitmap(png)
@@ -185,9 +194,15 @@ func (s *Shell) Open() *mygo.Window {
 			s.win.Update(func() { s.requestClose(s.tabIDs(), true) })
 		}
 	})
-	s.win.OnFocus(func() { s.win.Update(s.checkExternalChanges) })
+	s.win.OnFocus(func() {
+		s.win.Update(func() {
+			s.checkExternalChanges()
+			s.images.Revalidate()
+		})
+	})
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
+		s.images.Close()
 		if s.settings != nil {
 			s.settings.win.Close()
 		}

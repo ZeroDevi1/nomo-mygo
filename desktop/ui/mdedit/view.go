@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
@@ -187,7 +188,10 @@ type Editor struct {
 	highlights [][2]int
 	current    int
 
-	pal    palette
+	pal palette
+	// syntax 为代码块的语法配色（随明暗主题切换），tokBuf 为切分代码行的复用缓冲。
+	syntax *editor.Theme
+	tokBuf []editor.Token
 	dark   bool
 	themed bool
 	// colors 为外壳提供的主题配色（nil 用默认），classic 为经典块样式（引用与提示块为
@@ -204,6 +208,12 @@ type Editor struct {
 	widthPct float32
 	svc      ui.Services
 	hasSvc   bool
+
+	// images 为共用的图片缓存（nil 时行内图片显示为替代文字框），baseDir 为解析相对图片路径的
+	// 文档目录（未保存的新文档为空）；由外壳通过 SetImages 设置。
+	images  *Images
+	baseDir string
+	imgSeen uint64 // 上次绘制时的图片缓存代数
 }
 
 type dragMode uint8
@@ -243,7 +253,7 @@ func (e *Editor) ReleaseLayouts() {
 	for i := range e.entries {
 		for k := range e.entries[i].rows {
 			r := &e.entries[i].rows[k]
-			r.proj, r.layout, r.bytes = nil, nil, 0
+			r.proj, r.layout, r.bytes, r.objRects, r.objSizes = nil, nil, 0, nil, nil
 		}
 	}
 	e.cacheBytes = 0
@@ -298,6 +308,7 @@ func (e *Editor) setTheme(t *ui.Theme) {
 	}
 	e.themed, e.dark = true, t.Dark
 	e.pal = paletteFor(t)
+	e.syntax = editor.DefaultTheme(t)
 	if c := e.colors; c != nil {
 		e.pal.apply(c)
 	}
@@ -421,6 +432,8 @@ func (e *Editor) split(i int, reuse []row) {
 func inherit(n, o row) row {
 	n.proj, n.layout, n.gen, n.sig = o.proj, o.layout, o.gen, o.sig
 	n.height, n.measured, n.bytes, n.used = o.height, o.measured, o.bytes, o.used
+	n.hlIn, n.hlOut, n.hlKnown = o.hlIn, o.hlOut, o.hlKnown
+	n.objSizes, n.objRects, n.imgGen = o.objSizes, o.objRects, o.imgGen
 	return n
 }
 
@@ -533,23 +546,57 @@ func (e *Editor) ensureRow(i, k int) bool {
 	r.used = e.tick
 	top := e.Doc.blocks[i]
 	ex := e.expansionFor(top, r)
+	if r.htmlImg {
+		// 图片块只在光标严格位于块内时展开（与行内图片一致，见 projBuilder.inside）。
+		ex.inBlock = ex.inBlock && ex.caret > 0 && ex.caret < r.b-r.a
+	}
 	sig := e.signature(top, r, ex)
 	hidden := e.fenceHidden(top, r)
+	// 代码行的着色取决于行首 Tokenizer 状态，状态变化（如上文开了块注释）时重排。
+	var fr *frame
+	var hlIn uint64
+	if r.role == roleCode && !r.fence {
+		if fr = codeFrame(en, k); fr != nil {
+			hlIn = e.codeState(i, en, fr, k)
+			sig |= (hlIn + 1) << 2
+		}
+	}
 	if hidden {
 		sig = 2
 	}
-	if r.layout != nil && r.gen == e.layoutGen && r.sig == sig {
-		return false
-	}
-	var p *projection
-	if r.kind == rowText {
-		p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout})
-	} else {
-		p = projectIdentity(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
-	}
 	_, w := e.rowBox(r)
+	p := r.proj
+	var sizes [][2]float32
+	if r.layout != nil && r.gen == e.layoutGen && r.sig == sig {
+		// 投影有效：只有行内图片的尺寸变化（加载完成）时按原投影重排。
+		if len(p.objs) == 0 || r.imgGen == e.imageGen() {
+			return false
+		}
+		r.imgGen = e.imageGen()
+		if sizes = e.objSizes(p, w); slices.Equal(sizes, r.objSizes) {
+			return false
+		}
+	} else {
+		if r.kind == rowText {
+			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout})
+		} else if r.htmlImg && !ex.inBlock {
+			p = projectHTMLImages(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
+		} else {
+			p = projectIdentity(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
+		}
+		r.imgGen = e.imageGen()
+		sizes = e.objSizes(p, w)
+	}
 	font := e.rowFont(r)
-	l := ui.ShapeRichTextWith(e.spans(p), font, ui.TextShape{Width: w, Align: r.align})
+	var spans []ui.Span
+	if fr != nil && p.text != "" {
+		e.tokBuf, _ = fr.tok.Tokenize(p.text, hlIn, e.tokBuf[:0])
+		spans = e.codeSpans(p.text, e.tokBuf)
+	} else {
+		spans = e.spans(p, sizes)
+	}
+	l := ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align})
+	r.objSizes, r.objRects = sizes, objRects(l, p)
 	_, lh := l.Size()
 	m := font.Metrics()
 	h := r.padTop + max(lh, m.Ascent+m.Descent+m.LineGap) + r.padBottom
@@ -561,15 +608,26 @@ func (e *Editor) ensureRow(i, k int) bool {
 	}
 	e.cacheBytes -= r.bytes
 	r.proj, r.layout, r.gen, r.sig, r.height, r.measured = p, l, e.layoutGen, sig, h, true
-	r.bytes = 512 + len(p.text) + 96*p.u16 + 48*len(p.runs)
+	r.bytes = 512 + len(p.text) + 96*p.u16 + 48*max(len(p.runs), len(spans)) + 64*len(p.objs)
+	for _, o := range p.objs {
+		r.bytes += len(o.src) + len(o.alt)
+	}
 	e.cacheBytes += r.bytes
 	return true
 }
 
-func (e *Editor) spans(p *projection) []ui.Span {
+// spans 把投影转为排版片段；sizes 为各行内图片的显示尺寸（与 p.objs 一一对应）。
+func (e *Editor) spans(p *projection, sizes [][2]float32) []ui.Span {
 	spans := make([]ui.Span, 0, len(p.runs))
+	obj := 0
 	for k, r := range p.runs {
 		sp := ui.Span{Text: p.text[r.dispByte:p.runEnd(k)]}
+		if r.atomic && r.st&stImage != 0 && sp.Text == objChar && obj < len(sizes) {
+			sp.ObjectWidth, sp.ObjectHeight = sizes[obj][0], sizes[obj][1]
+			obj++
+			spans = append(spans, sp)
+			continue
+		}
 		if r.st&stBold != 0 {
 			sp.Weight = 700
 		}
@@ -988,7 +1046,7 @@ func (e *Editor) evict() {
 		}
 		r := &e.entries[v.i].rows[v.k]
 		e.cacheBytes -= r.bytes
-		r.proj, r.layout, r.bytes = nil, nil, 0
+		r.proj, r.layout, r.bytes, r.objRects, r.objSizes = nil, nil, 0, nil, nil
 	}
 }
 

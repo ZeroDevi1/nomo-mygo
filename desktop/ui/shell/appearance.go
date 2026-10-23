@@ -81,6 +81,11 @@ func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 	if tab != nil {
 		tab.Ed.SetColors(editorColors(t, dark, s.prefs.DocumentStyleID == "nomo-classic"), s.prefs.DocumentStyleID == "nomo-classic")
 		tab.Ed.SetFonts(s.prefs.DocumentFontFamily, s.prefs.MonoFontFamily)
+		dir := ""
+		if tab.Path != "" {
+			dir = filepath.Dir(tab.Path)
+		}
+		tab.Ed.SetImages(s.images, dir)
 		if tab.source != nil {
 			mono := s.prefs.MonoFontFamily
 			if mono == "" {

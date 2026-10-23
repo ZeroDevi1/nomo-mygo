@@ -11,6 +11,13 @@ import (
 )
 
 func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
+	if e.images != nil {
+		e.images.frame()
+		// 图片加载完成后行高可能变化：重新计算可见行（阅读锚点保持不动）。
+		if e.images.gen != e.imgSeen {
+			e.imgSeen, e.dirty = e.images.gen, true
+		}
+	}
 	busy := e.dirty
 	e.prepare(r.W, r.H)
 	x0 := r.X + e.left()
@@ -41,6 +48,9 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 			e.paintRange(p, s, selA, selB, tx, ty, func(rc ui.Rect) { p.Fill(rc, e.pal.selection, 0) })
 		}
 		p.TextLayout(s.layout, tx, ty, e.rowColor(row))
+		if len(row.objRects) > 0 {
+			e.drawImages(p, row, tx, ty)
+		}
 		if marked && mark.Anchor <= s.end && mark.Head >= s.base {
 			e.paintRange(p, s, mark.Anchor, mark.Head, tx, ty, func(rc ui.Rect) {
 				p.Fill(ui.Rect{X: rc.X, Y: rc.Y + rc.H - 1.5, W: rc.W, H: 1.5}, e.pal.text, 0)

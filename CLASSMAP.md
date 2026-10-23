@@ -68,6 +68,8 @@
 | 块组件（列表、任务、引用、提示块、表格、代码块、分割线、front matter） | `desktop/ui/mdedit/blocks.go` | `draw.go`, `view.go`, `document.go` | 修改块展开为行的规则、容器前缀、缩进与间距、装饰范围 |
 | 可见区布局与缓存 | `desktop/ui/mdedit/view.go` | `blocks.go`, `input.go` | 修改行虚拟化、阅读锚点、布局缓存预算与淘汰、命中测试、主题配色 |
 | 绘制 | `desktop/ui/mdedit/draw.go` | `view.go` | 修改装饰（引用条、提示块标题、代码卡片、表格网格）、列表符号与任务框绘制 |
+| 代码块语法高亮 | `desktop/ui/mdedit/highlight.go` | `view.go`, `blocks.go` | 修改代码块着色、Tokenizer 跨行状态缓存 |
+| 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载 |
 | 输入法、键盘与命令 | `desktop/ui/mdedit/input.go` | `view.go`, `edit.go`, `structure.go` | 修改 TextInputClient、光标移动、删除、剪贴板与加粗等命令 |
 | 结构编辑 | `desktop/ui/mdedit/structure.go` | `input.go`, `blocks.go` | 修改列表/引用内回车与退出、行首退格提出容器、Tab 缩进与表格单元格切换、任务勾选 |
 | 编辑器对外接口（格式命令、查找、大纲、统计、源码同步） | `desktop/ui/mdedit/api.go` | `structure.go`, `edit.go` | 修改工具栏/菜单命令的原文事务、查找匹配、大纲与写作统计 |
@@ -361,15 +363,17 @@
 - 块组件：顶层块展开为行（叶子段落、原文行、表格单元格）与跨行装饰，对齐原版 WebView 的列表、任务、引用、五类提示块、表格、代码块、分割线与 front matter 显示；行内 HTML 标签、实体与注释按原版渲染
 - `Editor` 视图：只布局可见行，块级阅读锚点，按估算字节的 LRU 布局缓存；`ReleaseLayouts` 供后台标签释放
 - `TextInputClient` 实现（原文 UTF-16 坐标）、键盘导航、删除/回车、剪贴板、加粗/斜体/删除线命令与结构编辑（列表/引用续写与退出、Tab 缩进、表格单元格切换、任务勾选）
+- 代码块语法高亮（MyGo editor Tokenizer）
+- 图片：Markdown 图片与 `<img>` 作为行内对象排版，只含图片的 HTML 块整块显示；`Images` 为窗口共用的按需加载缓存（本地、data URI、远程，后台解码、超大图缩小、字节预算 LRU）
 
 **Does not own:**
-- 图片、公式、Mermaid、脚注引用的渲染（P3，按计划 D3 走按需渲染服务）
-- 精细排版与行高（P0 第 3 项）、表格按内容自动列宽、代码高亮
+- 公式、Mermaid、脚注引用、一般 HTML 块的渲染（P3，按计划 D3 走按需渲染服务）
+- 精细排版与行高（P0 第 3 项）、表格按内容自动列宽
 - 文件读写（由调用方经 `desktop/internal/docfs` 完成）
 
 **Called by:** `desktop/ui/shell`
 
-**Depends on:** `github.com/egoist/mygo/ui`, `github.com/egoist/mygo/ui/markdown/parser`
+**Depends on:** `github.com/egoist/mygo/ui`, `github.com/egoist/mygo/ui/editor`（Tokenizer 与语法配色）, `github.com/egoist/mygo/ui/markdown/parser`, `golang.org/x/image/draw`, `desktop/ui/icons`
 
 **Change this when:**
 - 调整原生语义编辑的投影、输入、布局或缓存策略

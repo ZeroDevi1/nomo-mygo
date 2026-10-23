@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
@@ -77,10 +78,22 @@ type row struct {
 	// [blockA, blockB]（相对顶层块）内时显示，否则高度为 0，与原版只显示语言标签一致。
 	fence          bool
 	blockA, blockB int
+	// htmlImg 为 true 表示只含图片的 HTML 块：整块一行，光标严格位于块内时显示原文，否则显示图片。
+	htmlImg bool
 	// empty 为 true 表示空列表项或空引用的占位行（没有叶子块），编辑时按文本行处理。
 	empty bool
 
 	hash uint64 // 原文与几何的哈希，编辑后据此复用布局
+
+	// 代码行的 Tokenizer 状态：hlIn 为行首状态，hlOut 为按 hlIn 切分本行后的状态；
+	// hlKnown 为 false 表示尚未求出。见 highlight.go。
+	hlIn, hlOut uint64
+	hlKnown     bool
+	// 行内图片：objSizes 为排版时各图片的显示尺寸，objRects 为其在布局中的位置（相对文字原点），
+	// 均与 proj.objs 一一对应；imgGen 为排版时的图片缓存代数，变化后重新计算尺寸。
+	objSizes [][2]float32
+	objRects []ui.Rect
+	imgGen   uint64
 
 	proj     *projection
 	layout   *ui.TextLayout
@@ -113,6 +126,10 @@ type frame struct {
 	indent      float32
 	tone        int // 提示块类型
 	lang        string
+	// tok 为代码块语言的 Tokenizer（nil 不高亮）；hlUpTo 为已求出 Tokenizer 状态的行号上界
+	// （rows[first, hlUpTo) 有效），块重新展开时从 first 开始。
+	tok    editor.Tokenizer
+	hlUpTo int
 }
 
 // blockBuilder 把一个顶层块展开为行与装饰。
@@ -232,8 +249,14 @@ func (bb *blockBuilder) block(i int, c container) {
 					bb.rows[k].fence, bb.rows[k].blockA, bb.rows[k].blockB = true, bb.rel(b.Start), bb.rel(b.End)
 				}
 			}
-			bb.frames = append(bb.frames, frame{kind: frameCode, first: f, last: len(bb.rows) - 1, indent: c.indent, lang: b.Language()})
+			bb.frames = append(bb.frames, frame{kind: frameCode, first: f, last: len(bb.rows) - 1, indent: c.indent, lang: b.Language(), tok: codeTokenizer(b.Language())})
 			bb.closePad(codePadY + blockMargin)
+		} else if align, ok := htmlImagesOnly(bb.src[b.Start:b.End]); ok && b.Kind == parser.HTMLBlock {
+			// 只含图片的 HTML 块（原版设置宽度后的 <img>、README 的 <p align="center"><img></p>）
+			// 作为一行显示图片，光标进入时展开为原文。
+			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
+			bb.add(row{kind: rowLine, role: roleHTML, htmlImg: true, align: align, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
+			bb.closePad(paraSpacing(c))
 		} else {
 			bb.lines(b.Start, b.End, role, c, 0)
 			bb.closePad(paraSpacing(c))
@@ -349,6 +372,15 @@ func (bb *blockBuilder) emptyRow(at int, c container) {
 // lines 为 [start, end) 的每一行生成原样行，去掉行首属于外层容器的前缀。
 func (bb *blockBuilder) lines(start, end int, role rowRole, c container, padX float32) {
 	s := bb.src[start:end]
+	// 原样块（代码、HTML、公式、front matter）的缩进属于内容，续行只去掉容器前缀：引用标记加上
+	// 与首行同列的空格（列表内容列与围栏缩进）。其余块沿用按列表层级估算的缩进上限。
+	spaces := int(c.indent/listIndent)*4 + 4
+	if role == roleCode || role == roleHTML || role == roleMath || role == roleFront {
+		ls := strings.LastIndexByte(bb.src[:start], '\n') + 1
+		head := bb.src[ls:start]
+		q := quotePrefixLen(head, c)
+		spaces = len(head) - q - len(strings.TrimLeft(head[q:], " "))
+	}
 	for a := 0; a <= len(s); {
 		z := strings.IndexByte(s[a:], '\n')
 		if z < 0 {
@@ -358,30 +390,43 @@ func (bb *blockBuilder) lines(start, end int, role rowRole, c container, padX fl
 		}
 		skip := a
 		if a > 0 {
-			skip = a + prefixLen(s[a:z], c)
+			skip = a + prefixLen(s[a:z], c, spaces)
 		}
 		bb.add(row{kind: rowLine, role: role, a: bb.rel(start + skip), b: bb.rel(start + z), indent: c.indent + padX, quoteFg: c.quote, tone: c.tone})
 		a = z + 1
 	}
 }
 
-// prefixLen 返回续行开头属于容器的前缀长度：引用的“>”（含其后一个空格）与列表缩进。
-func prefixLen(line string, c container) int {
-	n := 0
+// prefixLen 返回续行开头属于容器的前缀长度：引用的“>”（含其后一个空格）与至多 spaces 个缩进空格。
+func prefixLen(line string, c container, spaces int) int {
+	n := quotePrefixLen(line, c)
+	for k := 0; k < spaces && n < len(line) && line[n] == ' '; k++ {
+		n++
+	}
+	return n
+}
+
+// quotePrefixLen 返回行首引用标记（“>”及其后一个空格，可夹杂空格、可多层）的长度；不在引用或提示块内时为 0。
+func quotePrefixLen(line string, c container) int {
+	if !c.quote && c.tone < 0 {
+		return 0
+	}
+	n, end := 0, 0
 	for n < len(line) {
-		switch {
-		case line[n] == '>' && (c.quote || c.tone >= 0):
+		switch line[n] {
+		case '>':
 			n++
 			if n < len(line) && line[n] == ' ' {
 				n++
 			}
-		case line[n] == ' ' && n < int(c.indent/listIndent)*4+4:
+			end = n
+		case ' ':
 			n++
 		default:
-			return n
+			return end
 		}
 	}
-	return n
+	return end
 }
 
 func (bb *blockBuilder) table(i int, t *parser.Block, c container) {

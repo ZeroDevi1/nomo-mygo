@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown/parser"
 
 	"nomo/desktop/internal/applog"
@@ -26,8 +28,8 @@ import (
 // PDF 把同一份 HTML 交给 Options.ExportPDF（主程序用按需创建的隐藏 WebView 打印，导出完即销毁，
 // 不常驻）；标题前插入书签标记，由主程序转换为 PDF 书签。
 //
-// 与原版的差异：代码不做语法高亮，公式与 Mermaid 以源码显示，提示块按引用块显示，不附带精细排版
-// 运行时。
+// 与原版的差异：代码高亮用 MyGo editor 的 Tokenizer 与 GitHub 配色（原版为 Shiki），未知语言不高亮；
+// 公式与 Mermaid 以源码显示，提示块按引用块显示，不附带精细排版运行时。
 
 // PDFOutlineEntry 是 PDF 书签：MarkerURI 为标题前标记链接的地址，主程序据此定位页面。
 type PDFOutlineEntry struct {
@@ -44,6 +46,7 @@ const pdfMarkerHost = "nomo-pdf-outline.invalid"
 var (
 	headingTagRe = regexp.MustCompile(`(?s)<h([1-6])>(.*?)</h[1-6]>`)
 	imgSrcRe     = regexp.MustCompile(`<img src="([^"]*)"`)
+	codeBlockRe  = regexp.MustCompile(`(?s)<pre><code class="language-([^"]*)">(.*?)</code></pre>`)
 	tagRe        = regexp.MustCompile(`<[^>]+>`)
 )
 
@@ -52,7 +55,7 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 	src := stripFrontMatter(tab.Doc.Source())
 	body := parser.New(parser.Default | parser.ExtDollarMath)
 	body.Set(src)
-	out := body.HTML()
+	out := highlightCodeHTML(body.HTML(), dark)
 
 	// 标题：加 id（与原版目录锚点一样按标题文字生成，重复时追加序号）与 PDF 书签标记。
 	var outline []PDFOutlineEntry
@@ -131,6 +134,53 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 }
 
 // stripFrontMatter 去掉开头的 YAML front matter（导出与原版一样不包含元数据）。
+// highlightCodeHTML 为解析器输出中带语言的代码块加语法着色：逐行切分，着色片段包成带内联颜色的
+// <span>，文字重新转义。未知语言的代码块原样保留。
+func highlightCodeHTML(out string, dark bool) string {
+	ct := editor.DefaultTheme(&ui.Theme{Dark: dark})
+	return codeBlockRe.ReplaceAllStringFunc(out, func(m string) string {
+		sub := codeBlockRe.FindStringSubmatch(m)
+		l := editor.LanguageNamed(html.UnescapeString(sub[1]))
+		if l == nil || l.Tokenizer == nil {
+			return m
+		}
+		var b strings.Builder
+		b.WriteString(`<pre><code class="language-` + sub[1] + `">`)
+		var state uint64
+		var toks []editor.Token
+		for k, line := range strings.Split(html.UnescapeString(sub[2]), "\n") {
+			if k > 0 {
+				b.WriteByte('\n')
+			}
+			toks, state = l.Tokenizer.Tokenize(line, state, toks[:0])
+			at := 0
+			for _, t := range toks {
+				z := min(t.End, len(line))
+				if z <= at {
+					continue
+				}
+				st := ct.Tokens[t.Kind]
+				if st.Color.A == 0 {
+					b.WriteString(html.EscapeString(line[at:z]))
+				} else {
+					style := fmt.Sprintf("color:#%02x%02x%02x", st.Color.R, st.Color.G, st.Color.B)
+					if st.Italic {
+						style += ";font-style:italic"
+					}
+					if st.Bold {
+						style += ";font-weight:700"
+					}
+					b.WriteString(`<span style="` + style + `">` + html.EscapeString(line[at:z]) + `</span>`)
+				}
+				at = z
+			}
+			b.WriteString(html.EscapeString(line[at:]))
+		}
+		b.WriteString("</code></pre>")
+		return b.String()
+	})
+}
+
 func stripFrontMatter(src string) string {
 	if !strings.HasPrefix(src, "---\n") && !strings.HasPrefix(src, "---\r\n") {
 		return src

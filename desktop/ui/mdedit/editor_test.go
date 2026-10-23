@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/png"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -274,6 +275,32 @@ func TestSnapshot(t *testing.T) {
 		src = string(b)
 	}
 	ed, tt := newTester(t, src, 1000, 900)
+	// 加载图片（相对路径按文档目录解析），等待已排队的加载完成后再截图。
+	tp := &testPost{}
+	im := NewImages(tp.post, DefaultImageBudget)
+	defer im.Close()
+	dir, _ := os.Getwd()
+	if f := os.Getenv("NOMO_SNAPSHOT_DOC"); f != "" {
+		dir = filepath.Dir(f)
+	} else {
+		dir = filepath.Join(dir, "..", "..", "..")
+	}
+	ed.SetImages(im, dir)
+	tt.Frame()
+	for range 50 {
+		time.Sleep(100 * time.Millisecond)
+		tp.mu.Lock()
+		fns := tp.fns
+		tp.fns = nil
+		tp.mu.Unlock()
+		for _, fn := range fns {
+			fn()
+		}
+		tt.Frame()
+		if im.idle() && len(fns) == 0 {
+			break
+		}
+	}
 	// 光标放进第一个含加粗的段落，展示就地展开。
 	if i := strings.Index(ed.Doc.Source(), "**"); i >= 0 {
 		ed.Doc.SetSelection(Selection{i + 3, i + 3})
