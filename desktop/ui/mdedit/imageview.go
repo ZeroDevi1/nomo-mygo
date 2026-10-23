@@ -176,7 +176,7 @@ func altLabel(o imgObj) string {
 }
 
 // objRects 返回布局中各行内对象的位置，与 p.objs 一一对应（按显示偏移匹配）。
-func objRects(l *ui.TextLayout, p *projection) []ui.Rect {
+func objRects(l *lineLayout, p *projection) []ui.Rect {
 	if len(p.objs) == 0 {
 		return nil
 	}

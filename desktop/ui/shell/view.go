@@ -34,7 +34,7 @@ func (s *Shell) view(c *ui.Context) {
 		if s.mode() == modeSource {
 			tab.syncFromSource()
 		}
-		tab.Ed.SetStyle(float32(s.prefs.FontSize), float32(s.prefs.ZoomPercent), float32(s.prefs.ContentWidthPercent))
+		s.applyEditorStyle(tab)
 	}
 	s.applyDocumentAppearance(c, tab)
 	s.autoSave(c)

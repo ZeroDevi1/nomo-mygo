@@ -5,6 +5,7 @@
 package mdedit
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -43,14 +44,16 @@ func (s Selection) Empty() bool       { return s.Anchor == s.Head }
 // 不变量：blocks 按 Start 升序，与 md 的顶层子块一一对应；u16Total 等于原文的
 // UTF-16 长度；marked 非空时 marked.Anchor <= marked.Head 且位于原文范围内。
 type Document struct {
-	md     *parser.Document
+	md     *tree
 	blocks []Block
 	spare  []Block // 编辑时复用的块数组，避免每次按键分配
 	// u16Total 是原文的 UTF-16 长度，编辑时增量维护。
 	u16Total int
 	version  uint64
 	// hasToc 表示文档含目录区（collect 时更新）；headings/headingsVer 缓存 Headings 的结果。
-	hasToc      bool
+	hasToc bool
+	// fm 是 front matter 结束偏移（collect 时更新，0 为没有），recollect 据此判断编辑是否可能改变它。
+	fm          int
 	headings    []Heading
 	headingsVer uint64
 	// inputVer 是最近一次键盘输入（键入、删除、输入法）后的版本；撤销、粘贴与命令不更新它。
@@ -67,7 +70,7 @@ type Document struct {
 // NewDocument 解析 src 并建立块索引。
 func NewDocument(src string) *Document {
 	// 现版本支持 $...$ 行内公式，Default 不含单美元公式，需显式加上。
-	d := &Document{md: parser.New(parser.Default | parser.ExtDollarMath)}
+	d := &Document{md: newTree(parser.Default | parser.ExtDollarMath)}
 	d.md.Set(src)
 	d.blocks = d.collect(d.blocks[:0])
 	d.fillU16(d.blocks, 0)
@@ -80,9 +83,6 @@ func (d *Document) Source() string { return d.md.Source() }
 
 // Blocks 返回顶层块列表，下次编辑前有效。
 func (d *Document) Blocks() []Block { return d.blocks }
-
-// Parser 返回解析结果，供投影读取行内节点；下次编辑前有效。
-func (d *Document) Parser() *parser.Document { return d.md }
 
 // Version 每次原文变化时递增。
 func (d *Document) Version() uint64 { return d.version }
@@ -112,6 +112,7 @@ const (
 func (d *Document) collect(dst []Block) []Block {
 	src := d.md.Source()
 	fm := frontMatterEnd(src)
+	d.fm = fm
 	// 目录区：成对的 <!-- toc --> 与 <!-- /toc --> 注释块之间（含两端）合并为一个 KindToc 合成块；
 	// 未配对的标记按普通注释块处理。先找出配对的起止子块序号，再在主循环中合并。
 	tocEnd := map[int]int{}
@@ -226,7 +227,13 @@ func (d *Document) replace(from, to int, text string) Change {
 	delta := len(text) - (to - from)
 	u16Delta := u16Len(text) - u16Len(src[from:to])
 	old := d.blocks
+	oldLen := d.md.Len()
 	d.md.Edit(from, to, text)
+	if ch, ok := d.recollect(src, from, to, delta, u16Delta, d.md.Len()-oldLen); ok {
+		d.u16Total += u16Delta
+		d.version++
+		return ch
+	}
 	nb := d.collect(d.spare[:0])
 
 	// 前缀：完全位于编辑点之前且区间不变的块内容未变。
@@ -259,6 +266,108 @@ func (d *Document) replace(from, to int, text string) Change {
 	d.u16Total += u16Delta
 	d.version++
 	return Change{First: p, Removed: len(old) - p - s, Inserted: mid - p}
+}
+
+// recollect 在编辑后只重建受影响的顶层块，避免每次按键遍历全部顶层子块。解析器只重解析编辑点附近，其后的块
+// 原样平移（序号整体移动 shift = 新旧块数之差，偏移移动 delta）；这里保留编辑点之前的块、找到第一个在新解析中
+// 对齐的旧块作为后缀起点，中间一段从解析器的顶层子块重新收集，后缀就地平移。成功时就地更新 d.blocks 并返回
+// 替换范围；涉及 front matter 或目录区（它们由多个子块合成）或无法对齐时返回 false 且不改 d.blocks，由调用方
+// 全量收集。oldSrc 为编辑前的原文。
+func (d *Document) recollect(oldSrc string, from, to, delta, u16Delta, shift int) (Change, bool) {
+	src := d.md.Source()
+	old := d.blocks
+	// front matter 的结束行可能被这次编辑创建或改变：文档以 “---” 开头而尚无 front matter，或编辑落在其中。
+	if d.fm == 0 && strings.HasPrefix(src, "---") || from <= d.fm+1 {
+		return Change{}, false
+	}
+	// 前缀：止于编辑点之前的块，再退一块——编辑可能并入前一块（懒惰续行、Setext 下划线、列表续行）。
+	p := sort.Search(len(old), func(i int) bool { return old[i].End >= from })
+	p = max(0, p-1)
+	start := 1
+	if p > 0 {
+		k := old[p-1]
+		b := d.md.Block(k.Index)
+		if k.Kind == KindFrontMatter || k.Kind == KindToc || b.Parent != 0 || b.Start != k.Start || b.Kind != k.Kind {
+			return Change{}, false
+		}
+		start = b.Next
+	}
+	// 后缀：第一个起点不早于被替换区间末尾、且在新解析中按 shift/delta 对齐的旧块。对齐的顶层块之后的解析
+	// 只取决于其后的原文（容器在顶层块起点全部关闭），因此其后的块都不变。
+	q := max(p, sort.Search(len(old), func(i int) bool { return old[i].Start >= to }))
+	end := d.md.Len()
+	for tries := 0; ; tries++ {
+		if q == len(old) {
+			break
+		}
+		if tries == 8 {
+			return Change{}, false
+		}
+		o := old[q]
+		if n := o.Index + shift; n >= start && n < end {
+			if b := d.md.Block(n); b.Parent == 0 && b.Start == o.Start+delta && b.Kind == o.Kind && o.Kind != KindFrontMatter && o.Kind != KindToc {
+				end = n
+				break
+			}
+		}
+		q++
+	}
+	for _, o := range old[p:q] {
+		if o.Kind == KindFrontMatter || o.Kind == KindToc || o.Kind == parser.HTMLBlock && isTocMarker(oldSrc[o.Start:o.End]) {
+			return Change{}, false
+		}
+	}
+	// 中间段：新解析中 start 到 end 之间的顶层子块；新出现的目录标记可能与别处的标记配对，交给全量收集。
+	mid := d.spare[:0]
+	c := start
+	for ; c < end; c = d.md.Block(c).Next {
+		b := d.md.Block(c)
+		if b.Kind == parser.HTMLBlock && isTocMarker(src[b.Start:b.End]) {
+			return Change{}, false
+		}
+		mid = append(mid, Block{Index: c, Kind: b.Kind, Start: b.Start, End: trailingEnd(src, b.End)})
+	}
+	if c != end {
+		return Change{}, false
+	}
+	for i := 1; i < len(mid); i++ {
+		mid[i-1].End = min(mid[i-1].End, mid[i].Start)
+	}
+	if n := len(mid); n > 0 && q < len(old) {
+		mid[n-1].End = min(mid[n-1].End, old[q].Start+delta)
+	}
+	// 收窄到真正变化的块：去掉与旧块相同的首尾（退回的那一块通常不变），让视图少重建。
+	for len(mid) > 0 && p < q && mid[0].Start == old[p].Start && mid[0].End == old[p].End && mid[0].Kind == old[p].Kind && old[p].End < from {
+		mid[0].U16Start, mid[0].U16Len = old[p].U16Start, old[p].U16Len
+		mid = mid[1:]
+		p++
+	}
+	for n := len(mid); n > 0 && q > p; n = len(mid) {
+		o := old[q-1]
+		if o.Start < to || mid[n-1].Start != o.Start+delta || mid[n-1].End != o.End+delta || mid[n-1].Kind != o.Kind {
+			break
+		}
+		mid = mid[:n-1]
+		q--
+	}
+	inserted, removed := len(mid), q-p
+	nb := slices.Replace(old, p, q, mid...)
+	d.fillU16(nb[:p+inserted], p)
+	for k := p + inserted; k < len(nb); k++ {
+		b := &nb[k]
+		b.Index += shift
+		b.Start += delta
+		b.End += delta
+		b.U16Start += u16Delta
+	}
+	d.blocks, d.spare = nb, mid[:0]
+	return Change{First: p, Removed: removed, Inserted: inserted}, true
+}
+
+// isTocMarker 报告 HTML 块原文是否为目录区起止标记。
+func isTocMarker(s string) bool {
+	s = strings.TrimSpace(s)
+	return s == tocStartMarker || s == tocEndMarker
 }
 
 // BlockAt 返回包含字节偏移 b 的块序号（Start <= b <= End），b 位于块间隙时

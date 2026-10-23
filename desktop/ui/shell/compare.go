@@ -130,6 +130,7 @@ func (s *Shell) comparisonView(c *ui.Context, left, right *Tab) (active ui.Eleme
 	}
 	// 两侧原文都与各自的源码缓冲同步（源码模式下编辑的是缓冲）。
 	for _, t := range []*Tab{left, right} {
+		s.applyEditorStyle(t)
 		if s.mode() == modeSource {
 			t.syncToSource()
 			t.syncFromSource()

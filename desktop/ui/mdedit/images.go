@@ -67,6 +67,9 @@ const (
 	RenderMathInline  = "math-inline"
 	RenderMathDisplay = "math-display"
 	RenderMermaid     = "mermaid"
+	// RenderSVG 栅格化含 <text> 的 SVG 图片（MyGo v0.6.2 的 SVG 渲染不画文字，如徽章上的字）：Src 为 SVG 原文，
+	// W、H 为显示尺寸。由图片加载流程内部使用，不进入渲染对象缓存。
+	RenderSVG = "svg"
 )
 
 // RenderRequest 是一个公式或 Mermaid 图表的渲染请求：Src 为 TeX 或 Mermaid 源码，Dark 与 FontSize（CSS 像素）
@@ -75,6 +78,7 @@ type RenderRequest struct {
 	Kind, Src string
 	Dark      bool
 	FontSize  float32
+	W, H      float32 // 仅 RenderSVG：显示尺寸（CSS 像素）
 }
 
 // RenderResult 是一个渲染请求的结果：Img 与显示尺寸 W、H（CSS 像素，按 DIP 显示），Depth 为基线以下的深度
@@ -450,7 +454,25 @@ func (im *Images) load(from string) imageResult {
 	}
 	res := decodeImage(data, strings.EqualFold(filepath.Ext(strings.SplitN(from, "?", 2)[0]), ".svg"))
 	res.modTime = mod
+	if res.svg != nil && bytes.Contains(data, []byte("<text")) {
+		res = im.rasterizeSVG(data, res)
+	}
 	return res
+}
+
+// rasterizeSVG 用离屏 WebView 把含文字的 SVG 栅格化为位图（在 worker 中运行）；没有渲染函数或渲染失败时返回
+// 原矢量结果（文字缺失，图形照常）。位图按渲染窗口的设备像素比生成，放大显示时会变模糊。
+func (im *Images) rasterizeSVG(data []byte, res imageResult) imageResult {
+	render := im.render
+	if render == nil {
+		return res
+	}
+	out := render([]RenderRequest{{Kind: RenderSVG, Src: string(data), W: res.w, H: res.h}})
+	if len(out) != 1 || out[0].Err != nil || out[0].Skipped || out[0].Img == nil {
+		return res
+	}
+	b := out[0].Img.Bounds()
+	return imageResult{bmp: ui.NewBitmap(out[0].Img), w: res.w, h: res.h, bytes: b.Dx() * b.Dy() * 4 * 4 / 3, modTime: res.modTime}
 }
 
 func readLimited(path string) ([]byte, time.Time, error) {

@@ -113,7 +113,7 @@ type row struct {
 	imgGen   uint64
 
 	proj     *projection
-	layout   *ui.TextLayout
+	layout   *lineLayout
 	gen      uint32
 	sig      uint64
 	height   float32 // 行框高度（含 padTop/padBottom）；measured 为 false 时是估算值
@@ -247,7 +247,8 @@ func paraSpacing(c container) float32 {
 }
 
 func (bb *blockBuilder) block(i int, c container) {
-	b := bb.d.md.Block(i)
+	blk := bb.d.md.Block(i)
+	b := &blk
 	base := row{rel: i - bb.top.Index, a: bb.rel(b.Start), b: bb.rel(b.End), indent: c.indent, quoteFg: c.quote, tone: c.tone}
 	switch b.Kind {
 	case parser.Paragraph, parser.Heading:
@@ -577,6 +578,18 @@ func (e *Editor) rowFont(r *row) ui.Font {
 	}
 	f.Size *= e.scale
 	return f
+}
+
+// rowLead 返回行的行框高度（DIP，对应 CSS line-height），0 表示沿用字体原生行高。与原版样式一致：正文、列表、
+// 引用与表格单元格用设置的行高倍数（--md-editor-line-height），标题固定 1.2；代码、公式、HTML 等原文行保持原生行高。
+func (e *Editor) rowLead(r *row, f ui.Font) float32 {
+	switch {
+	case r.role == roleHeading:
+		return f.Size * 1.2
+	case (r.role == roleBody || r.role == roleCellHead) && (r.kind == rowText || r.empty):
+		return f.Size * e.lineMul
+	}
+	return 0
 }
 
 func (e *Editor) monoFont() string {

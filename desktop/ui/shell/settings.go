@@ -16,7 +16,7 @@ import (
 
 // settingsWindow 是原生设置窗口，分类与文案对应原版 SettingsWindow.svelte。
 //
-// 只列出原生外壳已生效的设置；尚未实现的功能（行高、排版、代码块行号等）不展示无效的开关。
+// 只列出原生外壳已生效的设置；尚未实现的功能（排版、代码块行号等）不展示无效的开关。
 // 读写与主窗口共享的 Shell.prefs，键与 WebView 版相同。
 // 生命周期：openSettings 创建，关闭窗口即销毁（Shell.settings 置空）。
 type settingsWindow struct {
@@ -147,6 +147,7 @@ func (sw *settingsWindow) page(c *ui.Context) {
 	case "editor":
 		sw.section(c, "editorScale", func() {
 			sw.slider(c, "fontSize", "fontSize", &p.FontSize, 14, 22, 1, "%.0f px", false)
+			sw.slider(c, "lineHeight", "lineHeight", &p.LineHeight, 1.4, 2.1, 0.05, "%.2f", false)
 			sw.slider(c, "contentWidth", "contentWidthPercent", &p.ContentWidthPercent, 45, 90, 1, "%.0f%%", false)
 			sw.choice(c, "calloutStyle", "documentStyleId", &p.DocumentStyleID,
 				[]string{"nomo-modern", "nomo-classic"}, []string{s.tr("modern"), s.tr("classic")})

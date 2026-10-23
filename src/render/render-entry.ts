@@ -6,12 +6,15 @@ import 'katex/dist/katex.min.css';
 import { createMermaidDiagramRenderer } from '../lib/services/mermaidDiagramRenderer';
 
 interface RenderRequest {
-  kind: 'math-inline' | 'math-display' | 'mermaid';
+  kind: 'math-inline' | 'math-display' | 'mermaid' | 'svg';
   src: string;
   fg: string;
   bg: string;
   fontSize: number;
   mermaidTheme: string;
+  /** 仅 svg：显示尺寸（CSS 像素）。 */
+  w?: number;
+  h?: number;
 }
 
 interface RenderItem {
@@ -40,6 +43,20 @@ const tick = (ms = 16) => new Promise((resolve) => setTimeout(resolve, ms));
 async function renderInto(box: HTMLElement, request: RenderRequest): Promise<string> {
   box.style.color = request.fg;
   box.style.fontSize = `${request.fontSize}px`;
+  if (request.kind === 'svg') {
+    // 以 <img> 加载而非内联：SVG 中的脚本与外部资源不会执行或加载。
+    const img = new Image(request.w, request.h);
+    img.style.display = 'block';
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(request.src)}`;
+    box.style.padding = '0';
+    box.appendChild(img);
+    try {
+      await img.decode();
+    } catch {
+      return 'svg decode failed';
+    }
+    return '';
+  }
   if (request.kind === 'mermaid') {
     const { svg, error } = await mermaid.renderMermaid(request.src, {
       theme: { theme: request.mermaidTheme as never, themeVariables: {} },

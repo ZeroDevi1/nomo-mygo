@@ -79,6 +79,12 @@ func editorColors(t *themes.Theme, dark, classic bool) *mdedit.Colors {
 }
 
 // applyAppearance 在每帧开始时把主题与字体交给控件主题、外壳配色和当前编辑器。
+// applyEditorStyle 把字号、缩放、内容宽度与行高设置交给 tab 的语义编辑器；值未变时编辑器不做任何事。
+func (s *Shell) applyEditorStyle(tab *Tab) {
+	tab.Ed.SetStyle(float32(s.prefs.FontSize), float32(s.prefs.ZoomPercent), float32(s.prefs.ContentWidthPercent))
+	tab.Ed.SetLineHeight(float32(s.prefs.LineHeight))
+}
+
 func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 	t := s.currentTheme()
 	dark := c.Theme().Dark

@@ -47,9 +47,9 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		paint := func() {
 			e.paintHighlights(p, s, tx, ty)
 			if selA < selB && selA <= s.end && selB >= s.base {
-				e.paintRange(p, s, selA, selB, tx, ty, func(rc ui.Rect) { p.Fill(rc, e.pal.selection, 0) })
+				e.paintLines(s, selA, selB, tx, ty, func(rc ui.Rect) { p.Fill(rc, e.pal.selection, 0) })
 			}
-			p.TextLayout(s.layout, tx, ty, e.rowColor(row))
+			s.layout.paint(p, tx, ty, e.rowColor(row))
 			if len(row.objRects) > 0 {
 				e.drawImages(p, row, tx, ty)
 			}
@@ -233,6 +233,7 @@ func (e *Editor) drawFrame(p *ui.Painter, en *entry, f frame, x0, top float32, v
 func (e *Editor) drawMarker(p *ui.Painter, r *row, s seg, x0, ty float32) {
 	first := s.layout.Caret(0)
 	lineH := max(first.H, e.lineH)
+	ty += first.Y // 加了行距时首行文字下移
 	gx := x0 + r.indent - listIndent
 	if r.task != parser.NoTask {
 		box := ui.Rect{X: gx + 2, Y: ty + (lineH-taskBox)/2, W: taskBox, H: taskBox}
@@ -264,9 +265,10 @@ func (e *Editor) taskHit(pt ui.Point) (int, bool) {
 			continue
 		}
 		s := e.segOf(v.i, v.k)
-		lineH := max(s.layout.Caret(0).H, e.lineH)
+		first := s.layout.Caret(0)
+		lineH := max(first.H, e.lineH)
 		x := e.left() + r.indent - listIndent + 2
-		y := v.y + r.padTop + (lineH-taskBox)/2
+		y := v.y + r.padTop + first.Y + (lineH-taskBox)/2
 		if pt.X >= x-4 && pt.X <= x+taskBox+4 && pt.Y >= y-4 && pt.Y <= y+taskBox+4 {
 			return e.Doc.blocks[v.i].Start + r.taskAt, true
 		}
@@ -280,6 +282,19 @@ func (e *Editor) paintRange(p *ui.Painter, s seg, a, z int, tx, ty float32, fill
 		return
 	}
 	for _, rc := range s.layout.SelectionRects(ui.TextInputRange{Start: da, End: dz}) {
+		rc.X += tx
+		rc.Y += ty
+		fill(rc)
+	}
+}
+
+// paintLines 与 paintRange 相同，但矩形覆盖整个行框（含行距），多行选区连成一片。
+func (e *Editor) paintLines(s seg, a, z int, tx, ty float32, fill func(ui.Rect)) {
+	da, dz := s.toDisp(max(a, s.base)), s.toDisp(min(z, s.end))
+	if da >= dz {
+		return
+	}
+	for _, rc := range s.layout.LineRects(ui.TextInputRange{Start: da, End: dz}) {
 		rc.X += tx
 		rc.Y += ty
 		fill(rc)

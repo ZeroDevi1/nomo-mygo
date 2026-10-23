@@ -3,9 +3,11 @@ package mdedit
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -436,5 +438,32 @@ func TestRenderObjectsMathAndMermaid(t *testing.T) {
 	tt2.Frame()
 	if en := ed2.imageEntry(ed2.entries[0].rows[0].proj.objs[0]); en == nil || en.state != imageFailed {
 		t.Fatal("无渲染函数时应标记失败")
+	}
+}
+
+func TestSVGWithTextIsRasterized(t *testing.T) {
+	im := NewImages(func(fn func()) { fn() }, DefaultImageBudget)
+	defer im.Close()
+	var got []RenderRequest
+	fail := false
+	im.SetRenderer(func(reqs []RenderRequest) []RenderResult {
+		got = append(got, reqs...)
+		if fail {
+			return []RenderResult{{Err: errors.New("no webview")}}
+		}
+		return []RenderResult{{Img: image.NewRGBA(image.Rect(0, 0, 180, 40)), W: 90, H: 20}}
+	})
+	badge := `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="20"><rect width="90" height="20" fill="#4c1"/><text x="10" y="14">build</text></svg>`
+	res := im.load("data:image/svg+xml," + url.PathEscape(badge))
+	if res.bmp == nil || res.svg != nil || res.w != 90 || res.h != 20 || len(got) != 1 || got[0].Kind != RenderSVG || got[0].W != 90 {
+		t.Fatalf("含文字的 SVG 应栅格化：bmp=%v svg=%v %vx%v 请求 %+v", res.bmp != nil, res.svg != nil, res.w, res.h, got)
+	}
+	plain := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>`
+	if res := im.load("data:image/svg+xml," + url.PathEscape(plain)); res.svg == nil || len(got) != 1 {
+		t.Fatal("不含文字的 SVG 应按矢量显示，不调用渲染")
+	}
+	fail = true
+	if res := im.load("data:image/svg+xml," + url.PathEscape(badge)); res.svg == nil || res.err != nil {
+		t.Fatal("栅格化失败时应退回矢量显示")
 	}
 }

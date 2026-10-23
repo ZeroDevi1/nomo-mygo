@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 func repoFile(t testing.TB, name string) string {
@@ -157,5 +159,93 @@ func TestCRLineEndingsDoNotOverlapBlocks(t *testing.T) {
 		if d.Source() != src {
 			t.Fatal("原文应不变")
 		}
+	}
+}
+
+// TestRecollectMatchesFullParse 用容易改变块结构的片段（懒惰续行、Setext、列表续行、围栏、目录标记、front matter）
+// 随机编辑，逐块对照全量解析，并检查块序号指向当前解析结果中的同一块。
+func TestRecollectMatchesFullParse(t *testing.T) {
+	inserts := []string{"a", "中", "\n", "\n\n", "# ", "- ", "1. ", "> ", "    ", "===\n", "---\n", "```\n", "~~~",
+		"<!-- toc -->\n", "<!-- /toc -->\n", "|a|b|\n|-|-|\n", "  continued", "<div>\n", "[^1]: note\n", "$$\n"}
+	for seed := int64(1); seed <= 6; seed++ {
+		d := NewDocument(repoFile(t, "sample.md"))
+		rng := rand.New(rand.NewSource(seed))
+		for i := 0; i < 300; i++ {
+			s := d.Source()
+			from := runeStartBefore(s, rng.Intn(len(s)+1))
+			to := runeStartBefore(s, min(len(s), from+rng.Intn(12)))
+			if to < from || rng.Intn(3) > 0 {
+				to = from
+			}
+			d.Replace(from, to, inserts[rng.Intn(len(inserts))], editOther)
+			checkIndex(t, d)
+			for k, b := range d.blocks {
+				if b.Kind == KindFrontMatter || b.Kind == KindToc {
+					continue
+				}
+				if pb := d.md.Block(b.Index); pb.Parent != 0 || pb.Start != b.Start || pb.Kind != b.Kind {
+					t.Fatalf("种子 %d 第 %d 次编辑：块 %d 的序号 %d 指向 %+v", seed, i, k, b.Index, pb)
+				}
+			}
+		}
+	}
+}
+
+// TestChunkedTreeMatchesWholeParse 把文档切成很小的段，随机编辑（含会跨段延续的围栏、HTML、公式与引用定义），
+// 逐块、逐行内节点对照整篇解析。
+func TestChunkedTreeMatchesWholeParse(t *testing.T) {
+	ext := parser.Default | parser.ExtDollarMath
+	inserts := []string{"a", "中", "\n", "\n\n", "# ", "- ", "1. ", "> ", "    ", "===\n", "```\n", "~~~\n", "<!-- ",
+		" -->", "<script>\n", "$$\n", "|a|b|\n|-|-|\n", "  continued", "**b**", "[x](y)", "[r]: /u\n", "[^1]: n\n"}
+	var kept []string
+	for _, line := range strings.Split(repoFile(t, "sample.md"), "\n") {
+		if !hasDefinitions(line) { // 含定义的文档不分段
+			kept = append(kept, line)
+		}
+	}
+	sample := strings.Repeat(strings.Join(kept, "\n"), 2)
+	for seed := int64(1); seed <= 6; seed++ {
+		tr := newTree(ext)
+		tr.min, tr.size = 4<<10, 2<<10
+		tr.Set(sample)
+		if seed == 1 && len(tr.chunks) < 8 {
+			t.Fatalf("应切成多段，得到 %d 段", len(tr.chunks))
+		}
+		rng := rand.New(rand.NewSource(seed))
+		for i := 0; i < 250; i++ {
+			s := tr.Source()
+			from := runeStartBefore(s, rng.Intn(len(s)+1))
+			to := from
+			if rng.Intn(3) == 0 {
+				to = runeStartBefore(s, min(len(s), from+rng.Intn(40)))
+			}
+			text := inserts[rng.Intn(len(inserts))]
+			if seed > 3 && strings.HasPrefix(text, "[") && strings.Contains(text, "]:") {
+				text = "x" // 一半种子不引入定义，保持多段，覆盖段内与跨段编辑
+			}
+			tr.Edit(from, to, text)
+			whole := parser.New(ext)
+			whole.Set(tr.Source())
+			if tr.Len() != whole.Len() {
+				t.Fatalf("种子 %d 第 %d 次编辑（%d 段）：块数 %d，整篇 %d", seed, i, len(tr.chunks), tr.Len(), whole.Len())
+			}
+			for g := 1; g < whole.Len(); g++ {
+				a, b := tr.Block(g), whole.Block(g)
+				if a.Kind != b.Kind || a.Start != b.Start || a.End != b.End || a.Parent != b.Parent || a.Next != b.Next || a.Open != b.Open {
+					t.Fatalf("种子 %d 第 %d 次编辑（%d 段）：块 %d 为 %v [%d,%d) p%d n%d，整篇 %v [%d,%d) p%d n%d",
+						seed, i, len(tr.chunks), g, a.Kind, a.Start, a.End, a.Parent, a.Next, b.Kind, b.Start, b.End, b.Parent, b.Next)
+				}
+				ia, ib := tr.Inlines(g), whole.Inlines(g)
+				if len(ia) != len(ib) {
+					t.Fatalf("种子 %d 第 %d 次编辑：块 %d 行内节点 %d 个，整篇 %d 个", seed, i, g, len(ia), len(ib))
+				}
+				for x := range ia {
+					if ia[x].Kind != ib[x].Kind || ia[x].Start != ib[x].Start || ia[x].End != ib[x].End || ia[x].Dest != ib[x].Dest {
+						t.Fatalf("种子 %d 第 %d 次编辑：块 %d 行内节点 %d 为 %+v，整篇 %+v", seed, i, g, x, ia[x], ib[x])
+					}
+				}
+			}
+		}
+		t.Logf("种子 %d：结束时 %d 段", seed, len(tr.chunks))
 	}
 }

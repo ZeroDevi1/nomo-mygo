@@ -157,7 +157,7 @@ func (r *renderService) render(reqs []mdedit.RenderRequest) []mdedit.RenderResul
 		if req.Dark {
 			th = theme[1]
 		}
-		items[k] = map[string]any{"kind": req.Kind, "src": req.Src, "fg": th.fg, "bg": th.bg, "fontSize": req.FontSize, "mermaidTheme": th.mermaid}
+		items[k] = map[string]any{"kind": req.Kind, "src": req.Src, "fg": th.fg, "bg": th.bg, "fontSize": req.FontSize, "mermaidTheme": th.mermaid, "w": req.W, "h": req.H}
 	}
 	arg, _ := json.Marshal(items)
 	res, err := r.evalLocked(ctx, fmt.Sprintf("return await window.nomoRenderBatch(%s, %d)", arg, renderViewport))

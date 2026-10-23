@@ -14,13 +14,15 @@ import (
 // 版式常量。正文字号与内容宽度沿用现版本默认值（16 px、约 760 px），
 // P1 起改由主题令牌提供。
 const (
-	bodySize     = 16
-	maxContentW  = 760
-	minPadX      = 24
-	padTop       = 32
-	paraAfter    = 12
-	monoFamily   = "monospace"
-	scrollbarHit = 12
+	bodySize    = 16
+	maxContentW = 760
+	minPadX     = 24
+	padTop      = 32
+	paraAfter   = 12
+	// defaultLineHeight 为原版正文行高默认值（settings.ts 的 lineHeight: 1.75）。
+	defaultLineHeight = 1.75
+	monoFamily        = "monospace"
+	scrollbarHit      = 12
 	// defaultCacheBudget 是单个编辑器布局缓存的估算字节上限。经验值：
 	// 一屏约 30 块，布局按 96 B/UTF-16 码元估算，8 MB 约可容纳 8 万字的布局，
 	// 足够覆盖可见区上下数屏，超出时按最近使用淘汰。
@@ -204,6 +206,7 @@ type Editor struct {
 	// monoFontFamily。
 	fontBody, fontMono string
 	lineH              float32 // 正文一行高度，用于间隙光标与空行
+	lineMul            float32 // 正文行高倍数（SetLineHeight）；0 为字体原生行高
 	// scale 为字号缩放（正文字号 / 16 × 界面缩放），widthPct 为内容宽度占编辑区宽度的
 	// 百分比（0 表示固定最大 760）；由 SetStyle 设置，变化时全部布局作废。
 	scale    float32
@@ -232,7 +235,7 @@ const (
 
 // NewEditor 创建绑定 doc 的编辑器视图。
 func NewEditor(doc *Document) *Editor {
-	e := &Editor{Doc: doc, seed: maphash.MakeSeed(), dirty: true, anchorOff: -padTop, current: -1}
+	e := &Editor{Doc: doc, seed: maphash.MakeSeed(), dirty: true, anchorOff: -padTop, current: -1, lineMul: defaultLineHeight}
 	e.scale = 1
 	e.measureLine()
 	e.entries = make([]entry, len(doc.blocks))
@@ -276,6 +279,16 @@ func (e *Editor) SetStyle(fontSize, zoomPercent, widthPercent float32) {
 	e.scale, e.widthPct = scale, widthPercent
 	e.measureLine()
 	e.contentW, e.viewW = 0, 0 // 下次 prepare 按新宽度重算
+	e.layoutGen++
+	e.dirty = true
+}
+
+// SetLineHeight 设置正文行高倍数（原版设置 lineHeight，1.4–2.1）；值未变时不做任何事。
+func (e *Editor) SetLineHeight(m float32) {
+	if m == e.lineMul {
+		return
+	}
+	e.lineMul = m
 	e.layoutGen++
 	e.dirty = true
 }
@@ -420,7 +433,7 @@ func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 		_, w := e.rowBox(r)
 		f := e.rowFont(r)
 		lines := 1 + int(textWidth(e.Doc.Source()[top.Start+r.a:top.Start+r.b], f.Size)/w)
-		r.height = r.padTop + r.padBottom + float32(lines)*f.Size*1.4
+		r.height = r.padTop + r.padBottom + float32(lines)*max(f.Size*1.4, e.rowLead(r, f))
 	}
 	if reuse != nil {
 		p := 0
@@ -610,7 +623,7 @@ func (e *Editor) ensureRow(i, k int) bool {
 	} else {
 		spans = e.spans(p, sizes)
 	}
-	l := ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align})
+	l := newLineLayout(ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align}), e.rowLead(r, font))
 	r.objSizes, r.objRects, r.shapeW = sizes, objRects(l, p), w
 	_, lh := l.Size()
 	m := font.Metrics()
@@ -703,7 +716,7 @@ type seg struct {
 	base, end int // 行在原文中的绝对字节区间
 	x, w      float32
 	padTop    float32
-	layout    *ui.TextLayout
+	layout    *lineLayout
 	proj      *projection
 	kind      rowKind
 }
