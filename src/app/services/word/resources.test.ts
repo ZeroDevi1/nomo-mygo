@@ -2,29 +2,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWordResources, readWordImage, withWordAbort } from './resources';
 import { assertWordCanvasSize, WORD_MEDIA_BUDGET, WordBudgetError } from './protocol';
 
-const read = vi.hoisted(() => vi.fn());
-vi.mock('../../../lib/desktop/desktopStorage', () => ({ readFileAsBase64: read }));
-vi.mock('../exportImagePath', () => ({ resolveImagePath: vi.fn(async (path) => ({ absolutePath: path })) }));
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); read.mockReset(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Word resources', () => {
-  it('缺失图片保留失败结果，重复引用只读取一次', async () => {
-    read.mockRejectedValue(new Error('missing'));
+  it('本地路径（原生侧未内联的图片）按缺失处理，重复引用只记一次', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     const warnings = new Set<string>();
     const resources = createWordResources('D:/docs/a.md', new AbortController().signal, warnings);
     const node = { type: 'image', attrs: { src: 'D:/docs/missing.png' } };
     expect(await resources.resolve(node)).toBeNull();
     expect(await resources.resolve(node)).toBeNull();
-    expect(read).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(warnings.size).toBe(1);
     resources.dispose();
     expect(resources.media).toHaveLength(0);
   });
 
-  it('原生读取的预算错误不能降级为成功', async () => {
-    read.mockRejectedValue('[WORD_MEDIA_BUDGET] too large');
-    const resources = createWordResources(null, new AbortController().signal, new Set());
-    await expect(resources.resolve({ type: 'image', attrs: { src: 'D:/large.png' } })).rejects.toBeInstanceOf(WordBudgetError);
+  it('超过预算的 data URL 不能降级为成功', async () => {
+    const huge = 'data:image/png;base64,' + 'A'.repeat(Math.ceil(WORD_MEDIA_BUDGET * 1.5));
+    await expect(readWordImage(huge, null, new AbortController().signal)).rejects.toBeInstanceOf(WordBudgetError);
   });
 
   it('远程请求 8 秒超时会中断底层 fetch', async () => {

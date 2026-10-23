@@ -2,19 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/egoist/mygo"
 
@@ -22,21 +18,17 @@ import (
 	"nomo/desktop/internal/docfs"
 )
 
-// HTML / Word / PDF 导出与“读取文件为 data URL”。PDF 由隐藏窗口加载导出 HTML 后用 WebView
-// 原生打印生成，再根据标题定位链接写入文档书签。
+// PDF 导出：原生外壳生成的导出 HTML 由隐藏窗口加载后用系统 WebView 原生打印，再根据标题定位链接写入
+// 文档书签（pdf_outline.go）。HTML 与 Word 的生成见 desktop/ui/shell/export.go。
 
 const (
-	pdfExportTimeout      = 30 * time.Second
-	pdfExportWindowPrefix = "pdf-export-"
-	millimetersPerInch    = 25.4
-	defaultPDFMarginMM    = 20
+	pdfExportTimeout   = 30 * time.Second
+	millimetersPerInch = 25.4
+	defaultPDFMarginMM = 20
 )
 
 // pdfExportMu 让 PDF 导出串行执行：每次导出都占用一个隐藏 WebView 与原生打印会话。
-var (
-	pdfExportMu       sync.Mutex
-	pdfExportSequence atomic.Uint64
-)
+var pdfExportMu sync.Mutex
 
 type exportResult struct {
 	FilePath     string   `json:"file_path"`
@@ -65,152 +57,6 @@ type exportPDFInput struct {
 	Margins         *pdfMarginsInput  `json:"margins"`
 	PrintBackground *bool             `json:"print_background"`
 	Outline         []pdfOutlineEntry `json:"outline"`
-}
-
-func init() {
-	register("export_html", func(_ *commandCall, args struct {
-		Input struct {
-			HTMLContent string `json:"html_content"`
-			FilePath    string `json:"file_path"`
-		} `json:"input"`
-	}) (*exportResult, error) {
-		if err := os.MkdirAll(filepath.Dir(args.Input.FilePath), 0o755); err != nil {
-			return nil, fmt.Errorf("创建导出目录失败：%w", err)
-		}
-		if err := os.WriteFile(args.Input.FilePath, []byte(args.Input.HTMLContent), 0o644); err != nil {
-			return nil, fmt.Errorf("写入 HTML 文件失败：%w", err)
-		}
-		applog.Info("Export", fmt.Sprintf("已导出 HTML：%s (%d bytes)", args.Input.FilePath, len(args.Input.HTMLContent)))
-		return &exportResult{FilePath: args.Input.FilePath, BytesWritten: len(args.Input.HTMLContent)}, nil
-	})
-	// export_docx 的正文由前端以 base64 传入（原实现以二进制请求体传输）；路径经 URL 编码以保留任意字符。
-	register("export_docx", func(_ *commandCall, args struct {
-		Path        string `json:"path"`
-		BytesBase64 string `json:"bytesBase64"`
-	}) (*exportResult, error) {
-		path, err := decodeWordExportPath(args.Path)
-		if err != nil {
-			return nil, err
-		}
-		data, err := base64.StdEncoding.DecodeString(args.BytesBase64)
-		if err != nil {
-			return nil, errors.New("Word 导出需要二进制数据")
-		}
-		return saveWordDocument(path, data)
-	})
-	register("read_file_as_base64", func(_ *commandCall, args struct {
-		Input struct {
-			Path     string `json:"path"`
-			MaxBytes *int64 `json:"max_bytes"`
-		} `json:"input"`
-	}) (map[string]string, error) {
-		return readFileAsDataURL(args.Input.Path, args.Input.MaxBytes)
-	})
-	register("export_pdf_from_html", func(_ *commandCall, args struct {
-		Input exportPDFInput `json:"input"`
-	}) (*exportResult, error) {
-		if err := os.MkdirAll(filepath.Dir(args.Input.FilePath), 0o755); err != nil {
-			return nil, fmt.Errorf("创建导出目录失败：%w", err)
-		}
-		return runPDFExport(args.Input)
-	})
-}
-
-// decodeWordExportPath 按 URL 百分号编码解码一次，拒绝非 UTF-8、空路径与控制字符。
-func decodeWordExportPath(encoded string) (string, error) {
-	path, err := url.PathUnescape(encoded)
-	if err != nil {
-		return "", errors.New("Word 导出路径编码无效")
-	}
-	if !utf8ValidString(path) {
-		return "", errors.New("Word 导出路径不是 UTF-8")
-	}
-	if path == "" || strings.IndexFunc(path, unicode.IsControl) >= 0 {
-		return "", errors.New("Word 导出路径无效")
-	}
-	return path, nil
-}
-
-func utf8ValidString(value string) bool {
-	return strings.ToValidUTF8(value, "�") == value
-}
-
-// saveWordDocument 校验 .docx 扩展名与 ZIP 头后原子写入，失败时原文件保持不变。
-func saveWordDocument(filePath string, data []byte) (*exportResult, error) {
-	if !strings.EqualFold(filepath.Ext(filePath), ".docx") {
-		return nil, errors.New("Word 导出文件必须使用 .docx 扩展名")
-	}
-	if len(data) < 22 || string(data[:4]) != "PK\x03\x04" {
-		return nil, errors.New("Word 导出数据无效")
-	}
-	if parent := filepath.Dir(filePath); parent != "" {
-		if err := os.MkdirAll(parent, 0o755); err != nil {
-			return nil, fmt.Errorf("创建导出目录失败：%w", err)
-		}
-	}
-	if err := docfs.WriteFileAtomically(filePath, data); err != nil {
-		return nil, err
-	}
-	return &exportResult{FilePath: filePath, BytesWritten: len(data)}, nil
-}
-
-// readFileAsDataURL 读取文件为 data URL；maxBytes 给出时超过预算返回 [WORD_MEDIA_BUDGET] 错误。
-func readFileAsDataURL(path string, maxBytes *int64) (map[string]string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("文件不存在：%s", path)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("路径不是文件：%s", path)
-	}
-	var data []byte
-	if maxBytes != nil {
-		if info.Size() > *maxBytes {
-			return nil, errors.New("[WORD_MEDIA_BUDGET] 图片超过导出预算")
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return nil, fmt.Errorf("读取文件失败：%w", err)
-		}
-		defer file.Close()
-		if data, err = io.ReadAll(io.LimitReader(file, *maxBytes+1)); err != nil {
-			return nil, fmt.Errorf("读取文件失败：%w", err)
-		}
-		if int64(len(data)) > *maxBytes {
-			return nil, errors.New("[WORD_MEDIA_BUDGET] 图片超过导出预算")
-		}
-	} else if data, err = os.ReadFile(path); err != nil {
-		return nil, fmt.Errorf("读取文件失败：%w", err)
-	}
-	mimeType := imageMimeType(path)
-	return map[string]string{
-		"data_url":  "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data),
-		"mime_type": mimeType,
-	}, nil
-}
-
-func imageMimeType(path string) string {
-	switch strings.ToLower(strings.TrimPrefix(filepath.Ext(path), ".")) {
-	case "png":
-		return "image/png"
-	case "jpg", "jpeg":
-		return "image/jpeg"
-	case "gif":
-		return "image/gif"
-	case "webp":
-		return "image/webp"
-	case "svg":
-		return "image/svg+xml"
-	case "bmp":
-		return "image/bmp"
-	case "ico":
-		return "image/x-icon"
-	}
-	return "application/octet-stream"
-}
-
-func isPDFExportWindowLabel(label string) bool {
-	return strings.HasPrefix(label, pdfExportWindowPrefix)
 }
 
 // runPDFExport 在 30 秒期限内完成：渲染 → 校验 → 书签 → 原子写入目标文件。
@@ -287,7 +133,6 @@ func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput)
 		Bottom: marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Bottom }),
 		Left:   marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Left }),
 	}
-	label := fmt.Sprintf("%s%d-%d", pdfExportWindowPrefix, os.Getpid(), pdfExportSequence.Add(1))
 	fileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(htmlPath)}).String()
 	if !strings.HasPrefix(filepath.ToSlash(htmlPath), "/") {
 		fileURL = "file:///" + filepath.ToSlash(htmlPath)
@@ -301,12 +146,7 @@ func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput)
 		Frameless:   true,
 		SkipTaskbar: true,
 	})
-	window := &appWindow{label: label, win: win}
-	windows.add(window)
-	defer func() {
-		windows.remove(window)
-		win.Destroy()
-	}()
+	defer win.Destroy()
 	page := win.Page()
 	page.OnDidFinishLoad(func() {
 		select {

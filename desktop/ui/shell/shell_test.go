@@ -189,17 +189,6 @@ func TestSettingsPagesRender(t *testing.T) {
 		}
 		snapshot(t, tt, "settings-"+cat.id)
 	}
-	// 高级页提供界面引擎切换（默认原生），写入 desktopShell 供下次启动读取。
-	sw.cat = "advanced"
-	tt.Frame()
-	if !tt.HasText(s.tr("desktopShell")) || s.prefs.DesktopShell != "native" {
-		t.Fatalf("高级页应显示界面引擎，默认原生：%q", s.prefs.DesktopShell)
-	}
-	s.prefs.DesktopShell = "webview"
-	s.setPref("desktopShell")
-	if v, _ := s.cfg.Setting("desktopShell"); v != `"webview"` {
-		t.Fatalf("界面引擎未写入：%s", v)
-	}
 	// 切换开关立即写入配置。
 	sw.cat = "stats"
 	tt.Frame()

@@ -11,7 +11,6 @@ build/
 /.mygo/
 # 旧 Tauri 外壳的本地构建缓存
 /src-tauri/
-src/lib/desktop/runtime/bindings.gen.ts
 desktop/packaging/windows-shell-extension/bin/
 desktop/packaging/windows-shell-extension/obj/
 desktop/packaging/windows-shell-extension/obj-tests/

@@ -452,7 +452,7 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 
 ### 9.20 原生外壳设为默认界面（2026-10-23）
 
-- **选择顺序**（`nativeShellRequested`）：命令行 `--webview` / `--native`（临时，不写设置）→ 环境变量 `NOMO_SHELL=webview|native`（兼容 `NOMO_NATIVE=1|0`）→ 设置 `desktopShell`（两种外壳的“高级 → 渲染”都可切换，重启后生效）→ 默认原生。启动日志记录所选界面。实机验证（release、隔离 HOME）：默认 → 原生；`--webview` → WebView；设置为 WebView → WebView；设置为 WebView 时 `--native` → 原生。
+- （9.22 起已移除 WebView 界面与下述切换方式。）**选择顺序**（`nativeShellRequested`）：命令行 `--webview` / `--native`（临时，不写设置）→ 环境变量 `NOMO_SHELL=webview|native`（兼容 `NOMO_NATIVE=1|0`）→ 设置 `desktopShell`（两种外壳的“高级 → 渲染”都可切换，重启后生效）→ 默认原生。启动日志记录所选界面。实机验证（release、隔离 HOME）：默认 → 原生；`--webview` → WebView；设置为 WebView → WebView；设置为 WebView 时 `--native` → 原生。
 - WebView 外壳与其前端保留为回退，打包内容不变。
 
 **原生版相对 WebView 版仍缺少的功能**（按影响排序；“未验证”指已实现但未在真机窗口操作过）
@@ -475,4 +475,12 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **标题栏布局同原版 AppTitleBar**：侧栏开关、应用名、菜单；右侧小窗、主题切换、设置，再右为系统窗口按钮。去掉居中的文档名（标签上已有）；模式切换、查找与大纲开关移到格式工具栏右侧（同原版 EditorToolbar）。macOS 统一标题栏不变。
 - **工具栏按宽度收起**：按原版容器断点的顺序，宽度不足时先收起插入组（表格至折叠块），再收起中间组（行内注释至任务），最后收起核心格式组；宽度按上一帧工具栏宽度与按钮估算宽度判断（`toolbarFit`）。
 - 验证：无头渲染 Windows 布局 1330×870、1180×760、920×700（`TestWindowsTitleBarLayout`），`GOOS=windows go vet`；未在 Windows 真机复测。
+
+### 9.22 移除 WebView 界面（2026-10-23）
+
+原生界面成为唯一界面，WebView 界面与其 IPC 层删除：
+- **Go**：入口只启动原生界面，去掉 `--webview` / `NOMO_SHELL` / 设置 `desktopShell`。删除前端调用层（`bridge.go`、`commands_*.go`）、WebView 窗口与生命周期（`windows.go`、`lifecycle.go`、`window_state.go`、`menu.go`、`settings_window.go`、`open_targets.go`）、标签拖动与移交（`tab_drag*.go`、`tab_transfer.go`）、大文档正文协议（`document_content.go`）、分段大文件引擎（`internal/textdoc`）、Windows 文件关联与右键菜单命令（`windows_integration*.go`）、应用内下载安装与安装后更新日志（`software_update.go` → 只保留检查的 `update_check.go`，安装形态判断移到 `installation_*.go`）、仓库根的更新日志嵌入（`embedded.go`）。`external_open.go`、`tray.go`、`export.go` 只留原生界面用到的部分。
+- **前端**：只构建离屏渲染页 `render.html`（KaTeX、Mermaid、Word 导出）。按依赖图从渲染页、排版运行时（`scripts/typography-runtime-plugin.ts`）、主题生成（`scripts/generate-native-themes.mjs`）与文案生成（`scripts/generate-native-messages.mjs`）读取的源文件出发，删除不可达的源文件与只测试它们的用例（共 340 余个文件，含 Svelte 界面、ProseMirror 编辑器、桌面 IPC 适配与旧 Quick Look 渲染页）。Word 导出不再经 IPC 读取本地图片（原生侧导出前已内联为 data URL）。
+- 原生界面对 WebView 版的缺口见 9.20 清单；其中第 1 项（Windows 文件关联/右键菜单）的后端已随 WebView 删除，补做时从 git 历史（`desktop/windows_integration_windows.go`）恢复。
+- 验证：Go `vet` / `test`（macOS、`GOOS=windows`、`GOOS=linux` 编译）、`pnpm check`、前端保留的 18 个测试文件（228 个用例通过 227 个；失败的 1 个 `htmlClassifier` 用例在删除前已失败）、`mygo build`（.app 47 MB → 31 MB）。未做真机验证：另一会话当时正用 `/Applications/Nomo MyGo.app` 跑测且占用单实例锁。`scripts/msix/Build-Msix.ps1` 仍读取 Tauri 时期的 `src-tauri` 配置，迁移到 MyGo 时已失效，未改。
 

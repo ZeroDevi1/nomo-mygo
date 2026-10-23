@@ -29,8 +29,8 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // render.html 是原生外壳的离屏渲染页（公式与 Mermaid），与主界面共享依赖分块。
-      input: { main: 'index.html', render: 'render.html' },
+      // 前端只剩原生界面的离屏渲染页：公式、Mermaid 与 Word 导出（desktop/ui/shell/render.go 以隐藏窗口加载）。
+      input: { render: 'render.html' },
     },
   },
   server: {

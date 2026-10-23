@@ -12,7 +12,6 @@ export default defineConfig({
   icon: 'desktop/packaging/icons/nomo/source/nomo-app-light-1024.png',
   main: './desktop',
   out: 'target/mygo',
-  bindings: 'src/lib/desktop/runtime/bindings.gen.ts',
 
   devUrl: 'http://127.0.0.1:5173',
   devCommand: 'pnpm dev',

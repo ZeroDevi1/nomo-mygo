@@ -9,7 +9,6 @@
     "icons:generate": "node scripts/generate-icons.mjs",
     "dev": "pnpm exec paraglide-js compile && vite --host 0.0.0.0",
     "build": "pnpm exec paraglide-js compile && vite build",
-    "build:quicklook-renderer": "vite build --config vite.quicklook.config.ts",
     "build:quicklook-extension": "bash scripts/build-macos-quicklook.sh",
     "build:macos": "bash scripts/build-macos.sh",
     "preview": "vite preview --host 0.0.0.0",

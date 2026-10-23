@@ -61,14 +61,13 @@ See [release notes](https://github.com/nomo-md/nomo/releases) for version change
 
 ## Development
 
-Built with Tauri 2 + Svelte 5. Requires Node.js 22, pnpm 11.5.1 and Rust / Cargo.
+The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`); math, Mermaid and Word export run in a bundled offscreen render page (`render.html`). Requires Go 1.27, Node.js 22 and pnpm 11.5.1.
 
-- Windows: Visual Studio 2022 Build Tools or the full Visual Studio.
 - macOS: Xcode Command Line Tools; building the Quick Look extension requires the full Xcode.
 
 ```bash
 pnpm install
-pnpm tauri dev
+pnpm desktop:dev
 ```
 
 ## Get Involved
@@ -79,4 +78,4 @@ Enjoy Nomo? [Star the project](https://github.com/nomo-md/nomo) or follow [LIXia
 
 Licensed under [AGPL-3.0-or-later](./LICENSE); contact the maintainers for separate commercial licensing. Third-party components retain their own licenses.
 
-Thanks to Tauri, Svelte, ProseMirror, CodeMirror, markdown-it, Shiki, KaTeX, Mermaid and other open-source projects.
+Thanks to MyGo, markdown-it, KaTeX, Mermaid, docx and other open-source projects.

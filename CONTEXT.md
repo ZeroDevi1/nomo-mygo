@@ -25,7 +25,7 @@ _Avoid_: 纯源码编辑、左右分栏预览、完全所见即所得
 _Avoid_: 格式化文档、清除块结构、重置整篇文档
 
 **搜索与替换**:
-当前打开文档内的文字查找、跳转、单次替换和全部替换能力；语义编辑模式通过 EditorCore 操作运行时编辑文档，源码模式操作 Markdown 原文。
+当前打开文档内的文字查找、跳转、单次替换和全部替换能力；两种模式都直接操作 Markdown 原文。
 _Avoid_: 跨文件全文搜索、SQLite FTS 索引、资源管理器搜索
 
 **快捷插入**:
@@ -36,17 +36,9 @@ _Avoid_: 斜杠命令搜索、拼音搜索、全局命令面板
 用户可切换到 Markdown 原文编辑形态，以处理保真、调试或高级语法场景。
 _Avoid_: 原始模式、调试模式
 
-**EditorCore**:
-面向应用层的稳定编辑器 API 边界，封装编辑命令、状态订阅、Markdown 读写和渲染服务接入。
-_Avoid_: ProseMirror 直连层、UI 适配器
-
-**ProseMirror Adapter**:
-EditorCore 内部的具体编辑内核实现，负责把编辑命令转换为 ProseMirror 的事务、插件和 NodeView 行为。
-_Avoid_: 编辑器核心、业务编辑层
-
-**MarkdownBridge**:
-负责 Markdown 文本与运行时编辑文档之间双向转换的桥接层。
-_Avoid_: 文件存储层、渲染服务
+**语义编辑器（mdedit）**:
+原生界面中的编辑器（`desktop/ui/mdedit`）：Markdown 原文是唯一事实源，按块解析投影为可编辑的语义视图，编辑命令直接改写原文。
+_Avoid_: 富文本文档模型、ProseMirror 文档（随已移除的 WebView 界面一同废弃）
 
 **渲染服务**:
 图片、代码高亮、数学公式和图表等非文本能力的统一接入接口。
@@ -193,14 +185,13 @@ _Avoid_: 关闭窗口、隐藏到托盘
 - **Nomo** 以 **Markdown-first** 作为产品和数据原则。
 - **Windows-first** 约束第一版的桌面能力验收顺序，但不否定后续跨平台支持。
 - **语义编辑** 与 **源码模式** 是同一份 Markdown 文档的两种编辑形态。
-- **EditorCore** 对应用层暴露稳定接口，并隐藏 **ProseMirror Adapter** 的实现细节。
-- **MarkdownBridge** 在 Markdown 文本与 **ProseMirror Adapter** 的运行时文档之间转换。
+- **语义编辑器（mdedit）** 直接在 Markdown 原文上编辑，界面（`desktop/ui/shell`）通过其公开接口调用编辑命令。
 - **渲染服务** 只负责派生预览，不改变 **本地主存储** 的主内容。
 - **Outline** 和 **写作统计** 都从 Markdown 文本派生，不参与主存储。
 - **资源管理器** 属于文件导航区域；**Outline** 属于内容区内的跟随导航，不应与左侧文件树合并。
 - **安装示例文档** 是首次启动体验的一次性入口；复制后的文件成为普通 **本地主存储** 文档，但不会创建或绑定 **应用级默认存储根目录**。
 - **Task List**、**脚注**、**行内代码**、**超链接**、**基础表格**、**数学公式**、**Mermaid 图表** 和 **Callout** 都必须以 Markdown 文本为主数据。
-- **表格内联控件** 只操作当前 **基础表格** 的运行时编辑状态，并通过 **EditorCore** 回写到 Markdown 文本。普通矩形表格使用 pipe table；无表头、合并单元格、逐格不同对齐或列宽等无法由 pipe table 表达的结构使用嵌入 HTML，并可还原为语义表格。
+- **表格内联控件** 只操作当前 **基础表格**，并直接改写 Markdown 原文。普通矩形表格使用 pipe table；无表头、合并单元格、逐格不同对齐或列宽等无法由 pipe table 表达的结构使用嵌入 HTML，并可还原为语义表格。
 - **Front matter** 属于文档元数据，需要在语义编辑事务中保留。
 - **Markdown 注释** 与 **HTML 块** 使用相近源码外形，但语义不同；注释表达作者备注，HTML 块表达可保留或渲染的结构化 HTML 内容。
 - **辅助数据层** 可以索引和缓存 **本地主存储**，但不能替代 `.md` 文件。
@@ -221,8 +212,8 @@ _Avoid_: 关闭窗口、隐藏到托盘
 > **Dev:** “图片粘贴进编辑器后，是不是把图片 base64 写进 Markdown？”
 > **Domain expert:** “不是。图片进入资源目录，Markdown 只保存相对路径。这样才符合 **Markdown-first** 和 **本地主存储** 的边界。”
 
-> **Dev:** “Svelte 组件能不能直接调用 ProseMirror 的 `view.state`？”
-> **Domain expert:** “不能。应用层只调用 **EditorCore**，ProseMirror 通过 **ProseMirror Adapter** 隔离，避免未来替换内核时牵动 UI。”
+> **Dev:** “界面能不能直接改编辑器内部的行与布局缓存？”
+> **Domain expert:** “不能。界面只调用 **语义编辑器（mdedit）** 的公开接口，原文改写、撤销与重排都由编辑器负责。”
 
 ## Flagged ambiguities
 

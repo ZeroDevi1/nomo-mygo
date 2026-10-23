@@ -61,14 +61,13 @@ brew install --cask nomo
 
 ## 开发
 
-使用 Tauri 2 + Svelte 5 构建，需要 Node.js 22、pnpm 11.5.1 和 Rust / Cargo。
+界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`）；公式、Mermaid 与 Word 导出由随包的离屏渲染页完成（`render.html`）。需要 Go 1.27、Node.js 22 与 pnpm 11.5.1。
 
-- Windows：Visual Studio 2022 Build Tools 或完整 Visual Studio。
 - macOS：Xcode Command Line Tools；构建 Quick Look 扩展需要完整 Xcode。
 
 ```bash
 pnpm install
-pnpm tauri dev
+pnpm desktop:dev
 ```
 
 ## 参与项目
@@ -79,4 +78,4 @@ pnpm tauri dev
 
 采用 [AGPL-3.0-or-later](./LICENSE) 许可证；商业授权请联系维护者，第三方组件遵循各自许可证。
 
-感谢 Tauri、Svelte、ProseMirror、CodeMirror、markdown-it、Shiki、KaTeX、Mermaid 等开源项目。
+感谢 MyGo、markdown-it、KaTeX、Mermaid、docx 等开源项目。

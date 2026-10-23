@@ -1,6 +1,4 @@
-import { readFileAsBase64 } from '../../../lib/desktop/desktopStorage';
 import { t } from '../../i18n';
-import { resolveImagePath } from '../exportImagePath';
 import { assertWordCanvasSize, WORD_CONTENT_WIDTH_PX, WORD_MEDIA_BUDGET, WordBudgetError, type WordMedia, type WordNode } from './protocol';
 
 const TIMEOUT = 8_000;
@@ -24,27 +22,14 @@ export function withWordAbort<T>(promise: Promise<T>, signal: AbortSignal, timeo
   });
 }
 
-export async function readWordImage(src: string, documentPath: string | null, signal: AbortSignal, maxBytes = WORD_MEDIA_BUDGET): Promise<Blob> {
+/**
+ * 读取 Word 导出用的图片。原生界面导出前已把本地图片替换为 data URL（离屏渲染页没有读取本地文件的接口），
+ * 这里只处理 data:、blob: 与 http(s) 地址；其他地址按缺失图片处理（documentPath 保留以兼容调用方签名）。
+ */
+export async function readWordImage(src: string, _documentPath: string | null, signal: AbortSignal, maxBytes = WORD_MEDIA_BUDGET): Promise<Blob> {
   signal.throwIfAborted();
-  let url = src.trim();
-  const isAsset = /^(?:asset:\/\/|https?:\/\/asset\.localhost\/)/i.test(url);
-  if (!isAsset && !/^(?:https?:|data:|blob:)/i.test(url)) {
-    if (/^file:/i.test(url)) {
-      const parsed = new URL(url);
-      url = decodeURIComponent(parsed.pathname);
-      if (/^\/[a-z]:\//i.test(url)) url = url.slice(1);
-      if (parsed.hostname) url = `//${parsed.hostname}${url}`;
-    }
-    const result = await resolveImagePath(url, documentPath);
-    signal.throwIfAborted();
-    if (!result.absolutePath) throw new Error('missing-image');
-    const data = await readFileAsBase64(result.absolutePath, maxBytes).catch((error) => {
-      if (String(error).includes('[WORD_MEDIA_BUDGET]')) throw new WordBudgetError('media');
-      throw error;
-    });
-    signal.throwIfAborted();
-    url = data.data_url;
-  }
+  const url = src.trim();
+  if (!/^(?:https?:|data:|blob:)/i.test(url)) throw new Error('missing-image');
   if (url.startsWith('data:') && url.length > maxBytes * 1.4) throw new WordBudgetError('media');
   const controller = new AbortController();
   const abort = () => controller.abort();

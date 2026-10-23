@@ -44,7 +44,7 @@
 
 针对性回归入口：
 
-启动 `pnpm dev` 后打开 `/scripts/fixtures/kp-typography.html` 可重放浏览器原型检查。该独立测试页明确开启精细模式，不改变发布默认值；组合事件按钮仅模拟生命周期，不等于真实中文输入法验收。
+（原 WebView 编辑器的浏览器原型页 `scripts/fixtures/kp-typography.html` 已随 WebView 界面移除。）
 
 ```powershell
 pnpm exec vitest run src/lib/typography src/lib/editor-core/typography.test.ts src/app/services/exportService.test.ts src/app/services/settings.test.ts src/quicklook/preview.test.ts src/lib/editor-core/createEditorCore.test.ts src/lib/editor-core/markdown.test.ts src/lib/editor-core/clipboardMarkdown.test.ts

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 
 	"github.com/egoist/mygo"
 
@@ -15,46 +14,7 @@ import (
 	"nomo/desktop/ui/shell"
 )
 
-// 原生外壳入口：默认界面。WebView 外壳（Svelte 前端）作为回退保留，选择顺序（先到先得）：
-//  1. 命令行 `--webview` / `--native`（临时切换，不写设置）；
-//  2. 环境变量 NOMO_SHELL=webview|native，兼容旧的 NOMO_NATIVE=1|0；
-//  3. 设置 desktopShell（两种外壳的“高级”设置页都可修改，重启后生效）；
-//  4. 默认原生。
-
-const (
-	nativeFlag  = "--native"
-	webviewFlag = "--webview"
-)
-
-// nativeShellRequested 按上述顺序决定是否启动原生外壳；setting 为磁盘上 desktopShell 的 JSON 值（未设置时为空）。
-func nativeShellRequested(args []string, getenv func(string) string, setting string) bool {
-	switch {
-	case slices.Contains(args, webviewFlag):
-		return false
-	case slices.Contains(args, nativeFlag):
-		return true
-	}
-	switch getenv("NOMO_SHELL") {
-	case "webview":
-		return false
-	case "native":
-		return true
-	}
-	switch getenv("NOMO_NATIVE") {
-	case "0":
-		return false
-	case "1":
-		return true
-	}
-	return setting != `"webview"`
-}
-
-// stripShellFlags 去掉外壳选择参数，其余参数按外部打开目标处理。
-func stripShellFlags(args []string) []string {
-	return slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == nativeFlag || a == webviewFlag })
-}
-
-// runNativeShell 打开原生外壳窗口并运行到退出。数据目录、配置、日志与单实例锁已由 main
+// runNativeShell 打开原生界面窗口并运行到退出。数据目录、配置、日志与单实例锁已由 main
 // 初始化；外部打开（启动参数、第二实例、macOS 打开文件事件）直接交给外壳。
 func runNativeShell(args []string) {
 	// 渲染模式（原版设置 renderMode）：选择软件渲染时让 MyGo 在 CPU 上绘制，须在创建窗口前设置。
@@ -62,7 +22,7 @@ func runNativeShell(args []string) {
 		os.Setenv("MYGO_GPU", "0")
 		applog.Info("Native", "已启用软件渲染模式")
 	}
-	targets := collectExternalOpenTargets(stripShellFlags(args), mustGetwd())
+	targets := collectExternalOpenTargets(args, mustGetwd())
 	var sh *shell.Shell
 	var win *mygo.Window
 	// 第二实例与打开文件事件投递到最近聚焦的外壳窗口（多窗口时第一个窗口可能已关闭）。
@@ -135,17 +95,13 @@ func exportNativePDF(html, path string, outline []shell.PDFOutlineEntry) error {
 	return err
 }
 
-// checkNativeUpdate 复用 WebView 版的更新检查（GitHub Release、代理回退与安装方式判断）。
+// checkNativeUpdate 检查新版本（见 update_check.go）；有新版本时外壳打开发布页。
 func checkNativeUpdate() (shell.UpdateInfo, error) {
-	p, err := checkSoftwareUpdate("native", false)
+	p, err := checkSoftwareUpdate()
 	if err != nil {
 		return shell.UpdateInfo{}, err
 	}
-	info := shell.UpdateInfo{Supported: p.Supported && p.InstallationKind != installationStore, Available: p.Available}
-	if p.Version != nil {
-		info.Version = *p.Version
-	}
-	return info, nil
+	return shell.UpdateInfo{Supported: p.Supported, Available: p.Available, Version: p.Version}, nil
 }
 
 // installNativeTray 为原生外壳创建托盘：单击恢复主窗口（Linux 只能显示菜单），菜单为“打开 Nomo / 退出”，
