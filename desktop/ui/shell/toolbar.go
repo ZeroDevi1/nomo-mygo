@@ -25,6 +25,37 @@ const (
 	tablePickerCols = 6 // 原版 tableColumns = [1..6]
 )
 
+// 工具栏各部分的估算宽度（DIP），用于按可用宽度收起分组（原版 app-responsive.css 的容器断点：先收起插入组，
+// 再收起中间组，最后收起核心格式组）。toolBtnW 为图标按钮（16 图标 + 内边距 10 + 间隔 1），segmentedW 为三段
+// 模式切换（中文标签 12 号字实测约 180）。调整按钮或字号时同步修改。
+const (
+	toolBtnW   = 27
+	toolDivW   = 13
+	widthBtnW  = 64
+	segmentedW = 186
+)
+
+// toolbarFit 返回在宽度 w 内显示哪些分组；w 为 0（首帧尚未布局）时全部显示。tools 为右侧是否含模式切换、查找与大纲。
+func toolbarFit(w float32, emoji, tools bool) (core, medium, low bool) {
+	if w <= 0 {
+		return true, true, true
+	}
+	right := float32(widthBtnW + 20) // 内容宽度按钮与左右内边距
+	if emoji {
+		right += toolBtnW
+	}
+	if tools {
+		right += toolDivW + segmentedW + 6 + 2*toolBtnW
+	}
+	coreW := float32(9 * toolBtnW)
+	mediumW := float32(5*toolBtnW + toolDivW)
+	lowW := float32(7*toolBtnW + toolDivW)
+	core = right+coreW <= w
+	medium = core && right+coreW+mediumW <= w
+	low = medium && right+coreW+mediumW+lowW <= w
+	return
+}
+
 func (s *Shell) toolbar(c *ui.Context) {
 	disabled := s.mode() != modeSemantic
 	button := func(icon, tip string, on bool) ui.Element {
@@ -34,7 +65,10 @@ func (s *Shell) toolbar(c *ui.Context) {
 		}
 		return b
 	}
-	ui.Row(c).Height(toolbarH).FillWidth().Padding(0, 10).Gap(1).AlignItems(ui.Center).Children(func() {
+	row := ui.Row(c).Height(toolbarH).FillWidth().Padding(0, 10).Gap(1).AlignItems(ui.Center)
+	// 按上一帧的工具栏宽度决定显示哪些分组；收起的命令仍可从菜单、快捷键与快捷插入使用。
+	showCore, showMedium, showLow := toolbarFit(row.Bounds().W, s.loadEmoji != nil, !s.pf.mac)
+	row.Children(func() {
 		group := func(items ...[3]string) {
 			for _, it := range items {
 				if button(it[0], it[1], false).Clicked() {
@@ -43,41 +77,20 @@ func (s *Shell) toolbar(c *ui.Context) {
 			}
 		}
 		divider := func() { ui.Box(c).Size(1, 16).Background(s.ch.separator).Margin(0, 6) }
-		group([3]string{"heading-1", s.tr("setHeadingOne"), "heading1"},
-			[3]string{"bold", s.tr("toggleBold"), "bold"}, [3]string{"italic", s.tr("toggleItalic"), "italic"},
-			[3]string{"strikethrough", s.tr("toggleStrikethrough"), "strikethrough"}, [3]string{"underline", s.tr("toggleUnderline"), "underline"},
-			[3]string{"highlighter", s.tr("toggleHighlight"), "highlight"},
-			[3]string{"superscript", s.tr("toggleSuperscript"), "superscript"}, [3]string{"subscript", s.tr("toggleSubscript"), "subscript"},
-			[3]string{"link", s.tr("editLink"), "link"})
-		divider()
-		group([3]string{"message-square", s.tr("insertInlineComment"), "inlineComment"},
-			[3]string{"quote", s.tr("toggleQuote"), "quote"}, [3]string{"info", s.tr("insertCallout"), "callout"},
-			[3]string{"list", s.tr("toggleList"), "unorderedList"}, [3]string{"square-check", s.tr("toggleTaskList"), "taskList"})
-		divider()
-		s.tablePicker(c, button("table-2", s.tr("insertTable"), s.tbar.tableOpen))
-		group([3]string{"code-xml", s.tr("insertCodeBlock"), "codeBlock"})
-		button("sigma", s.tr("insertMathFormula"), false).Menu(func(m *ui.Menu) {
-			if m.Item(s.tr("mathInline") + "  $…$").Chosen() {
-				s.run("mathInline")
-			}
-			if m.Item(s.tr("mathBlock") + "  $$…$$").Chosen() {
-				s.run("mathBlock")
-			}
-		})
-		button("braces", s.tr("insertDiagram"), false).Menu(func(m *ui.Menu) {
-			if m.Item(s.tr("blankDiagram")).Chosen() {
-				s.insertDiagram("")
-			}
-			m.Separator()
-			for i, typ := range diagramTypes {
-				if m.Item(s.tr(diagramLabels[i])).Chosen() {
-					s.insertDiagram(diagramTemplates[typ])
-				}
-			}
-		})
-		group([3]string{"superscript", s.tr("insertFootnote"), "footnote"}, [3]string{"table-of-contents", s.tr("insertToc"), "toc"},
-			[3]string{"panel-top-close", s.tr("insertDetails"), "details"})
-		// 表情与内容宽度与原版一样位于工具栏右侧。
+		if showCore {
+			s.toolbarCore(c, group)
+		}
+		if showMedium {
+			divider()
+			group([3]string{"message-square", s.tr("insertInlineComment"), "inlineComment"},
+				[3]string{"quote", s.tr("toggleQuote"), "quote"}, [3]string{"info", s.tr("insertCallout"), "callout"},
+				[3]string{"list", s.tr("toggleList"), "unorderedList"}, [3]string{"square-check", s.tr("toggleTaskList"), "taskList"})
+		}
+		if showLow {
+			divider()
+			s.toolbarInserts(c, button, group)
+		}
+		// 表情、内容宽度与文档工具与原版一样位于工具栏右侧。
 		ui.Box(c).Grow(1)
 		if s.loadEmoji != nil {
 			if b := button("smile", s.tr("emojiInsert"), s.emo.picker); b.Clicked() {
@@ -86,8 +99,49 @@ func (s *Shell) toolbar(c *ui.Context) {
 			}
 		}
 		s.widthControl(c)
+		if !s.pf.mac {
+			divider()
+			s.documentTools(c)
+		}
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+}
+
+// toolbarCore 是核心格式组（原版 toolbar-group-core）。
+func (s *Shell) toolbarCore(c *ui.Context, group func(items ...[3]string)) {
+	group([3]string{"heading-1", s.tr("setHeadingOne"), "heading1"},
+		[3]string{"bold", s.tr("toggleBold"), "bold"}, [3]string{"italic", s.tr("toggleItalic"), "italic"},
+		[3]string{"strikethrough", s.tr("toggleStrikethrough"), "strikethrough"}, [3]string{"underline", s.tr("toggleUnderline"), "underline"},
+		[3]string{"highlighter", s.tr("toggleHighlight"), "highlight"},
+		[3]string{"superscript", s.tr("toggleSuperscript"), "superscript"}, [3]string{"subscript", s.tr("toggleSubscript"), "subscript"},
+		[3]string{"link", s.tr("editLink"), "link"})
+}
+
+// toolbarInserts 是插入组（原版 toolbar-group-low）：表格、代码块、公式、图表、脚注、目录与折叠块。
+func (s *Shell) toolbarInserts(c *ui.Context, button func(icon, tip string, on bool) ui.Element, group func(items ...[3]string)) {
+	s.tablePicker(c, button("table-2", s.tr("insertTable"), s.tbar.tableOpen))
+	group([3]string{"code-xml", s.tr("insertCodeBlock"), "codeBlock"})
+	button("sigma", s.tr("insertMathFormula"), false).Menu(func(m *ui.Menu) {
+		if m.Item(s.tr("mathInline") + "  $…$").Chosen() {
+			s.run("mathInline")
+		}
+		if m.Item(s.tr("mathBlock") + "  $$…$$").Chosen() {
+			s.run("mathBlock")
+		}
+	})
+	button("braces", s.tr("insertDiagram"), false).Menu(func(m *ui.Menu) {
+		if m.Item(s.tr("blankDiagram")).Chosen() {
+			s.insertDiagram("")
+		}
+		m.Separator()
+		for i, typ := range diagramTypes {
+			if m.Item(s.tr(diagramLabels[i])).Chosen() {
+				s.insertDiagram(diagramTemplates[typ])
+			}
+		}
+	})
+	group([3]string{"superscript", s.tr("insertFootnote"), "footnote"}, [3]string{"table-of-contents", s.tr("insertToc"), "toc"},
+		[3]string{"panel-top-close", s.tr("insertDetails"), "details"})
 }
 
 // insertDiagram 插入 Mermaid 图表：code 为空时插入空白图表并把光标放进代码块（原版 insertMermaidBlock），否则插入模板。

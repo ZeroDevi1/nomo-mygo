@@ -11,8 +11,9 @@ import (
 //
 //   - macOS：系统菜单栏（窗口内不画菜单）、交通灯位于侧栏顶部、侧栏使用 vibrancy
 //     材质（与 Finder、备忘录一致）、统一的标题栏工具区、13 pt 系统字体、系统强调色。
-//   - Windows 11：标题栏内菜单（文件/编辑/格式/查看）、Mica 材质窗口、内容区为圆角
-//     卡片、14 pt Segoe UI、4 px 圆角、系统强调色。
+//   - Windows 11：标题栏内菜单（文件/编辑/格式/查看）、不透明的 Mica 底色（不用系统 Mica 材质：
+//     MyGo 用 Mica 时把整个窗口框架扩展进客户区，开启“在标题栏和窗口边框上显示强调色”后，透明的
+//     标题栏与侧栏会透出强调色）、内容区为圆角卡片、14 pt Segoe UI、4 px 圆角、系统强调色。
 //   - Linux：Adwaita 风格的标题栏与配色，菜单在标题栏内。
 type platform struct {
 	mac, windows  bool
@@ -26,7 +27,7 @@ func currentPlatform() platform {
 	case "darwin":
 		return platform{mac: true, titleH: 52, vibrancy: mygo.VibrancySidebar}
 	case "windows":
-		return platform{windows: true, menusInWindow: true, titleH: 40, vibrancy: mygo.VibrancyMica}
+		return platform{windows: true, menusInWindow: true, titleH: 40, vibrancy: mygo.VibrancyNone}
 	}
 	return platform{menusInWindow: true, titleH: 46}
 }

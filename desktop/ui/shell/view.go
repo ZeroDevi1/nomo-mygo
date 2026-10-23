@@ -182,14 +182,34 @@ func (s *Shell) macTabs(c *ui.Context) {
 func (s *Shell) desktopLayout(c *ui.Context) {
 	bar := c.TitleBar()
 	ui.Column(c).Fill().Background(s.ch.paint(s.ch.titlebar, true)).Children(func() {
-		ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, bar.Right+8, 0, bar.Left+8).Gap(2).
+		// 标题栏同原版 AppTitleBar（Windows）：侧栏开关、应用名与菜单，右侧小窗、主题与设置；文档名在标签上，
+		// 模式切换、查找与大纲在格式工具栏右侧（toolbarTrailing）。
+		ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, bar.Right+8, 0, bar.Left+6).Gap(2).
 			AlignItems(ui.Center).DragWindow().Children(func() {
-			ui.Text(c, "Nomo").FontSize(12).Bold().Padding(0, 8, 0, 4)
+			hide := "hideExplorerSidebar"
+			if s.prefs.SidebarHidden {
+				hide = "showExplorerSidebar"
+			}
+			if s.toolButton(c, "panel-left", s.tr(hide), false).Clicked() {
+				s.toggleSidebar()
+			}
+			ui.Text(c, "Nomo").FontSize(12).Bold().Padding(0, 6, 0, 4)
 			s.menus(c)
 			ui.Spacer(c)
-			s.titleText(c)
-			ui.Spacer(c)
-			s.trailingTools(c)
+			if s.activeTab() != nil && s.toolButton(c, "picture-in-picture-2", s.tr("markdownMiniShortcut"), false).Clicked() {
+				s.toggleMini()
+			}
+			dark := c.Theme().Dark
+			icon := "moon"
+			if dark {
+				icon = "sun"
+			}
+			if s.toolButton(c, icon, s.tr("switchTheme"), false).Clicked() {
+				s.toggleTheme(dark)
+			}
+			if s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
+				s.openSettings()
+			}
 		})
 		ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
 			card := func() {
@@ -322,6 +342,7 @@ func (s *Shell) tabMenu(el ui.Element, tab *Tab) {
 	})
 }
 
+// titleText 是 macOS 统一标题栏中的文档名（有未保存修改时附注）。
 func (s *Shell) titleText(c *ui.Context) {
 	title := "Nomo"
 	if tab := s.activeTab(); tab != nil {
@@ -330,40 +351,39 @@ func (s *Shell) titleText(c *ui.Context) {
 			title += " — " + s.tr("unsavedChanges")
 		}
 	}
-	txt := ui.Text(c, title).FontSize(13).SingleLine().Shrink(1)
-	if s.pf.mac {
-		txt.Bold()
-	} else {
-		txt.TextColor(s.ch.muted).FontSize(12)
+	ui.Text(c, title).FontSize(13).Bold().SingleLine().Shrink(1)
+}
+
+// trailingTools 是 macOS 统一标题栏右侧：文档工具与设置。
+func (s *Shell) trailingTools(c *ui.Context) {
+	s.documentTools(c)
+	if s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
+		s.openSettings()
 	}
 }
 
-// trailingTools 是标题栏右侧：模式切换、查找、大纲、侧栏（Windows / Linux）、设置。
-func (s *Shell) trailingTools(c *ui.Context) {
-	if t := s.activeTab(); t != nil {
-		modes := []string{modeSemantic, modeSource, modeSplit}
-		mode := 0
-		for k, m := range modes {
-			if s.prefs.EditorMode == m {
-				mode = k
-			}
-		}
-		if t.Kind() == kindMarkdown && ui.Segmented(c, &mode, s.tr("semanticEditing"), s.tr("sourceMode"), s.tr("splitMode")).FontSize(12).Changed() {
-			s.setMode(modes[mode])
-		}
-		ui.Box(c).Width(6)
-		if s.toolButton(c, "search", s.tr("searchReplace"), s.finding).Clicked() {
-			s.openFind(false)
-		}
-		if s.toolButton(c, "list-tree", s.tr("showOutline"), s.prefs.OutlineVisible).Clicked() {
-			s.toggleOutline()
+// documentTools 是模式切换、查找与大纲开关：macOS 在统一标题栏，Windows / Linux 在格式工具栏右侧（同原版 EditorToolbar）。
+func (s *Shell) documentTools(c *ui.Context) {
+	t := s.activeTab()
+	if t == nil {
+		return
+	}
+	modes := []string{modeSemantic, modeSource, modeSplit}
+	mode := 0
+	for k, m := range modes {
+		if s.prefs.EditorMode == m {
+			mode = k
 		}
 	}
-	if !s.pf.mac && s.toolButton(c, "panel-left", s.tr("showHideExplorer"), !s.prefs.SidebarHidden).Clicked() {
-		s.toggleSidebar()
+	if t.Kind() == kindMarkdown && ui.Segmented(c, &mode, s.tr("semanticEditing"), s.tr("sourceMode"), s.tr("splitMode")).FontSize(12).Changed() {
+		s.setMode(modes[mode])
 	}
-	if s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
-		s.openSettings()
+	ui.Box(c).Width(6)
+	if s.toolButton(c, "search", s.tr("searchReplace"), s.finding).Clicked() {
+		s.openFind(false)
+	}
+	if s.toolButton(c, "list-tree", s.tr("showOutline"), s.prefs.OutlineVisible).Clicked() {
+		s.toggleOutline()
 	}
 }
 
