@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$projectRoot = Join-Path $repoRoot 'src-tauri\windows-shell-extension'
+$projectRoot = Join-Path $repoRoot 'desktop\packaging\windows-shell-extension'
 
 function Resolve-MSBuildEnvironment {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'

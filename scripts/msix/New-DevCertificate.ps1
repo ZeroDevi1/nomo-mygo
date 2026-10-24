@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$identityPath = Join-Path $repoRoot 'src-tauri\msix\package-identity.json'
+$identityPath = Join-Path $repoRoot 'desktop\packaging\msix\package-identity.json'
 $identity = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json
 
 if (-not $OutputDirectory) {

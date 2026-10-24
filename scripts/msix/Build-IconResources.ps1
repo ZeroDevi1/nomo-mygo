@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $packageDirectory = [IO.Path]::GetFullPath($PackageRoot)
-$iconsDirectory = Join-Path $repoRoot 'src-tauri\icons'
+$iconsDirectory = Join-Path $repoRoot 'desktop\packaging\icons'
 $variantDirectory = Join-Path $iconsDirectory 'nomo\windows'
 $manifestPath = Join-Path $packageDirectory 'AppxManifest.xml'
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
