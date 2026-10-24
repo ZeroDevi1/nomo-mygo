@@ -583,7 +583,8 @@ func (e *Editor) CaretContext(limit int) (before string, literal, ok bool) {
 		return "", false, false
 	}
 	r := &e.entries[s.i].rows[s.k]
-	before = e.Doc.Source()[max(s.base, head-limit):head]
+	// 空表格单元格的段起点可能在光标之后（“|  |”中光标在两个空格之间），此时光标前没有本段文字。
+	before = e.Doc.Source()[min(max(s.base, head-limit), head):head]
 	if r.kind != rowText {
 		return before, true, true
 	}
@@ -681,11 +682,14 @@ func (e *Editor) ScrollToSource(off int) {
 func (e *Editor) Focused() bool { return e.focused }
 
 // ContextTarget 描述最近一次右键位置的目标，外壳据此组织编辑区右键菜单（对应原版 contextMenu.ts 的
-// ContextMenuTarget）。Kind 为 "selection"（右键落在非空选区内）、"details"（折叠块标题行）、"link"、"heading"
-// 或 "text"；Href 为链接地址，Level 为标题级别，DetailsKey、DetailsOpen 为折叠块的键与默认展开。
+// ContextMenuTarget）。Kind 为 "selection"（右键落在非空选区内）、"details"（折叠块标题行）、"table"、"code"、
+// "math"（公式块）、"mermaid"、"link"、"heading" 或 "text"；Href 为链接地址，Level 为标题级别，Lang 为代码块语言，
+// DetailsKey、DetailsOpen 为折叠块的键与默认展开，Pos 为右键位置的原文偏移（块命令据此定位）。
 type ContextTarget struct {
 	Kind        string
 	Href        string
+	Lang        string
+	Pos         int
 	Level       int
 	DetailsKey  int
 	DetailsOpen bool
@@ -708,16 +712,72 @@ func (e *Editor) ContextTarget() ContextTarget {
 		return ContextTarget{Kind: "text"}
 	}
 	b := d.blocks[i]
+	switch b.Kind {
+	case parser.Table:
+		return ContextTarget{Kind: "table", Pos: pos}
+	case parser.MathBlock:
+		return ContextTarget{Kind: "math", Pos: pos}
+	case parser.CodeBlock:
+		blk := d.md.Block(b.Index)
+		lang := blk.Language()
+		if strings.EqualFold(lang, "mermaid") {
+			return ContextTarget{Kind: "mermaid", Pos: pos}
+		}
+		return ContextTarget{Kind: "code", Lang: lang, Pos: pos}
+	}
 	if b.Kind == parser.Heading {
 		return ContextTarget{Kind: "heading", Level: d.md.Block(b.Index).Level}
 	}
-	if s, ok := e.segAt(pos); ok && s.kind == rowText {
-		r := &e.entries[s.i].rows[s.k]
-		for _, in := range d.md.Inlines(b.Index + r.rel) {
-			if in.Kind == parser.Link && pos >= in.Start && pos <= in.End {
-				return ContextTarget{Kind: "link", Href: in.Dest}
-			}
-		}
+	if ins, k, ok := e.linkInline(pos); ok {
+		return ContextTarget{Kind: "link", Href: ins[k].Dest, Pos: pos}
 	}
 	return ContextTarget{Kind: "text"}
+}
+
+// Link 是原文中的一个行内链接：[Start, End) 为整段原文，Label 为方括号内的原文（含行内标记），Dest、Title 为
+// 地址与标题。
+type Link struct {
+	Start, End  int
+	Label       string
+	Dest, Title string
+}
+
+// LinkAt 返回包含原文位置 pos 的链接（含两端）；自动链接（<https://…>、裸网址）没有可编辑的文字，不算。
+// pos 须在可见区附近已布局的行内（编辑区按光标布局，光标与右键位置总满足）。
+func (e *Editor) LinkAt(pos int) (Link, bool) {
+	ins, k, ok := e.linkInline(pos)
+	if !ok || ins[k].Auto {
+		return Link{}, false
+	}
+	in, src := ins[k], e.Doc.Source()
+	// 方括号内的文字：子节点（k+1 到 Next）覆盖的范围；没有子节点时为空，位于“[”之后。
+	la, lz := in.Start+1, in.Start+1
+	for j := k + 1; j < in.Next && j < len(ins); j++ {
+		lz = max(lz, ins[j].End)
+	}
+	if lz > in.End || lz > len(src) {
+		return Link{}, false
+	}
+	return Link{Start: in.Start, End: in.End, Label: src[la:lz], Dest: in.Dest, Title: in.Title}, true
+}
+
+// linkInline 返回 pos 所在行的行内节点与包含 pos 的链接节点下标。
+func (e *Editor) linkInline(pos int) ([]parser.Inline, int, bool) {
+	d := e.Doc
+	i, _ := d.BlockAt(pos)
+	if i < 0 {
+		return nil, 0, false
+	}
+	s, ok := e.segAt(pos)
+	if !ok || s.kind != rowText {
+		return nil, 0, false
+	}
+	r := &e.entries[s.i].rows[s.k]
+	ins := d.md.Inlines(d.blocks[i].Index + r.rel)
+	for k, in := range ins {
+		if in.Kind == parser.Link && pos >= in.Start && pos <= in.End {
+			return ins, k, true
+		}
+	}
+	return nil, 0, false
 }

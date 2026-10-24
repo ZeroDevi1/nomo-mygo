@@ -257,6 +257,22 @@ func (t *Tab) newSource(text string) *editor.State {
 	return &editor.State{Buffer: buf, SoftWrap: true, LineNumbers: numbers, Label: label}
 }
 
+// replaceText 把原文整体换成 text（LF 换行），按最小差异写入，保留撤销历史；未保存判定照常按保存时的原文比较。
+func (t *Tab) replaceText(text string) {
+	if t.plain {
+		// TXT/JSON：缓冲是事实源。
+		buf := t.source.Buffer
+		old := buf.String()
+		p, sfx := diffBounds(old, text)
+		buf.Edit(editor.Edit{Start: p, End: len(old) - sfx, Text: text[p : len(text)-sfx]})
+		return
+	}
+	t.Ed.SetSource(text)
+	if t.source != nil {
+		t.syncToSource()
+	}
+}
+
 // syncToSource 在进入源码模式前，把语义编辑期间的改动按差异带到源码缓冲区。
 func (t *Tab) syncToSource() {
 	if t.plain {

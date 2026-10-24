@@ -63,7 +63,7 @@
 | 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go` | `render.html`, `src/render/render-entry.ts`, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线、含文字 SVG 的栅格化 |
 | 双栏模式 | `desktop/ui/shell/split.go` | `tab.go`（双向同步）, `desktop/ui/mdedit/api.go`（`TopSourceOffset`、`ScrollToSource`） | 修改双栏布局、比例保存、活动一侧与滚动同步 |
 | 组合标签 | `desktop/ui/shell/compare.go` | `view.go`（标签栏、右键菜单）, `tab.go`（`partner`） | 修改组合/解散/交换、并排显示与活动文档 |
-| 多窗口、托盘、小窗 | `desktop/ui/shell/windows.go`, `tray.go`, `mini.go` | `desktop/native.go`（`installNativeTray`） | 修改窗口注册与菜单分发、关闭到托盘、Markdown 小窗 |
+| 多窗口、托盘、小窗、标签拖动排序 | `desktop/ui/shell/windows.go`, `tray.go`, `mini.go`, `view.go`（`tabDragTarget`） | `desktop/native.go`（`installNativeTray`） | 修改窗口注册与菜单分发、关闭到托盘、Markdown 小窗、标签栏内拖动排序 |
 | Word 导出 | `desktop/ui/shell/export.go`（`exportWord`） | `render.go`（`word`）, `src/render/render-entry.ts`（复用 `src/app/services/word`） | 修改 Word 导出流程与本地图片内联 |
 | 测试集跑测 | `desktop/ui/mdedit/corpus_test.go`, `desktop/ui/shell/corpus_test.go` | `NOMO_CORPUS` 环境变量 | 修改测试集逐文件检查项（保真、耗时、内存）与外壳场景（编码、四标签、目录树） |
 | 输入法、键盘与命令 | `desktop/ui/mdedit/input.go` | `view.go`, `edit.go`, `structure.go` | 修改 TextInputClient、光标移动、删除、剪贴板与加粗等命令 |
@@ -87,7 +87,12 @@
 | 资源管理器与标签的文件操作 | `desktop/ui/shell/fileops.go` | `explorer.go`, `view.go` | 修改新建、重命名、复制路径、在文件夹中显示 |
 | 资源管理器目录树 | `desktop/ui/shell/explorer.go` | `desktop/internal/docfs/tree.go` | 修改目录懒加载、刷新与点击打开 |
 | 颜色主题、字体与用户主题导入导出 | `desktop/ui/shell/appearance.go` | `desktop/ui/themes`, `settings.go` | 修改主题到编辑器配色的映射、字体应用、用户主题文件读写 |
-| 编辑区右键菜单 | `desktop/ui/shell/editormenu.go` | `desktop/ui/mdedit/api.go`（`ContextTarget`） | 修改右键目标判断与各目标的菜单项（原版 buildEditorContextMenuItems） |
+| 编辑区右键菜单 | `desktop/ui/shell/editormenu.go` | `desktop/ui/mdedit/api.go`（`ContextTarget`）, `desktop/ui/mdedit/blockedit.go` | 修改右键目标判断与各目标的菜单项（原版 buildEditorContextMenuItems），含表格、代码块、公式与图表菜单 |
+| 块级命令（表格增删行列与对齐、代码块语言、复制块内容、删除块） | `desktop/ui/mdedit/blockedit.go` | `editormenu.go`（`blockMenu`） | 修改表格原文重写规则、围栏内容范围、公式块闭合行 |
+| 链接快速编辑浮层 | `desktop/ui/shell/linkedit.go` | `desktop/ui/mdedit/api.go`（`LinkAt`） | 修改链接插入/编辑/移除、地址校验与浮层位置 |
+| 历史快照窗口 | `desktop/ui/shell/snapshots.go` | `desktop/internal/config/snapshot.go`（`ListSnapshots`） | 修改快照列表、预览与恢复 |
+| 工作区恢复与恢复副本、首次示例文档 | `desktop/ui/shell/workspace.go` | `shell.go`（`New`、关闭流程）, `desktop/native.go`（`resolveSampleDocument`） | 修改设置 `nativeWorkspace` 的结构、副本写入时机与冲突处理、示例文档条件 |
+| Windows 文件关联与右键菜单 | `desktop/windows_integration_windows.go` | `desktop/windows_integration.go`（接入外壳）, `desktop/ui/shell/winintegration.go`（设置页） | 修改注册表写入、MSIX 包内右键菜单开关、设置页按钮 |
 | 大纲面板（可折叠树、默认展开层级） | `desktop/ui/shell/outline.go` | `view.go`（`outline`） | 修改大纲可见项、展开箭头与默认层级 |
 | 快捷插入菜单 | `desktop/ui/shell/quickinsert.go` | `desktop/ui/mdedit/api.go`（`CaretRect`、`Delete`、`Intercept`） | 修改触发条件、菜单项与键盘操作 |
 | 原生表情建议与选择器 | `desktop/ui/shell/emoji.go` | `desktop/internal/emoji`, `desktop/ui/mdedit/api.go`（`CaretContext`、`Replace`）, `Document.InputVersion` | 修改冒号建议的弹出与排除条件、键盘操作、选择器分类/网格/搜索、插入目标校验 |

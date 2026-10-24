@@ -12,7 +12,7 @@ import (
 //   - 偏好由所有窗口共享同一个 *Prefs（设置在任一窗口修改，其他窗口下一帧生效）。
 //   - macOS 的系统菜单是全局的：只由第一个窗口安装，菜单命令发给当前聚焦的窗口（current）。
 //   - 托盘只安装一次；“退出”依次关闭全部窗口（各自确认未保存的修改）。
-// 跨窗口拖动标签与窗口布局恢复未实现（原版 tab_transfer / workspace restore）。
+// 启动恢复只记录主窗口的标签（workspace.go）；跨窗口拖动标签与多窗口布局恢复未实现（原版 tab_transfer）。
 
 var registry struct {
 	shells                []*Shell

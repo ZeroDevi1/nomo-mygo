@@ -2,7 +2,9 @@ package shell
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
+	"nomo/desktop/internal/config"
 	"nomo/desktop/ui/icons"
 )
 
@@ -43,9 +46,15 @@ func (s *Shell) view(c *ui.Context) {
 	}
 	s.applyDocumentAppearance(c, tab)
 	s.autoSave(c)
+	s.trackWorkspace(c)
 	s.scheduleLint(c, s.activeTab())
 	root := ui.Column(c).Fill()
 	s.shortcuts(root)
+	// 编辑区之外（空白工作区、侧栏、标签栏等）拖入的文件在这里接收；编辑区自己接收（图片插入文档）。
+	if files := root.DroppedFiles(); len(files) > 0 {
+		s.openDropped(files)
+	}
+	dropping := root.FileDragOver()
 	root.Children(func() {
 		if s.mini.active {
 			s.miniLayout(c)
@@ -60,6 +69,9 @@ func (s *Shell) view(c *ui.Context) {
 	s.dialogs(c)
 	w, h := c.Size()
 	s.emojiPicker(c, ui.Rect{W: w, H: h})
+	if dropping {
+		s.dropHint(c, w, h)
+	}
 	if s.status != "" {
 		c.Toast(s.status)
 		s.status = ""
@@ -151,6 +163,7 @@ func (s *Shell) macTabs(c *ui.Context) {
 			if i > 0 {
 				cell.Border(1, s.ch.separator).BorderWidth(0, 0, 0, 1)
 			}
+			s.tabDragTarget(cell, tab)
 			hovered := cell.Hovered()
 			cell.Children(func() {
 				s.closeButton(ck, tab, hovered || selected)
@@ -163,6 +176,9 @@ func (s *Shell) macTabs(c *ui.Context) {
 						txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
 					}
 				})
+				if tab.Path != "" {
+					label.Tooltip(tab.Path)
+				}
 				if label.DoubleClicked() {
 					tab.preview = false // 双击标题固定预览标签
 				}
@@ -252,6 +268,7 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 				case box.Hovered():
 					box.Background(s.ch.hover)
 				}
+				s.tabDragTarget(box, tab)
 				hovered := box.Hovered()
 				box.Children(func() {
 					label := ui.ButtonBase(ck).Gap(6).Children(func() {
@@ -264,6 +281,9 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 							txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
 						}
 					})
+					if tab.Path != "" {
+						label.Tooltip(tab.Path)
+					}
 					if label.DoubleClicked() {
 						tab.preview = false // 双击标题固定预览标签
 					}
@@ -280,6 +300,42 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 		}
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+}
+
+// tabDrag 是标签栏中拖动的标签（按 ID）。
+type tabDrag struct{ id int }
+
+// tabDragTarget 让标签可以拖动排序：拖到另一标签上时，在放下的一侧显示强调色竖线，松开后移到那里
+// （从左往右拖放在目标之后，反之放在之前）。跨窗口拖动标签未实现。
+func (s *Shell) tabDragTarget(el ui.Element, tab *Tab) {
+	el.Drag(tabDrag{tab.ID})
+	if el.Dragging() {
+		el.Opacity(0.5)
+	}
+	if d, over := ui.DragOver[tabDrag](el); over && d.id != tab.ID {
+		from, to := s.findTabIndex(d.id), s.findTabIndex(tab.ID)
+		if from < to {
+			el.Border(2, s.ch.accent).BorderWidth(0, 2, 0, 0)
+		} else {
+			el.Border(2, s.ch.accent).BorderWidth(0, 0, 0, 2)
+		}
+	}
+	if d, ok := ui.Drop[tabDrag](el); ok {
+		s.moveTab(d.id, tab.ID)
+	}
+}
+
+// moveTab 把标签 id 移到标签 target 的位置，活动标签保持不变。
+func (s *Shell) moveTab(id, target int) {
+	from, to := s.findTabIndex(id), s.findTabIndex(target)
+	if from < 0 || to < 0 || from == to {
+		return
+	}
+	active := s.activeTab()
+	t := s.tabs[from]
+	s.tabs = slices.Delete(s.tabs, from, from+1)
+	s.tabs = slices.Insert(s.tabs, to, t)
+	s.active = slices.Index(s.tabs, active)
 }
 
 // closeButton 画标签的关闭按钮；有未保存修改时平时显示圆点，悬停时显示 ×（与原版一致）。
@@ -405,7 +461,7 @@ func (s *Shell) sidebar(c *ui.Context, mac bool) {
 				name = s.folder.name
 			}
 			ui.Text(c, name).FontSize(11).Bold().TextColor(s.ch.muted).SingleLine().Grow(1)
-			if s.toolButton(c, "folder-open", s.tr("openFolderEllipsis"), false).Clicked() {
+			if s.folder != nil && s.toolButton(c, "folder-open", s.tr("openFolderEllipsis"), false).Clicked() {
 				s.openDialog(true)
 			}
 			if s.folder != nil && s.toolButton(c, "refresh-cw", s.tr("refresh"), false).Clicked() {
@@ -416,13 +472,23 @@ func (s *Shell) sidebar(c *ui.Context, mac bool) {
 			ui.Column(c).FillWidth().Padding(0, 6, 8, 6).Children(func() {
 				if s.folder != nil {
 					s.tree(c, s.folder)
+					if s.folder.loaded && len(s.folder.children) == 0 {
+						ui.Text(c, s.tr("folderHasNoDocuments")).FontSize(12).TextColor(s.ch.muted).Wrap().Padding(8, 10)
+					}
 					return
 				}
-				ui.Text(c, s.tr("noOpenDocumentDescription")).FontSize(12).TextColor(s.ch.muted).Wrap().Padding(6, 8)
-				if ui.Button(c, s.tr("openFolderEllipsis")).Clicked() {
-					s.openDialog(true)
+				ui.Column(c).FillWidth().Padding(20, 10, 12, 10).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, s.icon("folder-open")).FontSize(28).TextColor(s.ch.muted)
+					ui.Text(c, s.tr("noFolderOpen")).FontSize(13).Bold()
+					ui.Text(c, s.tr("noFolderOpenDescription")).FontSize(12).TextColor(s.ch.muted).Wrap().TextAlign(ui.Center)
+					if ui.Button(c, s.tr("openFolderEllipsis")).Clicked() {
+						s.openDialog(true)
+					}
+				})
+				if s.hasRecent("folder") {
+					s.sectionLabel(c, s.tr("recentFolders"))
+					s.recentList(c, "folder", 6)
 				}
-				s.recentList(c, "folder", 6)
 			})
 		})
 	})
@@ -458,6 +524,7 @@ func (s *Shell) document(c *ui.Context) {
 						s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
 					}
 					s.quickInsert(c, s.activeTab(), el)
+					s.linkPopover(c, s.activeTab(), el)
 					s.emojiSuggest(c, s.activeTab(), el)
 				}
 			} else if s.split() {
@@ -466,6 +533,7 @@ func (s *Shell) document(c *ui.Context) {
 					s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
 				}
 				s.quickInsert(c, tab, el)
+				s.linkPopover(c, tab, el)
 				s.emojiSuggest(c, tab, el)
 			} else if s.mode() == modeSource {
 				// 与语义模式同宽居中（原版源码模式同样受内容宽度约束）。
@@ -482,6 +550,7 @@ func (s *Shell) document(c *ui.Context) {
 					s.editorOrigin = ui.Point{X: r.X, Y: r.Y}
 				}
 				s.quickInsert(c, tab, el)
+				s.linkPopover(c, tab, el)
 				s.emojiSuggest(c, tab, el)
 			}
 			if files := el.DroppedFiles(); len(files) > 0 {
@@ -566,6 +635,10 @@ func (s *Shell) outline(c *ui.Context, tab *Tab) {
 			rows := s.outlineRows(tab, hs)
 			head := tab.Doc.Sel.Head
 			current := sort.Search(len(hs), func(i int) bool { return hs[i].Pos > head }) - 1
+			if len(hs) == 0 {
+				ui.Text(c, s.tr("documentHasNoHeadings")).FontSize(12).TextColor(s.ch.muted).Wrap().Padding(4, 14)
+				return
+			}
 			ui.List(c, &s.outlineList, len(rows), func(r int) {
 				i := rows[r]
 				h := hs[i]
@@ -624,9 +697,16 @@ func (s *Shell) statusBar(c *ui.Context, tab *Tab) {
 			muted(fmt.Sprintf("%d:%d", line, col))
 		}
 		// 路径最先让位：空间不够时由它截断。
-		path := ui.Text(c, filepath.Dir(tab.Path)).FontSize(11).TextColor(s.ch.muted).SingleLine().Shrink(1).Grow(1)
+		path := ui.ButtonBase(c).Shrink(1).Grow(1).Justify(ui.Start).Children(func() {
+			ui.Text(c, displayPath(filepath.Dir(tab.Path))).FontSize(11).TextColor(s.ch.muted).SingleLine().Shrink(1)
+		})
 		if tab.Path == "" {
 			path.Opacity(0)
+		} else {
+			path.Tooltip(tab.Path)
+			if path.Clicked() {
+				revealInFolder(tab.Path)
+			}
 		}
 		if tab.saving {
 			muted(s.tr("settingsSaving"))
@@ -663,17 +743,22 @@ func (s *Shell) empty(c *ui.Context) {
 		ui.Text(c, s.tr("noOpenDocument")).FontSize(18).Bold()
 		ui.Text(c, s.tr("noOpenDocumentDescription")).TextColor(s.ch.muted)
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.PrimaryButton(c, s.tr("newMarkdown")).Clicked() {
+			if ui.PrimaryButton(c, s.tr("newMarkdown")).Tooltip(s.shortcutText("new")).Clicked() {
 				s.NewDocument()
 			}
-			if ui.Button(c, s.tr("openFileEllipsis")).Clicked() {
+			if ui.Button(c, s.tr("openFileEllipsis")).Tooltip(s.shortcutText("open")).Clicked() {
 				s.openDialog(false)
 			}
-			if ui.Button(c, s.tr("openFolderEllipsis")).Clicked() {
+			if ui.Button(c, s.tr("openFolderEllipsis")).Tooltip(s.shortcutText("openFolder")).Clicked() {
 				s.openDialog(true)
 			}
 		})
-		ui.Column(c).Width(420).Gap(2).Children(func() { s.recentList(c, "file", 8) })
+		if s.hasRecent("file") {
+			ui.Column(c).Width(440).Gap(2).Padding(14, 0, 0, 0).Children(func() {
+				s.sectionLabel(c, s.tr("recentOpenLabel"))
+				s.recentList(c, "file", 8)
+			})
+		}
 	})
 }
 
@@ -699,10 +784,43 @@ func (s *Shell) recentList(c *ui.Context, kind string, limit int) {
 			ui.Text(ck, filepath.Base(e.Path)).FontSize(13).SingleLine().Shrink(0)
 			ui.Text(ck, filepath.Dir(e.Path)).FontSize(12).TextColor(s.ch.muted).SingleLine().Shrink(1).Grow(1)
 		})
+		b.Tooltip(e.Path)
 		if b.Clicked() {
 			s.OpenFiles([]string{e.Path})
 		}
+		path := e.Path
+		b.ContextMenu(func(m *ui.Menu) {
+			if m.Item(s.tr("revealInFolder")).Chosen() {
+				revealInFolder(path)
+			}
+			if m.Item(s.tr("removeRecentLabel")).Chosen() {
+				s.forget(path)
+			}
+		})
 	}
+}
+
+// hasRecent 报告是否有该类（file / folder）的最近记录。
+func (s *Shell) hasRecent(kind string) bool {
+	return slices.ContainsFunc(s.recent, func(e config.RecentEntry) bool { return e.EntryType == kind })
+}
+
+// sectionLabel 是侧栏与空白工作区中分组的小标题。
+func (s *Shell) sectionLabel(c *ui.Context, text string) {
+	ui.Text(c, text).FontSize(11).Bold().TextColor(s.ch.muted).Padding(10, 10, 4, 10).FillWidth()
+}
+
+// dropHint 是从其他应用拖入文件时覆盖窗口的提示（不拦截指针，拖放仍落到下面的接收元素）。
+func (s *Shell) dropHint(c *ui.Context, w, h float32) {
+	ui.Overlay(c, func() {
+		ui.Column(c).Absolute().Left(0).Top(0).Size(w, h).Padding(10).PassThrough().Children(func() {
+			ui.Column(c).Fill().Center().Gap(10).Radius(12).Border(2, s.ch.accent).
+				Background(s.ch.accent.Alpha(0.08)).PassThrough().Children(func() {
+				ui.Icon(c, s.icon("folder-open")).FontSize(32).TextColor(s.ch.accent)
+				ui.Text(c, s.tr("dropFilesToOpen")).FontSize(15).Bold().TextColor(s.ch.accent)
+			})
+		})
+	})
 }
 
 func (s *Shell) dialogs(c *ui.Context) {
@@ -720,6 +838,8 @@ func (s *Shell) dialogs(c *ui.Context) {
 	}
 	s.renameDialog(c)
 	s.closeChoiceDialog(c)
+	s.draftConflictDialog(c)
+	s.snapshotsDialog(c)
 }
 
 func (s *Shell) toggleSidebar() {
@@ -768,3 +888,18 @@ func (s *Shell) zoom(delta float64) {
 }
 
 func clampInt(v, lo, hi int) int { return max(lo, min(hi, v)) }
+
+// displayPath 把用户目录开头的路径缩写为“~”，状态栏空间有限。
+func displayPath(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if rel, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
+		return "~" + string(filepath.Separator) + rel
+	}
+	return p
+}

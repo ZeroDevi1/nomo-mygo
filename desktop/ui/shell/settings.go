@@ -41,6 +41,7 @@ type settingsWindow struct {
 	updating        bool
 	update          string
 	updateAvailable bool
+	win32           winState // “Windows 集成”分组，见 winintegration.go
 }
 
 type settingsCategory struct{ id, label, icon string }
@@ -201,6 +202,7 @@ func (sw *settingsWindow) page(c *ui.Context) {
 				[]string{"reload-external", "overwrite-external", "ignore"},
 				[]string{s.tr("externalFileChangeBehaviorReload"), s.tr("externalFileChangeBehaviorOverwrite"), s.tr("externalFileChangeBehaviorIgnore")})
 		})
+		sw.windowsIntegration(c)
 	case "images":
 		img := &p.ImageHandlingSettings
 		sw.section(c, "imageImport", func() {

@@ -171,6 +171,9 @@ func (s *Shell) applyQuick(tab *Tab, it quickItem) {
 	switch it.command {
 	case "image":
 		s.pickImages()
+	case "link":
+		s.openLinkEditor()
+		return
 	case "emoji":
 		// 选择器取代编辑区焦点；位置在光标下方（原版 openEmojiPicker 的 caret 锚点）。
 		at := ui.Point{X: 200, Y: 120}

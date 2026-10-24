@@ -69,7 +69,7 @@ func (s *Shell) dropFiles(tab *Tab, paths []string) {
 		s.insertImages(tab, images)
 	}
 	if len(other) > 0 {
-		s.OpenFiles(other)
+		s.openDropped(other)
 	}
 }
 

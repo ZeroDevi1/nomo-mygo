@@ -9,6 +9,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+
+	"nomo/desktop/ui/mdedit"
 )
 
 // editorView 构建 tab 的语义编辑区，并挂上编辑区右键菜单。所有显示语义编辑区的位置（单栏、双栏、组合标签、
@@ -18,8 +20,7 @@ func (s *Shell) editorView(c *ui.Context, tab *Tab) ui.Element {
 }
 
 // editorMenu 填充语义编辑区的右键菜单，按右键位置的目标给出不同的项（原版 App.svelte 的
-// buildEditorContextMenuItems）：选区、折叠块标题、链接、标题与普通文本。原版的代码块、表格、公式与图表专属菜单
-// 在原生版中按普通文本处理。
+// buildEditorContextMenuItems）：选区、折叠块标题、表格、代码块、公式、图表、链接、标题与普通文本。
 func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 	tg := tab.Ed.ContextTarget()
 	run := func(m *ui.Menu, label, cmd string) {
@@ -38,6 +39,12 @@ func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 		}
 	}
 	switch tg.Kind {
+	case "table", "code", "math", "mermaid":
+		s.blockMenu(c, m, tab, tg)
+		m.Separator()
+		m.EditItems()
+		tail()
+		return
 	case "details":
 		if m.Item(s.tr("detailsDefaultOpen")).Checked(tg.DetailsOpen).Chosen() {
 			tab.Ed.SetDetailsDefaultOpen(tg.DetailsKey, !tg.DetailsOpen)
@@ -59,12 +66,18 @@ func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 			sub.Separator()
 			run(sub, s.tr("clearStyle"), "clearFormat")
 		})
-		run(m, s.tr("createLink"), "link")
+		if m.Item(s.tr("createLink")).Chosen() {
+			s.openLinkEditor()
+		}
 		tail()
 		return
 	case "link":
 		if m.Item(s.tr("openLink")).Chosen() {
 			s.openLink(c, tab, tg.Href)
+		}
+		if m.Item(s.tr("editLink")).Chosen() {
+			tab.Ed.Select(tg.Pos, tg.Pos)
+			s.openLinkEditor()
 		}
 		if m.Item(s.tr("copyLinkAddress")).Chosen() {
 			c.Services().WriteClipboard(tg.Href)
@@ -107,6 +120,74 @@ func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 		run(sub, s.tr("horizontalRule"), "horizontalRule")
 	})
 	tail()
+}
+
+// codeMenuLanguages 是代码块右键“选择语言”中列出的常用语言（与快捷插入、设置中的语言标识一致）。
+var codeMenuLanguages = []string{"ts", "js", "go", "python", "rust", "java", "c", "cpp", "json", "yaml", "html", "css", "sql", "bash"}
+
+// blockMenu 是表格、代码块、公式与图表的专属菜单项（原版 contextMenu.ts 的 table / code / math / mermaid 目标）。
+func (s *Shell) blockMenu(c *ui.Context, m *ui.Menu, tab *Tab, tg mdedit.ContextTarget) {
+	done := func() { s.focusEditor = true }
+	copyContent := func(label string) {
+		if m.Item(label).Chosen() {
+			if text, ok := tab.Ed.BlockContent(tg.Pos); ok {
+				c.Services().WriteClipboard(text)
+			}
+		}
+	}
+	switch tg.Kind {
+	case "table":
+		row, _, rows, _, ok := tab.Ed.TableCell(tg.Pos)
+		if !ok {
+			return
+		}
+		table := func(m *ui.Menu, label, op string, disabled bool) {
+			if m.Item(label).Disabled(disabled).Chosen() {
+				tab.Ed.TableCommand(tg.Pos, op)
+				done()
+			}
+		}
+		table(m, s.tr("addRowBefore"), "addRowBefore", row == 0)
+		table(m, s.tr("addRowAfter"), "addRowAfter", false)
+		table(m, s.tr("deleteRow"), "deleteRow", row == 0 || rows <= 1)
+		m.Separator()
+		table(m, s.tr("addColumnBefore"), "addColumnBefore", false)
+		table(m, s.tr("addColumnAfter"), "addColumnAfter", false)
+		table(m, s.tr("deleteColumn"), "deleteColumn", false)
+		m.Submenu(s.tr("columnAlignment"), func(sub *ui.Menu) {
+			table(sub, s.tr("alignDefault"), "alignNone", false)
+			table(sub, s.tr("alignLeft"), "alignLeft", false)
+			table(sub, s.tr("alignCenter"), "alignCenter", false)
+			table(sub, s.tr("alignRight"), "alignRight", false)
+		})
+		m.Separator()
+		table(m, s.tr("deleteTable"), "deleteTable", false)
+		return
+	case "code":
+		copyContent(s.tr("copyCode"))
+		m.Submenu(s.tr("chooseLanguage"), func(sub *ui.Menu) {
+			if sub.Item(s.tr("plainText")).Checked(tg.Lang == "").Chosen() {
+				tab.Ed.SetCodeLanguage(tg.Pos, "")
+				done()
+			}
+			sub.Separator()
+			for _, l := range codeMenuLanguages {
+				if sub.Item(l).Checked(strings.EqualFold(tg.Lang, l)).Chosen() {
+					tab.Ed.SetCodeLanguage(tg.Pos, l)
+					done()
+				}
+			}
+		})
+	case "math":
+		copyContent(s.tr("copyFormulaSource"))
+	case "mermaid":
+		copyContent(s.tr("copyDiagramSource"))
+	}
+	m.Separator()
+	if m.Item(s.tr("deleteBlock")).Chosen() {
+		tab.Ed.DeleteBlock(tg.Pos)
+		done()
+	}
 }
 
 // openLink 打开链接：带协议的地址交给系统；相对路径按文档目录解析，Markdown 文件在新标签中打开，其余交给系统。

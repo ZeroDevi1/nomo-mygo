@@ -18,7 +18,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
@@ -98,7 +97,9 @@ type Shell struct {
 	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
 	images *mdedit.Images
 
-	quick quickState // 快捷插入菜单，见 quickinsert.go
+	quick quickState     // 快捷插入菜单，见 quickinsert.go
+	link  linkEditor     // 链接快速编辑浮层，见 linkedit.go
+	snaps snapshotsState // 历史快照窗口，见 snapshots.go
 	// 双栏模式（split.go）：splitActive 为活动一侧（modeSemantic / modeSource，随焦点切换）；splitPct 为左侧
 	// 宽度百分比的界面值，拖动结束后写入 prefs.SplitLeftPercent；splitSync 记录上次同步滚动时两侧的位置。
 	splitActive string
@@ -116,6 +117,8 @@ type Shell struct {
 	checkUpdate func() (UpdateInfo, error)
 	dark        bool // 最近一帧的明暗外观（导出 HTML 配色用），在 applyDocumentAppearance 中更新
 	iconSynced  bool // 已把 dark 交给 Options.SetIconTheme；dark 变化时重新同步
+
+	ws workspaceSaver // 主窗口的工作区记录与恢复，见 workspace.go
 
 	focusSaved *[3]bool // 专注模式前的侧栏隐藏、大纲显示、工具栏隐藏；nil 表示不在专注模式（不写盘）
 
@@ -146,8 +149,15 @@ type Options struct {
 	SetIconTheme func(dark bool)
 	// LoadEmoji 加载表情目录（主程序提供，读缓存或下载，在后台调用）；retry 为 true 时忽略失败冷却。为空时不提供表情功能。
 	LoadEmoji func(retry bool) ([]emoji.Entry, error)
-	Files     []string // 启动时打开的文档
-	Folders   []string // 启动时打开的文件夹（取第一个）
+	// Primary 表示应用的主窗口：记录工作区（打开的文件夹、标签与未保存文档的恢复副本），没有启动参数时恢复上次的
+	// 工作区并处理首次启动示例文档（见 workspace.go）。“移动到新窗口”创建的窗口不设置。
+	Primary bool
+	// Windows 为 Windows 文件关联与右键菜单操作（主程序提供，只在 Windows 上非空），显示在设置的“文件”页。
+	Windows *WindowsIntegration
+	// SampleDocument 返回随包分发的示例文档路径（主程序提供）；为空时首次启动不打开示例。
+	SampleDocument func() (string, error)
+	Files          []string // 启动时打开的文档
+	Folders        []string // 启动时打开的文件夹（取第一个）
 }
 
 // UpdateInfo 是检查更新的结果：Supported 为 false 表示当前安装方式不支持自动更新（如免安装版、
@@ -174,6 +184,11 @@ func New(o Options) *Shell {
 	}
 	s.recent = s.cfg.Get().Recent.Entries
 	slices.SortStableFunc(s.recent, func(a, b config.RecentEntry) int { return int(b.OpenedAt - a.OpenedAt) })
+	if o.Primary && len(o.Files) == 0 && len(o.Folders) == 0 {
+		s.restoreWorkspace()
+		s.openFirstRunSample()
+		return s
+	}
 	if len(o.Folders) > 0 {
 		s.openFolder(o.Folders[0])
 	}
@@ -267,6 +282,7 @@ func (s *Shell) Open() *mygo.Window {
 	})
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
+		s.finishWorkspaceClose()
 		unregister(s)
 		s.images.Close()
 		s.rend.close()
@@ -368,9 +384,13 @@ func (s *Shell) NewDocument() {
 
 // addTab 加入并激活标签，接上外壳对编辑器的钩子（粘贴图片）。
 func (s *Shell) addTab(t *Tab) {
-	t.Ed.PasteData = func(d transfer.Data) bool { return s.pasteData(t, d) }
+	s.wirePaste(t)
 	s.tabs = append(s.tabs, t)
 	s.activate(len(s.tabs) - 1)
+}
+
+func (s *Shell) wirePaste(t *Tab) {
+	t.Ed.PasteData = func(d transfer.Data) bool { return s.pasteData(t, d) }
 }
 
 // OpenExternal 打开从系统传入的文档（启动参数、Finder 双击、第二实例）：窗口尚未打开文件夹且没有已保存路径或
@@ -478,6 +498,34 @@ func (s *Shell) remember(path, kind string) {
 	s.recent = s.cfg.Get().Recent.Entries
 }
 
+// forget 从最近打开中移除 path（只删记录，不动文件）。
+func (s *Shell) forget(path string) {
+	err := s.cfg.Update(func(c *config.AppConfig) {
+		c.Recent.Entries = slices.DeleteFunc(c.Recent.Entries, func(e config.RecentEntry) bool { return samePath(e.Path, path) })
+	})
+	if err != nil {
+		applog.Warn("Native", "更新最近打开失败："+err.Error())
+		return
+	}
+	s.recent = slices.DeleteFunc(s.recent, func(e config.RecentEntry) bool { return samePath(e.Path, path) })
+}
+
+// openDropped 打开从其他应用拖到编辑区之外的文件：文件夹作为资源管理器根目录，Markdown / 文本 / JSON 打开为标签；
+// 其他文件（含图片，图片须拖到编辑区插入）不打开，全部不支持时提示。
+func (s *Shell) openDropped(paths []string) {
+	var open []string
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && (fi.IsDir() || docfs.IsSupportedDocument(p)) {
+			open = append(open, p)
+		}
+	}
+	if len(open) == 0 {
+		s.status = s.tr("dragDropNoMarkdown")
+		return
+	}
+	s.OpenExternal(open)
+}
+
 func (s *Shell) markdownFilters() []mygo.FileFilter {
 	return []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown", "mdown", "mkd"}},
 		{Name: "Text / JSON", Extensions: []string{"txt", "json"}}}
@@ -567,6 +615,9 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 
 // requestClose 关闭标签（all 为 true 时随后关闭窗口）；有未保存修改时先确认。
 func (s *Shell) requestClose(ids []int, all bool) {
+	if all {
+		s.beginWorkspaceClose()
+	}
 	s.closing, s.closingAll = ids, all
 	s.continueClose()
 }
@@ -608,6 +659,9 @@ func (s *Shell) resolveClose(choice int) {
 	case choice == 2 && i >= 0:
 		s.save(s.tabs[i], false, s.continueClose)
 	default:
+		if s.closingAll {
+			s.cancelWorkspaceClose()
+		}
 		s.closing, s.closingAll = nil, false
 		s.quitting = false // 取消了退出：之后点关闭按钮仍按“关闭窗口行为”处理
 		s.focusEditor = true
@@ -660,18 +714,7 @@ func (s *Shell) checkExternalChanges() {
 	}
 	t.syncFromSource()
 	text := t.adoptLineEndings(doc.Markdown)
-	if t.plain {
-		// TXT/JSON：缓冲是事实源，按差异更新（保留撤销历史）。
-		buf := t.source.Buffer
-		old := buf.String()
-		p, sfx := diffBounds(old, text)
-		buf.Edit(editor.Edit{Start: p, End: len(old) - sfx, Text: text[p : len(text)-sfx]})
-	} else {
-		t.Ed.SetSource(text)
-		if t.source != nil {
-			t.syncToSource()
-		}
-	}
+	t.replaceText(text)
 	t.markSaved(text)
 	t.diskModified = mod
 }
@@ -708,6 +751,10 @@ func (s *Shell) run(name string) {
 		return
 	}
 	if t == nil || s.mode() != modeSemantic {
+		return
+	}
+	if name == "link" {
+		s.openLinkEditor()
 		return
 	}
 	t.Ed.Run(name)

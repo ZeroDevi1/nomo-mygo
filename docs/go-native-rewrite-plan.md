@@ -455,7 +455,7 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - （9.22 起已移除 WebView 界面与下述切换方式。）**选择顺序**（`nativeShellRequested`）：命令行 `--webview` / `--native`（临时，不写设置）→ 环境变量 `NOMO_SHELL=webview|native`（兼容 `NOMO_NATIVE=1|0`）→ 设置 `desktopShell`（两种外壳的“高级 → 渲染”都可切换，重启后生效）→ 默认原生。启动日志记录所选界面。实机验证（release、隔离 HOME）：默认 → 原生；`--webview` → WebView；设置为 WebView → WebView；设置为 WebView 时 `--native` → 原生。
 - WebView 外壳与其前端保留为回退，打包内容不变。
 
-**原生版相对 WebView 版仍缺少的功能**（按影响排序；“未验证”指已实现但未在真机窗口操作过）
+**原生版相对 WebView 版仍缺少的功能**（按影响排序；“未验证”指已实现但未在真机窗口操作过；第 1、2、5、7、8 项与第 4 项中的标签排序、拖到窗口打开已在 9.25 补齐）
 1. Windows 集成设置：Markdown 文件关联、资源管理器右键菜单、Store 版检测旧安装版的提示——WebView 设置页有，原生设置页没有（后端命令仍在，未接入原生界面）。
 2. 启动时恢复上次工作区（打开的标签、各窗口布局）与未保存文档的恢复副本：原生外壳不读写 `workspaceTabs` / `startupWorkspace` 与草稿，启动只打开参数中的文档。
 3. 软件更新：只检查并打开发布页，不下载安装；更新完成后的更新日志弹窗没有。
@@ -495,4 +495,24 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - 问题：应用浅色、系统深色时，运行时用 `setApplicationIconImage` 换上的浅色平面 PNG 被系统压暗成灰底（用户截图）；同时覆盖了包内 `Assets.car` 的浅色 / 深色 / 着色变体。
 - 修复（`desktop/tray.go` 的 `applyDockIcon`）：应用为深色（主题默认跟随系统深色模式）时换成深色 Logo；为浅色时清除替换、恢复包内图标（`Assets.car` 浅色变体，随 macOS 26 图标风格渲染）；未打包运行（没有 `Assets.car`）仍换成浅色 PNG。应用未运行时 Finder / Dock 照旧由 `Assets.car` 按系统图标风格选图。
 - 实机验证（macOS 26，系统深色、图标风格默认）：应用深色、跟随系统 → 深色 Logo；应用浅色 → 包内浅色图标，不再发灰。
+
+
+### 9.25 补齐迁移缺口与界面打磨（2026-10-24）
+
+补齐 9.20 清单中的以下项：
+- **工作区恢复与恢复副本**（`desktop/ui/shell/workspace.go`）：主窗口把文件夹、标签与活动标签写入设置 `nativeWorkspace`（新键，不读旧 `workspaceTabs:*` 格式）；未保存文档防抖 2 秒（原文超过 1 MiB 时 8 秒）后写恢复副本到 `drafts/<内容散列>.md`，同内容不重写，不再引用的副本随下次写入删除。无启动参数时恢复；带副本的标签载入副本并显示为未保存；写副本后文件又被外部修改的逐个询问（恢复副本 / 使用磁盘 / 另存副本，关闭对话框按另存处理）。关闭主窗口时按关闭前的标签同步写一次：“不保存”的新文档不记录，有路径的照常恢复。只记录主窗口（“移动到新窗口”的窗口不记录）。
+- **首次启动示例文档**：同原版 `maybeOpenFirstRunSample`（`firstRunSampleDocumentOpened`）：无恢复标签、无文件夹、无最近记录时打开随包 `samples/sample.md`。
+- **Windows 文件关联与右键菜单**：从 `eef4dfb^` 恢复注册表实现（`windows_integration_windows.go`，去掉 IPC 注册与旧安装版提示），接到设置“文件与窗口”页的“Windows 集成”分组；只在 Windows 上显示。
+- **链接快速编辑**（`linkedit.go`）：⌘K、工具栏、菜单、快捷插入与右键“创建 / 编辑链接”弹出浮层，编辑文字与地址，可移除链接；拒绝 `javascript:` / `vbscript:` / `data:`，含空白或括号的地址用尖括号包裹。
+- **历史快照**（`snapshots.go`，“文件 → 历史快照…”）：列出当前文件的快照并预览，“恢复此版本”把原文换成快照内容（未保存、可撤销），不改文件的换行风格。保存前快照记录的是即将写入的内容（与原版 `saveNativeMarkdownFile` 一致）。
+- **块级右键菜单**（`mdedit/blockedit.go`）：表格（上下插行、删行、左右插列、删列、列对齐、删表，整表按规范管道表格重写；表头行不可删）、代码块（复制代码、选择语言、删除）、公式与 Mermaid（复制源码、删除）。
+- **标签拖动排序**；**拖到窗口打开**：编辑区之外拖入的文件夹与 Markdown / 文本 / JSON 打开，其他文件不打开并提示；拖动时显示覆盖提示。编辑区拖入非图片文件也走同一过滤（此前 PDF 等会被当作 Markdown 打开）。
+
+界面打磨：侧栏无文件夹时显示空状态（此前文案为“从左侧选择…”，指向错误）与“最近文件夹”；空白工作区的最近文件加分组标题，右键可“在文件夹中显示 / 移除记录”，按钮提示快捷键；文件夹内没有文档时提示；大纲无标题时提示；状态栏路径把用户目录缩写为 `~`，悬停显示完整路径、点击在文件夹中显示；标签悬停显示完整路径。
+
+修复：`mdedit.CaretContext` 在光标位于空表格单元格（段起点在光标之后）时切片越界，导致表情建议每帧崩溃；表格插入列后可复现（`TestTableCommandCaretContext`）。
+
+未做：MyGo 0.6.2 没有中键事件，中键关闭标签无法实现；应用内下载安装更新与更新日志（第 3 项）、图片右键菜单与拖动调整（第 6 项）、列表中的折叠块（第 9 项）、上下标基线（第 10 项，上游）、托盘未激活图标（第 11 项）、跨窗口拖动标签与多窗口布局恢复、Store 版检测旧安装版的提示。
+
+验证：Go `vet`（macOS、`GOOS=windows`、`GOOS=linux`）与 `go test ./desktop/...`；新增测试 `TestWorkspaceRestore`、`TestWorkspaceDraftConflict`、`TestWorkspaceCloseDropsDiscarded`、`TestTabDragReorder`、`TestDropOnEmptyWorkspace`、`TestLinkEditor`、`TestSnapshotsRestore`、`TestTableCommands`、`TestCodeBlockCommands`、`TestTableCommandCaretContext`、`TestWindowsIntegrationSettings`；`pnpm check`、`vitest run src/app/i18n.test.ts`；`mygo build`。实机（macOS，release，隔离 HOME）：链接浮层编辑已有链接、表格右键插入列、保存后历史快照、崩溃后无参数启动恢复标签与未保存修改、正常退出后副本清理与工作区记录、全新配置打开示例文档。未实机：Windows 集成（无 Windows 真机）、拖入文件的覆盖提示（只在测试器中验证拖放）。后台辅助功能写入（AXSelectedText）只改输入框显示、不进入 MyGo 文本输入绑定，真实键盘输入正常。
 

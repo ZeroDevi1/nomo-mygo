@@ -18,7 +18,7 @@ export default defineConfig({
   buildCommand: 'pnpm build && node scripts/prepare-desktop-resources.mjs',
   frontendDist: 'dist',
 
-  // 示例文档与其图片以 samples/ 目录随包分发（见 desktop/commands_files.go 的 resolveSampleDocument）。
+  // 示例文档与其图片以 samples/ 目录随包分发（见 desktop/native.go 的 resolveSampleDocument）。
   resources: ['target/desktop-resources/samples'],
   fileAssociations: [
     { ext: ['md', 'markdown'], name: 'Markdown Document', mimeType: 'text/markdown', role: 'Editor' },

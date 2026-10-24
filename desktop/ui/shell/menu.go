@@ -44,6 +44,7 @@ func (s *Shell) menuGroups() []menuGroup {
 			custom(command{id: "exportHtml", label: "exportHtml", sep: true, run: (*Shell).exportHTML}, "export-html"),
 			custom(command{id: "exportPdf", label: "exportPdf", run: (*Shell).exportPDF}, "export-pdf"),
 			{id: "exportWord", label: "exportWord", run: (*Shell).exportWord},
+			{id: "snapshots", label: "documentSnapshotsEllipsis", sep: true, run: (*Shell).openSnapshots},
 			{id: "close", label: "closeCurrentFile", mods: cmd, key: ui.KeyW, sep: true, run: func(s *Shell) {
 				if t := s.activeTab(); t != nil {
 					s.requestClose([]int{t.ID}, false)
@@ -324,3 +325,38 @@ var keyNames = func() map[ui.Key]string {
 	}
 	return m
 }()
+
+// shortcutText 返回命令 id 的快捷键显示文本（macOS 用 ⌘⌥⇧ 符号，其他平台如“Ctrl+Shift+O”）；没有快捷键时为空串。
+func (s *Shell) shortcutText(id string) string {
+	for _, g := range s.menuGroups() {
+		for _, it := range g.items {
+			if it.id != id || it.key == 0 {
+				continue
+			}
+			name := keyNames[it.key]
+			if runtime.GOOS == "darwin" {
+				var b strings.Builder
+				for _, m := range [...]struct {
+					mod ui.Modifiers
+					sym string
+				}{{ui.Ctrl, "⌃"}, {ui.Alt, "⌥"}, {ui.Shift, "⇧"}, {ui.Cmd, "⌘"}} {
+					if it.mods&m.mod != 0 {
+						b.WriteString(m.sym)
+					}
+				}
+				return b.String() + name
+			}
+			parts := []string{}
+			for _, m := range [...]struct {
+				mod  ui.Modifiers
+				name string
+			}{{ui.Cmd, "Ctrl"}, {ui.Alt, "Alt"}, {ui.Shift, "Shift"}} {
+				if it.mods&m.mod != 0 {
+					parts = append(parts, m.name)
+				}
+			}
+			return strings.Join(append(parts, name), "+")
+		}
+	}
+	return ""
+}
