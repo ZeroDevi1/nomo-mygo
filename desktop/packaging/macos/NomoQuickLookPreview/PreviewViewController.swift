@@ -87,8 +87,16 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
                 bodyFamily: options.documentFont, monoFamily: options.monoFont,
                 classic: options.documentStyleID == "nomo-classic", baseURL: url.deletingLastPathComponent()
             )
-            // 解析与富文本构建不触碰视图，放到后台，避免大文档阻塞扩展主线程。
-            let rendered = await Task.detached(priority: .userInitiated) { RenderedText(renderer.render(markdown)) }.value.text
+            // 解析与富文本构建不触碰视图，放到后台，避免大文档阻塞扩展主线程。大文件只渲染开头（约 1 秒每 MB），
+            // 末尾附截断提示。
+            let rendered = await Task.detached(priority: .userInitiated) { () -> RenderedText in
+                let (shown, truncated) = MarkdownRenderer.truncate(markdown)
+                let text = NSMutableAttributedString(attributedString: renderer.render(shown))
+                if truncated {
+                    text.append(renderer.truncationNote(total: markdown.utf8.count, shown: shown.utf8.count))
+                }
+                return RenderedText(text)
+            }.value.text
             let background = palette.color("documentBackground")
             scrollView.backgroundColor = background
             textView.backgroundColor = background

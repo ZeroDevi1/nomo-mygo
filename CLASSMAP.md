@@ -42,6 +42,7 @@
 | 代码块语法高亮 | `desktop/ui/mdedit/highlight.go` | `view.go`, `blocks.go` | 修改代码块着色、Tokenizer 跨行状态缓存 |
 | 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载、GIF 动画 |
 | 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `view.go`（`rowBox`）, `draw.go`, `input.go` | 修改列宽策略（原版 widths.ts）、超宽表格横向滚动、单元格裁剪 |
+| 文档元数据卡片（front matter） | `desktop/ui/mdedit/frontmatter.go` | `blocks.go`（front matter 一行）、`htmlpreview.go`（`previewFrontMatter`）、`draw.go`（展开时的代码框） | 修改卡片字段解析（同原版 parseFrontMatterFields）与版式、点击进入原文 |
 | HTML 块预览、注释卡片、目录卡片 | `desktop/ui/mdedit/htmlpreview.go` | `blocks.go`, `document.go`（`KindToc`）, `imageview.go` | 修改可预览的 HTML 白名单与排版、注释/目录卡片样式、目录点击跳转 |
 | 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go`（离屏 WebView 渲染服务） | `desktop/ui/render`（渲染页 render.html / render.js 与随附的 KaTeX 0.17.0、Mermaid 11.15.0）, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`）, `export.go`（`renderExportMarkup`） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线；升级 KaTeX / Mermaid 时替换 assets 并更新 THIRD_PARTY_NOTICES.md |
 | Word（.docx）导出 | `desktop/ui/word`（`Build`：docx.go、media.go、parts.go） | `desktop/ui/shell/export.go`（`exportWord`）, `mdedit.HeadingIDs`（目录锚点） | 修改 Word 版式与样式、块与行内的转换、图片与公式嵌入、资源预算与降级说明 |
@@ -138,7 +139,7 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | macOS 扩展入口 | `desktop/packaging/macos/NomoQuickLookPreview/PreviewViewController.swift` | `MarkdownRenderer.swift`, `BuiltinThemes.swift` | 读取文件、Nomo 设置与用户主题，用 NSTextView 显示原生渲染结果 |
-| Quick Look 原生 Markdown 渲染 | `desktop/packaging/macos/NomoQuickLookPreview/MarkdownRenderer.swift` | `PreviewViewController.swift` | 修改 PresentationIntent 到富文本的映射（标题、列表、引用 / 提示块、代码、表格、图片） |
+| Quick Look 原生 Markdown 渲染 | `desktop/packaging/macos/NomoQuickLookPreview/MarkdownRenderer.swift` | `PreviewViewController.swift` | 修改 PresentationIntent 到富文本的映射（标题、列表、引用 / 提示块、代码、表格、图片）、行内 HTML 样式、公式与上下标的预处理、元数据卡片、大文件截断（`previewLimit`） |
 
 ### 软件更新
 

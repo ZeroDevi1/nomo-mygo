@@ -580,3 +580,14 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **导出精细排版**：排版包编译为 WebAssembly（gzip 后 1.3 MB，构建时由 `scripts/kpwasm` 生成到 `desktop/ui/kpexport/gen`，不纳入版本库；mygo.json 的 buildCommand 调用），连同 Go 的 wasm_exec.js 与 `kp.js` 内联到导出文档：页面测量字素宽度，按 WebAssembly 返回的断行插入换行、字距、行首压缩与连字符；窗口变化时重排，PDF 打印前按版心重排。单元构造规则与编辑区（mdedit/kp.go）一致。开启时导出文件约增加 1.7 MB；未生成 WebAssembly 时导出不含精排并记日志。浏览器实测：纯中文段落非末行右缘均为 520.1（行宽 520），末行不拉伸；中英混排的示例段落两端对齐无解，按算法回退左对齐（与编辑区相同）。
 
 验证：`go vet`（macOS、Windows、Linux、js/wasm）、`go test ./...`；新增 `TestJapaneseMessages`、`TestExportRenderMarkers`、`TestBuildDocx`、`TestBuildDocxFallbacks`、`TestBuildDocxBudget`、`TestLayoutJustifies`、`TestScript`。实机（macOS，/Applications 安装的构建）：编辑区行内公式、公式块与 Mermaid 流程图渲染正确。未实机验证：导出 Word / HTML / PDF 的实际文件（保存面板在后台无法选择文件夹，未取得全屏控制）、日文界面截图、Word / WPS 打开 .docx 的排版。
+
+### 9.31 文档元数据卡片与 Quick Look 渲染修正（2026-10-24）
+
+- **文档元数据卡片**（`mdedit/frontmatter.go`）：front matter 收起时显示为原版 v0.6.2 FrontMatterCard 的卡片（标题或“文档元数据”、状态、创建 / 更新日期、更多元数据数、标签；字段解析同原版 parseFrontMatterFields），点击进入原文（代码框），光标离开后收起。实机（macOS，/Applications）核对卡片显示、点击展开与收起。
+- **Quick Look**（`MarkdownRenderer.swift`）：
+  - front matter 显示为同样的元数据卡片（文字随系统语言：简体、繁体、日文、英文）；
+  - 行内 HTML 按编辑区支持的标签转为样式（u、mark、kbd/code/samp、sup/sub、s/del、b/strong、i/em、small、span / font 颜色、a），此前只去掉标签、样式丢失；行内注释不显示；HTML 行里的换行实体与连续空白折叠为一个空格（此前导致段首空行与缩进）；
+  - `$$` 公式块与行内 `$…$` 按源码（等宽）原样显示，此前反斜杠被 Markdown 转义吃掉（`\\` 变成 `\`）；`^上标^`、`~下标~` 同编辑区；货币写法（`$5`）不当作公式；
+  - 大文件只预览开头 512 KB（截在围栏代码块外的空行处），末尾提示文件大小与完整内容请用 Nomo 打开：10 MiB 混合文档离屏渲染由约 9.0 秒降到 0.53 秒。
+  - 测试结果文档中“A. 渲染与交互”那张表按原文显示：表头 19 列、分隔行 20 列，按 GFM 规则不构成表格（GitHub 与编辑区同样不渲染），属文件本身问题，未改渲染器。
+- 验证：`go test ./...`；Swift 预览以与扩展相同的视图配置离屏排版截图（示例文档全部 22 页、行内语法样例、10 MiB 文档计时）。未在系统 Quick Look 面板中截图（面板由系统服务进程绘制，后台无法截取）。
