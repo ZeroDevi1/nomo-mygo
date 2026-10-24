@@ -51,17 +51,17 @@ SmartScreen or Gatekeeper may prompt on first launch; download from this project
 ## Features
 
 - **Markdown editing**: Live preview, source and split modes, with `/` for quick insertion.
-- **Rich content**: Tables, syntax highlighting, math formulas and Mermaid diagrams.
+- **Rich content**: Tables, syntax highlighting, callouts and text colors; math formulas and Mermaid diagrams are shown as source.
 - **File management**: Type to locate files in the explorer, work in multiple tabs and edit large TXT / JSON files in segments.
 - **Save and restore**: Optional autosave and local Markdown snapshots, plus workspace and reading position restoration.
 - **Comfortable writing**: Light and dark themes, [custom color themes and fonts](docs/custom-themes.md) (guide in Chinese), optional fine typography and an always-on-top Markdown mini window.
-- **Export and preview**: Export HTML / PDF / Word (.docx), with editable Word text and tables, formulas and diagrams as images, and Quick Look previews on macOS.
+- **Export and preview**: Export HTML / PDF (paper size, margins, page numbers, header and footer), and Quick Look previews on macOS.
 
 See [release notes](https://github.com/nomo-md/nomo/releases) for version changes.
 
 ## Development
 
-The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`); math, Mermaid and Word export run in a bundled offscreen render page (`render.html`). Requires Go 1.27, Node.js 22 and pnpm 11.5.1.
+The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`), with no web front-end code. Requires Go 1.27; Node.js 22 and pnpm 11.5.1 are only used for the MyGo CLI, icon generation and formatting.
 
 - macOS: Xcode Command Line Tools; building the Quick Look extension requires the full Xcode.
 
@@ -69,6 +69,8 @@ The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) na
 pnpm install
 pnpm desktop:dev
 ```
+
+Checks and tests: `pnpm check` (`go vet`) and `pnpm test` (`go test`).
 
 ## Get Involved
 
@@ -78,4 +80,4 @@ Enjoy Nomo? [Star the project](https://github.com/nomo-md/nomo) or follow [LIXia
 
 Licensed under [AGPL-3.0-or-later](./LICENSE); contact the maintainers for separate commercial licensing. Third-party components retain their own licenses.
 
-Thanks to MyGo, markdown-it, KaTeX, Mermaid, docx and other open-source projects.
+Thanks to MyGo, pdfcpu, Lucide and other open-source projects.

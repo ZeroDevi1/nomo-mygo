@@ -23,23 +23,6 @@
 | 原生界面启动、外部打开投递、托盘菜单、PDF 与更新检查接入 | `desktop/native.go` | `desktop/external_open.go`, `desktop/tray.go`, `desktop/export.go`, `desktop/update_check.go` | 修改外壳选项、第二实例与 macOS 打开文件事件的投递、托盘菜单 |
 | 启动参数识别 | `desktop/external_open.go` | `desktop/native.go` | 修改受支持文档与文件夹的识别、去重与路径规范化 |
 
-### 前端 Markdown 库（Word 导出与离屏渲染页使用）
-
-界面已全部原生化；`src/` 只剩离屏渲染页（`render.html` → `src/render/render-entry.ts`：KaTeX、Mermaid、Word 导出）与其依赖，以及生成脚本读取的文案、主题与导出样式源文件。下列模块中提到的编辑器交互属于已移除的 WebView 界面，仅作历史说明。
-
-| Responsibility | Primary code | Related code | Change when |
-|---|---|---|---|
-| 精细段落排版 | `src/lib/typography/knuthPlass.ts` | `types.ts`, `rules.ts`, `hyphenation.ts`, `measure.ts`, `renderPlan.ts`, `positions.ts`, `solver.ts`, `typography.worker.ts` | 修改 KP 间距质量评分、两端/左对齐选择、中文规则、英文 Liang 断词、可取消分批/有界同步测量、目标几何快照、文字测量 LRU 或位置映射 |
-| 只读与离线排版 | `src/lib/typography/dom.ts` | `renderPlan.ts`, `selectionPaint.ts`, `exportRuntime.ts`, `exportPrint.ts`, `dom.test.ts`, `scripts/typography-runtime-plugin.ts` | 修改只读布局、图片克隆的加载失效、字距与连续选区背景、离线运行时或打印就绪契约 |
-| Schema 定义 | `src/lib/editor-core/schema.ts` | `src/lib/editor-core/callout/calloutSchema.ts` | 新增/修改节点或 mark 类型 |
-| Markdown 解析与序列化 | `src/lib/editor-core/markdown.ts` | `markdownTokenizer.ts`, `markdownSerialization.ts`, `src/lib/editor-core/callout/`, `html/` | Markdown 与 ProseMirror doc 互转规则变更；Word 可选解析临时放行图片来源，默认编辑与链接校验保持不变；纯 tokenizer 与序列化可供 Worker 复用 |
-| Markdown 源码行到语义块导航 | `src/lib/editor-core/markdown.ts`,  | — | 诊断、大纲等功能需要从源码行定位到最近的语义顶层块 |
-| HTML 安全策略 | `src/lib/editor-core/html/htmlPolicy.ts` | `src/lib/editor-core/html/htmlClassifier.ts` | 可编辑 HTML 标签/属性白名单变更 |
-| HTML 块分类 | `src/lib/editor-core/html/htmlClassifier.ts` | `src/lib/editor-core/html/htmlPolicy.ts` | HTML 块可编辑性判断/属性提取规则变更 |
-| HTML 锚点保留 | `src/lib/editor-core/html/htmlAnchor.ts` | `schema.ts`, `markdown.ts`, `html/htmlToPmLogic.ts`, `html/pmToHtml.ts`, `markdownSerialization.ts` | 空锚点节点、含文本锚点 mark、`id/name` 属性及安全 HTML 输出规则变更 |
-| 列表创建、层级与类型切换 | `src/lib/editor-core/listCommands.ts` | `ProseMirrorEditorCore.ts`, `markdown.ts`, `editorCommands.ts` | 语义模式 Tab/Shift+Tab、列表符号输入与粘贴规则、选中项类型转换和任务列表退出清理；各入口共用局部事务 |
-| 链接安全与规范化 | `src/lib/editor-core/link.ts` | — | 链接协议白名单/序列化规则变更 |
-
 ### 原生语义编辑器原型（Go，P0）
 
 | Responsibility | Primary code | Related code | Change when |
@@ -49,8 +32,8 @@
 | 正文行高（行距排版） | `desktop/ui/mdedit/lines.go` | `view.go`（`ensureRow`）, `blocks.go`（`rowLead`）, `draw.go` | 修改行距规则、加行距后的命中测试、选区与逐行绘制 |
 | 折叠块（details） | `desktop/ui/mdedit/details.go`（识别与配对）、`detailsview.go`（视图与命令） | `blocks.go`（标记行）、`htmlpreview.go`（`previewDetails`）、`desktop/ui/shell/editormenu.go` | 修改折叠标记语法、配对与增量平移、卡片绘制、折叠隐藏与自动展开、插入/默认展开/取消折叠 |
 | 编辑区选项（代码块行号、Tab 缩进、行内代码、复制语法、默认插入） | `desktop/ui/mdedit/options.go` | `desktop/ui/shell/editoroptions.go`（设置到选项、图表模板、Ctrl 滚轮） | 修改原版 editor.updateOptions 对应的显示与插入行为 |
-| 精细排版（Knuth–Plass 断行，纯计算） | `desktop/ui/typography`（`knuthplass.go`、`rules.go`、`hyphenation.go`） | `scripts/generate-native-hyphenation.mjs`（生成 `hyphen_en_us_gen.go`）、`testdata/crosscheck.json`（原版依赖对照数据） | 修改 KP 求解、标点禁则/压缩/悬挂、中西文空白、英文断词；移植自 `src/lib/typography` |
-| 精细排版接入编辑区 | `desktop/ui/mdedit/kp.go`（测量、规则输入、逐行排版）、`kplines.go`（多行布局映射） | `view.go`（`ensureRow`）、`lines.go`（`adjacentY`）、`desktop/ui/shell/export.go`（`withTypography`） | 修改精排适用范围、测量与绘制、导出时内联原版运行时 |
+| 精细排版（Knuth–Plass 断行，纯计算） | `desktop/ui/typography`（`knuthplass.go`、`rules.go`、`hyphenation.go`） | `scripts/generate-native-hyphenation.mjs`（生成 `hyphen_en_us_gen.go`）、`testdata/crosscheck.json`（原版依赖对照数据） | 修改 KP 求解、标点禁则/压缩/悬挂、中西文空白、英文断词 |
+| 精细排版接入编辑区 | `desktop/ui/mdedit/kp.go`（测量、规则输入、逐行排版）、`kplines.go`（多行布局映射） | `view.go`（`ensureRow`）、`lines.go`（`adjacentY`） | 修改精排适用范围、测量与绘制 |
 | 单行修补（大表格/长代码块按键） | `desktop/ui/mdedit/patch.go` | `view.go`（`applyEdit`）、`document.go`（`checkpoints`） | 修改块内编辑的增量路径与 UTF-16 检查点 |
 | 原文到显示的投影 | `desktop/ui/mdedit/projection.go` | `view.go` | 修改行内标记就地展开/隐藏、行内 HTML 标签样式、实体解码、提示块标记、显示与原文偏移映射 |
 | 块组件（列表、任务、引用、提示块、表格、代码块、分割线、front matter） | `desktop/ui/mdedit/blocks.go` | `draw.go`, `view.go`, `document.go` | 修改块展开为行的规则、容器前缀、缩进与间距、装饰范围 |
@@ -60,11 +43,14 @@
 | 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载、GIF 动画 |
 | 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `view.go`（`rowBox`）, `draw.go`, `input.go` | 修改列宽策略（原版 widths.ts）、超宽表格横向滚动、单元格裁剪 |
 | HTML 块预览、注释卡片、目录卡片 | `desktop/ui/mdedit/htmlpreview.go` | `blocks.go`, `document.go`（`KindToc`）, `imageview.go` | 修改可预览的 HTML 白名单与排版、注释/目录卡片样式、目录点击跳转 |
-| 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go` | `render.html`, `src/render/render-entry.ts`, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`）, `renderdump.go`（诊断转储） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线、含文字 SVG 的栅格化；`NOMO_RENDER_DUMP=<目录>` 开启每批截图与测量的转储 |
+| 公式与 Mermaid（显示源码） | `desktop/ui/mdedit/blocks.go`（`buildRows` 的 `render`） | `view.go`（`Editor.canRender`）, `images.go`（`RenderFunc`）, `projection.go`（`leafOpts.noRender`） | 外壳未注入渲染器时公式块、Mermaid 与行内公式按源码显示；如重新接入渲染器从这里开始 |
+| 图片编辑（拖边缩放、拖动移位、右键菜单、预览） | `desktop/ui/mdedit/imageedit.go` | `input.go`（拖动与双击）, `desktop/ui/shell/imagemenu.go`（菜单与全屏预览） | 修改宽度/对齐写回原文的规则、拖动命中与绘制、图片菜单项 |
+| 文字颜色 | `desktop/ui/mdedit/textcolor.go` | `projection.go`（`style` 高位颜色索引）, `desktop/ui/shell/toolbar.go`（`colorPicker`） | 修改颜色解析、`<span style="color">` 写回、调色板 |
+| 提示块标题与折叠 | `desktop/ui/mdedit/calloutfold.go` | `projection.go`（`parseCalloutHeader`）, `blocks.go`, `draw.go`（`drawFrame`） | 修改提示块别名、自定义标题、`+`/`-` 折叠语法与点击展开 |
+| 源码模式 HTML 补全 | `desktop/ui/shell/htmlcomplete.go` | `desktop/ui/mdedit/api.go`（`Document.CodeAt`） | 修改标签/属性/CSS 补全项与触发条件 |
 | 双栏模式 | `desktop/ui/shell/split.go` | `tab.go`（双向同步）, `desktop/ui/mdedit/api.go`（`TopSourceOffset`、`ScrollToSource`） | 修改双栏布局、比例保存、活动一侧与滚动同步 |
 | 组合标签 | `desktop/ui/shell/compare.go` | `view.go`（标签栏、右键菜单）, `tab.go`（`partner`） | 修改组合/解散/交换、并排显示与活动文档 |
-| 多窗口、托盘、小窗、标签拖动排序 | `desktop/ui/shell/windows.go`, `tray.go`, `mini.go`, `view.go`（`tabDragTarget`） | `desktop/native.go`（`installNativeTray`） | 修改窗口注册与菜单分发、关闭到托盘、Markdown 小窗、标签栏内拖动排序 |
-| Word 导出 | `desktop/ui/shell/export.go`（`exportWord`） | `render.go`（`word`）, `src/render/render-entry.ts`（复用 `src/app/services/word`） | 修改 Word 导出流程与本地图片内联 |
+| 多窗口、托盘、小窗、标签拖动 | `desktop/ui/shell/windows.go`, `tray.go`, `mini.go`, `view.go`（`tabDragTarget`） | `desktop/native.go`（`installNativeTray`）, `workspace.go`（多窗口恢复） | 修改窗口注册与菜单分发、关闭到托盘与托盘图标状态、Markdown 小窗、标签拖动排序/跨窗口/拖出成新窗口、中键关闭 |
 | 测试集跑测 | `desktop/ui/mdedit/corpus_test.go`, `desktop/ui/shell/corpus_test.go` | `NOMO_CORPUS` 环境变量 | 修改测试集逐文件检查项（保真、耗时、内存）与外壳场景（编码、四标签、目录树） |
 | 输入法、键盘与命令 | `desktop/ui/mdedit/input.go` | `view.go`, `edit.go`, `structure.go` | 修改 TextInputClient、光标移动、删除、剪贴板与加粗等命令 |
 | 结构编辑 | `desktop/ui/mdedit/structure.go` | `input.go`, `blocks.go` | 修改列表/引用内回车与退出、行首退格提出容器、Tab 缩进与表格单元格切换、任务勾选 |
@@ -98,10 +84,11 @@
 | 原生表情建议与选择器 | `desktop/ui/shell/emoji.go` | `desktop/internal/emoji`, `desktop/ui/mdedit/api.go`（`CaretContext`、`Replace`）, `Document.InputVersion` | 修改冒号建议的弹出与排除条件、键盘操作、选择器分类/网格/搜索、插入目标校验 |
 | 图片粘贴、拖放与插入 | `desktop/ui/shell/images.go` | `desktop/internal/imageasset`, `mdedit` `PasteData` | 修改图片导入策略、PicGo 上传、插入的 Markdown / HTML |
 | Markdown 格式检查（状态栏与问题列表） | `desktop/ui/shell/lint.go` | `desktop/ui/mdlint` | 修改检查调度、防抖、问题弹层与跳转 |
-| 导出 HTML / PDF | `desktop/ui/shell/export.go` | `desktop/ui/themes/export.go`, `desktop/native.go`（`exportNativePDF`）, `desktop/export.go` | 修改导出文档结构、图片内联、PDF 书签标记 |
-| 界面文案与图标（生成） | `scripts/generate-native-messages.mjs`, `scripts/generate-native-icons.mjs` | `desktop/ui/shell/messages_gen.go`, `desktop/ui/icons/icons_gen.go`, `i18n.go` | 前端文案、检查规则标题或所用图标变化后重新生成 |
+| 导出 HTML / PDF | `desktop/ui/shell/export.go` | `desktop/ui/themes/export.go`, `desktop/native.go`（`exportNativePDF`）, `desktop/export.go` | 修改导出文档结构、图片内联、提示块卡片、分页标记、PDF 书签标记与版式（`PDFLayout`） |
+| 界面文案 | `desktop/ui/shell/messages.go`（直接维护） | `i18n.go`（语言选择、MyGo 内置文案语言包） | 新增或修改界面文案（简体、繁体、英文同步） |
+| 图标（生成） | `scripts/generate-native-icons.mjs` | `desktop/ui/icons/icons_gen.go` | 所用 Lucide 图标变化后重新生成 |
 | 应用与界面图标 | `desktop/ui/icons/icons.go` | `desktop/appicon.go`, `desktop/native.go` | 修改文件类型图标、提示块图标、应用图标（窗口 / Dock / 关于页） |
-| 内置主题、导出样式与 Quick Look 主题表（生成） | `scripts/generate-native-themes.mjs` | `desktop/ui/themes/builtin_gen.go`, `export_document.css`, `desktop/packaging/macos/NomoQuickLookPreview/BuiltinThemes.swift` | 前端主题注册表或导出样式变化后重新生成 |
+| 内置主题、导出样式与 Quick Look 主题表 | `desktop/ui/themes/builtin.go`（直接维护） | `export_document.css`, `desktop/packaging/macos/NomoQuickLookPreview/BuiltinThemes.swift` | 修改内置配色或导出样式；改内置主题时同步 Quick Look 主题表 |
 | 主题解析、校验与导出 | `desktop/ui/themes/themes.go` | `export.go` | 修改用户主题 JSON 规则（与 userThemeDefinition.ts 一致）、颜色解析、导出 CSS 变量 |
 | Markdown 检查规则（markdownlint 子集） | `desktop/ui/mdlint/mdlint.go` | `mdlint_test.go`（`MDLINT_DUMP` 与 markdownlint 对照） | 新增规则或调整宽松规则集 |
 | 图片资源导入与图床上传 | `desktop/internal/imageasset/imageasset.go` | — | 修改资源目录策略、同内容复用、PicGo 上传与连接测试 |
@@ -111,40 +98,19 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 八类行内原文与投影 | `src/lib/editor-core/InlineSourceCodec.ts`, `inlineSourceCommands.ts` | `markdownTokenizer.ts`, `markdown.ts`, `markdownSerialization.ts`, `schema.ts`, `ProseMirrorEditorCore.ts` | 原文/格式与位置映射、上下标语法与投影、代码字面粘贴和清除、外层格式组合、HTML 导入与输出语义 |
-| 表格自动列宽与局部滚动 | `src/lib/table-layout/widths.ts`, `src/lib/table-layout/dom.ts` | `src/lib/table-layout/export.ts`, `plugins/tableControls.ts`, `plugins/typography.ts` | 语义内容度量、合并格约束、按需列宽、视图级调度与缓存、精细排版失效、HTML/PDF 目标宽度重排；自动宽度不写入 Markdown |
-| Emoji 搜索与联网缓存 | `desktop/internal/emoji`（ 注册命令） | `src/app/i18n.emoji.ts` | 固定版本元数据、双语搜索索引（Go 版 `catalog.go` 供原生外壳，规则与前端一致）、三源错峰获取、SHA-256 校验、4 MiB 原子缓存与共享加载 |
-| 连续行选区绘制 | `src/lib/typography/selectionPaint.ts` | `dom.ts` | 合并可见行矩形、按实际行内内容限制背景宽度，保持首帧行高与像素对齐；选区折叠、转移或原生输入聚焦时同步清理本编辑区补色，释放监听与共享 CSSOM；不改正文内容或导出快照 |
+| Emoji 搜索与联网缓存 | `desktop/internal/emoji` | `desktop/ui/shell/emoji.go` | 固定版本元数据、双语搜索索引、三源错峰获取、SHA-256 校验、4 MiB 原子缓存与共享加载 |
 
 ### 文件系统与文档操作
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 关闭大文档后归还内存 | `desktop/internal/memtrim` | `desktop/ui/shell/shell.go`（`removeTab`） | 修改主动归还的阈值与延时 |
-| 渲染服务类型接口 | `src/lib/services/render.ts` | `katexMathRenderer.ts`, `mermaidDiagramRenderer.ts` | ImageLoader、CodeTokenizer、MathRenderer、DiagramRenderer 接口变更 |
 | Go 文件系统 | `desktop/internal/docfs/docfs.go` | `desktop/internal/config/config.go` | 后端文件读写、Markdown 编码转换/保持、短句柄目录快照与按需枚举 |
-
-### 大纲与导航
-
-| Responsibility | Primary code | Related code | Change when |
-|---|---|---|---|
-| 大纲服务 | `src/lib/outline/outlineService.ts` | `src/lib/outline/writingStats.ts`, `src/lib/editor-core/InlineSourceCodec.ts` | 标题语义内容与 slug、八类行内符号排除、大纲与同步统计兼容入口 |
-| 正文统计与范围索引 | `src/lib/outline/writingStats.ts` | `sourceTokenPositions.ts`, `writingStatsEngine.ts`, `writingStatsProtocol.ts` | 中英计数、可见字数、源码/语义选区上下文和索引查询 |
-| TOC 服务 | `src/lib/toc/tocService.ts` | `src/lib/outline/outlineService.ts` | 生成 TOC Markdown/目录项数据，标题字面符号转义与统一跳转 |
-
-### 渲染服务
-
-| Responsibility | Primary code | Related code | Change when |
-|---|---|---|---|
-| 图表渲染 | `src/lib/services/mermaidDiagramRenderer.ts` | — | Mermaid 图表渲染 |
-| 增强渲染调度与可见性 | `src/lib/services/renderTaskQueue.ts`,  | 代码块与 Mermaid NodeView、图表渲染器 | 有界并发、排队取消、视口及后台暂停、结果提交阅读锚点；导出主动补齐 |
 
 ### 设置与偏好
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 主题公共契约 | `src/lib/theme/types.ts` | `src/app/services/themeRegistry.ts`, 编辑器渲染器 | 颜色/样式令牌、样式档案、文档样式或渲染配置契约变更 |
-| 主题注册表 | `src/app/services/themeRegistry.ts` | `src/lib/theme/types.ts` | 内置配色、样式档案、文档样式、令牌映射或主题校验变更 |
 | Go 配置管理 | `desktop/internal/config/config.go` | `desktop/internal/config/config.go` | 应用配置 JSON 持久化、设置读写、启动前读取 |
 | 用户主题文件存储 | `desktop/internal/config/themes.go` | `desktop/ui/shell/appearance.go` | `themes/<id>.json` 列出/保存/删除、外部主题读取与模板写出、ID/大小/数量上限 |
 
@@ -153,19 +119,12 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 后端日志系统 | `desktop/internal/applog/applog.go` | — | 日志文件落盘/轮转/终端输出 |
-| PDF 导出（隐藏 WebView 原生打印、文档书签） | `desktop/export.go` | `desktop/pdf_outline.go`, `desktop/ui/shell/export.go`, `src/lib/typography/exportRuntime.ts` | 修改打印纸张与边距、排版就绪检查、书签生成 |
-
-### 导出
-
-| Responsibility | Primary code | Related code | Change when |
-|---|---|---|---|
-| 共用正文样式与打印准备 | `src/lib/typography/exportPrint.ts` | `editor-document.css`, `export-document.css`, `src/lib/typography/exportRuntime.ts` | 编辑器与导出共用展示样式（含内嵌徽章及链接布局）、目标版心、跨页分类、安全表头提升及媒体尺寸约束 |
+| PDF 导出（隐藏 WebView 原生打印、书签、页码与页眉页脚） | `desktop/export.go` | `desktop/pdf_outline.go`（`stampPageNumbers`、`stampHeaderFooter`）, `desktop/ui/shell/export.go` | 修改纸张与边距、书签、页码与页眉页脚盖印 |
 
 ### 本地化
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| 前端本地化 | `src/app/i18n.ts` | `src/app/i18n.ja.ts`, `src/paraglide/` | 界面文案/语言切换 |
 | 后端本地化 | `desktop/internal/i18n/i18n.go` | — | 菜单/托盘/系统集成文案 |
 
 ### Quick Look 预览（macOS）
@@ -186,7 +145,7 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 托盘与 Dock 图标深浅色、托盘删除、主程序文案语言 | `desktop/tray.go` | `desktop/native.go`（`installNativeTray`） | 修改托盘与 Dock 图标随外观替换、退出前删除托盘（`destroyAppTray`） |
-| 软件更新检查与安装形态 | `desktop/update_check.go` | `desktop/installation_windows.go`, `desktop/installation_other.go` | 修改 GitHub Release 检查、gh-proxy 回退与 Windows 安装形态判断 |
+| 软件更新检查、下载与安装 | `desktop/update_check.go`, `desktop/update_install.go` | `desktop/installation_windows.go`（静默安装并重启、旧版安装器检测）, `desktop/installation_other.go`, `desktop/ui/shell/update.go`（提示、进度、更新日志） | 修改 GitHub Release 检查、gh-proxy 回退、安装包下载与 MD5 校验、Windows 安装形态判断 |
 
 ### 发布与打包
 
@@ -195,7 +154,7 @@
 | macOS 构建、Quick Look 嵌入与 DMG | `scripts/build-macos.sh` | `scripts/build-macos-quicklook.sh`, `scripts/verify-macos-bundle.sh`, `desktop/packaging/macos/NomoQuickLookPreview/`, `mygo.config.ts` | 修改 MyGo 产物后处理、扩展架构/版本同步、由内向外签名（扩展保留沙盒 entitlements，主应用不带 `--deep`）或 DMG 生成 |
 | Linux 本地构建与安装 | `scripts/build-linux.sh` | `mygo.config.ts` | 修改 DEB/RPM 构建、产物定位或安装；DEB 优先通过 apt-get 解析依赖，失败时保留错误 |
 | SVG 图标与平台资源生成 | `scripts/generate-icons.mjs` | `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, `scripts/compile-macos-appicon.sh`, `desktop/tray.go` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 和移动端保持母版造型 |
-| Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.config.ts` | 修改 Store 包身份、版本映射、生产前端嵌入校验、图标 PRI 生成、Shell 扩展封装或上传产物 |
+| Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.config.ts` | 修改 Store 包身份、版本映射、MyGo 构建与产物复制、图标 PRI 生成、Shell 扩展封装或上传产物 |
 
 ## Code Unit Entries
 
@@ -210,12 +169,11 @@
 - `TextInputClient` 实现（原文 UTF-16 坐标）、键盘导航、删除/回车、剪贴板、加粗/斜体/删除线命令与结构编辑（列表/引用续写与退出、Tab 缩进、表格单元格切换、任务勾选）
 - 代码块语法高亮（MyGo editor Tokenizer）
 - 图片：Markdown 图片与 `<img>` 作为行内对象排版，只含图片的 HTML 块整块显示；`Images` 为窗口共用的按需加载缓存（本地、data URI、远程，后台解码、超大图缩小、字节预算 LRU、GIF 动画）
-- 公式与 Mermaid：作为渲染对象，经外壳注入的 `RenderFunc` 生成位图，结果进入同一缓存
+- 公式与 Mermaid：外壳注入 `RenderFunc` 时作为渲染对象生成位图；当前未注入，按源码显示
 - HTML 块静态预览（白名单与原版 sanitizeHtml 一致，含合并单元格表格）、注释卡片、目录卡片（`KindToc` 合成块）、脚注引用标签与跳转
 - 表格列宽（原版 widths.ts 策略）与超宽表格横向滚动；超长行分段排版
 
 **Does not own:**
-- 公式与图表的实际渲染（外壳 `render.go` 的离屏 WebView）
 - 精细排版与行高（P0 第 3 项）
 - 文件读写（由调用方经 `desktop/internal/docfs` 完成）
 
@@ -227,253 +185,9 @@
 - 调整原生语义编辑的投影、输入、布局或缓存策略
 
 **Do not change this when:**
-- 修改现版本 ProseMirror 编辑器行为
+- 修改外壳布局、菜单或文件操作（在 `desktop/ui/shell`）
 
 **Related tests:** `desktop/ui/mdedit/*_test.go`（`NOMO_PERF=1` 运行延迟测量，`NOMO_SNAPSHOT=<png>` 输出首屏截图）
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/scrollSyncMapping.ts`
-
-**Kind:** parser instrumentation
-
-**Owns:** 包装同一 MarkdownParser 的实际 token handler，记录真正创建的节点及嵌套源码来源，生成块边界和代码逻辑行锚点；定义只属于当前修订的只读同步数据。
-
-**Does not own:** 不更改解析规则、持久化节点属性或历史，不测量 DOM。
-
-**Called by:** `src/lib/editor-core/markdown.ts`
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
-### `src/lib/theme/types.ts`
-
-**Kind:** public contract
-
-**Owns:**
-- 明暗模式、有效配色、外观偏好、颜色令牌、主题变体和文档样式的公共类型
-- Shiki 与 Mermaid 的主题渲染配置契约
-
-**Does not own:**
-- 不拥有具体主题色值或注册逻辑
-- 不拥有主题运行时应用与持久化
-
-**Called by:** 主题注册表、主题管理器、设置模型、EditorCore 和代码/图表渲染器
-
-**Change this when:** 修改 v1 主题契约、必填令牌或渲染器主题配置
-
-**Confidence:** high
-
----
-
-### `src/app/services/themeRegistry.ts`
-
-**Kind:** registry
-
-**Owns:**
-- `nomo-default`、`nomo-amber-paper`、`nomo-classic-gray`、`nomo-github` 的亮暗变体、样式档案和预览
-- `nomo-classic`、`nomo-modern` 文档样式稳定 ID
-- 必填颜色/样式令牌到 CSS 变量的映射与主题完整性校验
-- 内置与用户主题的区分：用户主题可替换、注销，内置主题不可
-
-**Does not own:**
-- 不拥有用户当前选择或 DOM 应用
-- 不拥有配置持久化
-
-**Called by:** —
-
-**Depends on:** `src/lib/theme/types.ts`
-
-**Change this when:** 新增内置主题、调整主题令牌、文档样式或注册校验
-
-**Related tests:** `src/app/services/themeRegistry.test.ts`
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/markdown.ts`
-
-**Kind:** service
-
-**Owns：**
-- 基于 `markdown-it` 和 `prosemirror-markdown` 的 Markdown 解析
-- ProseMirror doc 序列化回 Markdown
-- 表格文本的反斜杠保留与行内代码围栏，避免序列化丢字导致后续同步锚点偏移
-- 合并格、无表头等保真表格 HTML 的完整校验与 schema 表格恢复；未知或不合法表格 HTML 保留原文
-- 顶层 Front Matter 文档属性与正文的解析、序列化
-- 表格、图片扩展属性、公式、脚注、HTML、Callout、TOC、Mermaid、注释等语法处理
-
-**Does not own：**
-- 不拥有基础 markdown-it 规则（依赖库提供）
-- 不拥有 Callout 具体解析规则（在 callout/calloutParser.ts 中）
-- 不拥有 HTML 转换逻辑（在 html/ 目录中）
-
-**Called by:** —
-
-**Depends on:** `src/lib/editor-core/schema.ts`, `src/lib/editor-core/callout/calloutParser.ts`, `src/lib/editor-core/callout/calloutSerializer.ts`, `src/lib/editor-core/html/htmlToPmLogic.ts`, `src/lib/editor-core/html/pmToHtml.ts`
-
-**Change this when：**
-- 修改 Markdown 解析规则
-- 修改 Markdown 序列化输出格式
-- 新增 Markdown 语法支持
-
-**Do not change this when：**
-- 修改编辑器 UI 行为
-- 修改渲染样式
-
-**Related tests:** `src/lib/editor-core/markdown.test.ts`
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/schema.ts`
-
-**Kind:** model
-
-**Owns：**
-- ProseMirror Schema 定义
-- 扩展 Markdown 基础 schema：图片属性、表格、公式、HTML、注释、脚注、TOC、Mermaid、Callout 等节点/mark
-
-**Does not own：**
-- 不拥有解析/序列化规则（在 markdown.ts 中）
-- 不拥有 Callout schema 细节（在 callout/calloutSchema.ts 中）
-
-**Called by:** `src/lib/editor-core/markdown.ts`, nodeViews, plugins
-
-**Depends on:** `src/lib/editor-core/callout/calloutSchema.ts`
-
-**Change this when：**
-- 新增/修改节点或 mark 类型
-- 修改文档结构约束
-
-**Do not change this when：**
-- 修改解析规则
-- 修改 UI 展示
-
-**Related tests:** `src/lib/editor-core/*.test.ts`（涉及 schema 的测试）
-
-**Confidence:** high
-
----
-
-### `src/lib/services/mermaidDiagramRenderer.ts`
-
-**Kind:** service
-
-**Owns：**
-- 调用 Mermaid 渲染图表
-- 为 Mermaid NodeView 提供 SVG
-- 按当前主题传入 Mermaid `theme` 与 `themeVariables`；初始化和渲染串行调度，允许取消过期的排队任务
-- 首次加载 Mermaid 时注册本地 `logos` 图标包，按需加载品牌图标供主编辑器与 Quick Look 离线复用
-
-**Does not own：**
-- 不拥有图表代码编辑交互（在 MermaidBlockNodeView.ts 中）
-
-**Called by:** —
-
-**Depends on:** `mermaid`, `@iconify-json/logos`
-
-**Change this when：**
-- 修改 Mermaid 配置
-- 修改图表渲染错误处理
-
-**Do not change this when：**
-- 修改图表插入流程
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
-### `src/lib/outline/outlineService.ts`
-
-**Kind:** service
-
-**Owns：**
-- 复用 `tocService.ts` 的真实 Markdown 标题集合、来源行号与统一 ID，提供大纲兼容入口
-- 同步统计兼容入口；词数、字数与范围查询由 `writingStats.ts` 负责
-
-**Does not own：**
-- 不拥有大纲 UI 展示（在 EditorWorkspace.svelte 中）
-- 不拥有大纲交互（在 outlineInteractionController.ts 中）
-
-**Called by:** —
-
-**Depends on:** `src/lib/outline/writingStats.ts`, `src/lib/toc/tocService.ts`
-
-**Change this when：**
-- 修改大纲提取算法
-- 修改同步统计兼容入口（计数规则在 writingStats.ts）
-
-**Do not change this when：**
-- 修改大纲面板 UI
-
-**Related tests:** `src/lib/outline/outlineService.test.ts`
-
-**Confidence:** high
-
----
-
-### `src/lib/toc/tocService.ts`
-
-**Kind:** service
-
-**Owns：**
-- 生成 TOC Markdown 块
-- 基于真实 Markdown 纯预处理与 token 生成目录项及来源行号，统一大纲与文档标题 ID
-- 提供标题归一化与全局唯一 ID 分配，DOM 标题属性和目录导航复用文档位置映射
-
-**Does not own：**
-- 不拥有 TOC 块展示（在 TocBlockNodeView.ts 中）
-
-**Called by:** `src/lib/outline/outlineService.ts`
-
-**Depends on:** `src/lib/editor-core/markdownTokenizer.ts`, `src/lib/editor-core/markdownSerialization.ts`, `src/lib/editor-core/InlineSourceCodec.ts`, `src/lib/editor-core/markdown.ts`（纯 tokenizer 与来源行号 API）
-
-**Change this when：**
-- 修改 TOC 生成逻辑
-- 修改目录项数据结构
-
-**Do not change this when：**
-- 修改 TOC 块渲染样式
-
-**Related tests:** `src/lib/toc/tocService.test.ts`
-
-**Confidence:** high
-
----
-
-### `src/lib/markdown/frontMatter.ts`
-
-**Kind:** utility
-
-**Owns：**
-- 识别 Markdown 开头的 YAML front matter
-- 拆出元数据块和正文
-
-**Does not own：**
-- 不拥有 front matter UI（在 FrontMatterCard.svelte 中）
-
-**Called by:** 编辑器/文档流程
-
-**Depends on:** —
-
-**Change this when：**
-- 修改 front matter 解析规则
-- 修改 YAML 边界检测
-
-**Do not change this when：**
-- 修改 front matter 展示 UI
-
-**Related tests:** `src/lib/markdown/frontMatter.test.ts`
 
 **Confidence:** high
 
@@ -541,12 +255,12 @@
 - `ConfigManager`：线程安全的配置管理器（`Arc<RwLock<AppConfig>>`）
 - `AppConfig` 结构定义：app（设置）、editor（编辑器设置）、window（窗口状态）、recent（最近打开）、workspace（工作区标签元数据）、snapshots（文档快照索引）
 - 草稿/快照正文仓库路径规则，以及旧 snapshot 正文迁移到独立内容文件
-- 设置键值存储：为前端偏好设置提供后端读写
+- 设置键值存储：原生外壳偏好的读写
 - 设置路由：按 key 前缀将设置分发到对应 section（`windowState:`、`workspaceTabs:`、`pendingFolder:` 等）
 - 启动前设置读取：在 `AppHandle` 可用前从磁盘读取配置（渲染模式、开发者模式）
 
 **Does not own：**
-- 不拥有前端设置模型与归一化（在 `settings.ts` 中）
+- 不拥有偏好模型与归一化（在 `desktop/ui/shell/prefs.go` 中）
 
 **Called by:** `desktop/main.go`（setup 中初始化）, 启动流程
 
@@ -560,7 +274,6 @@
 - 修改设置路由规则
 
 **Do not change this when：**
-- 修改前端设置 UI
 - 修改具体业务逻辑
 
 **Related tests:** `desktop/internal/config/config.go` 模块内测试
@@ -584,7 +297,7 @@
 **Does not own：**
 - 不拥有图片资源处理（在 file_system/image_assets.rs 中）
 
-**Called by:** `desktop/main.go`（注册为 IPC）, 前端 `documentFiles.ts`
+**Called by:** `desktop/main.go`（注册为 IPC）, `desktop/ui/shell`
 
 **Depends on:** `desktop/internal/config/config.go`, `encoding_rs`
 
@@ -594,7 +307,6 @@
 - 修改文件过滤/忽略规则
 
 **Do not change this when：**
-- 修改前端文件操作封装
 
 **Related tests:** `desktop/internal/docfs/docfs.go` 内联测试
 
@@ -649,136 +361,6 @@
 
 ---
 
-### `src/lib/editor-core/link.ts`
-
-**Kind:** utility
-
-**Owns:**
-- 超链接安全校验与规范化：拒绝 `javascript:` 等脚本协议，允许 `https?`/`mailto`/相对路径
-- 链接属性创建与序列化
-
-**Does not own:**
-- 不拥有链接交互 UI（在 linkInteraction.ts 和 LinkQuickEditor.svelte 中）
-
-**Called by:** `src/lib/editor-core/markdown.ts`
-
-**Depends on:** —
-
-**Change this when:**
-- 修改链接协议白名单
-- 修改链接序列化规则
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/html/htmlPolicy.ts`
-
-**Kind:** model
-
-**Owns:**
-- HTML 安全白名单：可编辑块级标签（section/div）、内联标签、允许属性
-- 危险标签集合（script/iframe/form 等）
-- 内联标签到 ProseMirror mark 的映射表
-
-**Does not own:**
-- 不拥有 HTML 分类逻辑（在 htmlClassifier.ts 中）
-
-**Called by:** `src/lib/editor-core/html/htmlClassifier.ts`, `src/lib/editor-core/html/htmlToPmLogic.ts`
-
-**Depends on:** —
-
-**Change this when:**
-- 新增可编辑 HTML 标签
-- 修改安全白名单
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/html/htmlClassifier.ts`
-
-**Kind:** utility
-
-**Owns:**
-- 无 DOM 的 HTML 块分类：仅单根及可保真的行内结构可编辑；其它结构/属性保留原文 fallback
-- 按实际属性边界提取、实体解码与安全协议校验
-- 与 HTML 导入共用现有行内原子节点的属性识别（图片、换行、数学、注释、脚注）
-
-**Does not own:**
-- 不拥有标签/mark 映射白名单（在 htmlPolicy.ts 中）
-- 不拥有 DOM 导入与 HTML 输出（在 htmlToPmLogic.ts、pmToHtml.ts 中）
-
-**Called by:** `src/lib/editor-core/markdown.ts`、`src/lib/editor-core/html/htmlToPmLogic.ts`、`src/lib/outline/writingStats.ts`
-
-**Depends on:** `htmlPolicy.ts`、`../markdownTokenizer.ts`、`htmlAnchor.ts`、`../link.ts`
-
-**Change this when:**
-- 修改 HTML 块可编辑性判断规则
-- 修改属性提取逻辑
-
-**Related tests:** `src/lib/editor-core/html/__tests__/htmlClassifier.test.ts`
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/callout/calloutTypes.ts`
-
-**Kind:** model
-
-**Owns:**
-- Callout 类型定义：5 种固定类型（note/tip/important/warning/caution）
-- 类型配置表（图标、默认标题、颜色后缀）
-- 多语言标签映射（zh-CN/zh-TW/en-US）
-
-**Does not own:**
-- 不拥有 Callout 解析/序列化（在 calloutParser.ts/calloutSerializer.ts 中）
-
-**Called by:** `src/lib/editor-core/callout/calloutSchema.ts`
-
-**Depends on:** —
-
-**Change this when:**
-- 新增 Callout 类型
-- 修改类型配置或标签
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
-### `src/lib/services/render.ts`
-
-**Kind:** model
-
-**Owns:**
-- 渲染服务类型接口：`ImageLoader`、`CodeTokenizer`、`MathRenderer`、`DiagramRenderer`
-- 图片处理设置类型：`ImageHandlingSettings`、`ImageInsertStrategy`、`ImageUploadProvider`
-- `ImageContext`、`ImageResolveResult`、`ImageImportResult` 等
-
-**Does not own:**
-- 不拥有具体渲染实现（在 shikiCodeTokenizer.ts、katexMathRenderer.ts、mermaidDiagramRenderer.ts 中）
-
-**Called by:** `src/lib/services/mermaidDiagramRenderer.ts`
-
-**Depends on:** —
-
-**Change this when:**
-- 新增渲染服务类型
-- 修改图片处理设置结构
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
 ### `desktop/export.go`
 
 **Kind:** service
@@ -810,10 +392,6 @@
 **Owns:**
 - 后端日志系统：文件落盘（`./logs/`）、5MB 轮转、终端输出
 - 日志开关 IPC（`set_logger_enabled`、`get_logger_enabled`、`log_message`）
-- 前端日志转发接收
-
-**Does not own:**
-- 不拥有前端日志生成（在 logger.ts 中）
 
 **Called by:** `desktop/main.go`（注册为 IPC）, 后端各模块（通过 `info`/`debug`/`error` 等）
 
@@ -829,53 +407,15 @@
 
 ---
 
-### `src/lib/outline/writingStats.ts`
-
-**Kind:** pure statistics / index
-
-**Owns:** 共享 tokenizer 的源码正文位置映射、ProseMirror 正文投影、中英文词边界和 Unicode 可见字符边界、累计范围查询。
-
-**Does not own:** DOM、选区修改、文件 IO 或 Worker 生命周期。
-
-**Related code:** `sourceTokenPositions.ts`, `writingStatsEngine.ts`, `writingStatsProtocol.ts`；后两者管理 Worker 内的单文档缓存与消息契约。
-
-**Related tests:** —
-
-**Confidence:** high
-
----
-
-### `src/lib/editor-core/markdownTokenizer.ts` / `markdownSerialization.ts`
-
-**Kind:** pure Markdown syntax / serialization
-
-**Owns:** 可复用的 markdown-it 规则工厂、表格/Callout/目录 token 归一化、无 DOM 的 Markdown 与选区/剪贴板纯文本序列化；普通 GFM 表格及不能保真的合并格、无表头表格 HTML 保存。
-
-**Called by:** `markdown.ts`、正文统计与统计 Worker；原模块继续重导出序列化 API。
-
-**Statistics path:** 语义选区的字符数和行数复用序列化规则流式计量，避免生成完整选区字符串；剪贴板和保存仍使用原有字符串序列化入口。
-
-**Related tests:** `src/lib/editor-core/markdown.test.ts`
-
-**Confidence:** high
-
----
-
 ## 文件与目录速查
 
 | 目录 | 用途 |
 |---|---|
 | `desktop/` | Go 桌面程序入口：启动、托盘、外部打开、PDF 导出、更新检查（`main.go`、`native.go`） |
-| `desktop/ui/shell/` | 原生界面（MyGo UI）：窗口、标签、工具栏、设置、导出、离屏渲染调用 |
+| `desktop/ui/shell/` | 原生界面（MyGo UI）：窗口、标签、工具栏、设置、导出、更新 |
 | `desktop/ui/mdedit/` | 原生语义编辑器 |
 | `desktop/ui/typography/` | 精细排版（Knuth–Plass）纯计算 |
 | `desktop/internal/` | 配置、文件读写、日志、本地化、表情目录、图片资源、内存归还 |
-| `render.html`, `src/render/` | 离屏渲染页：KaTeX、Mermaid、Word 导出（原生界面以隐藏窗口加载） |
-| `src/app/services/word/` | Word 导出模型与文档生成（离屏渲染页按需加载） |
-| `src/lib/` | 离屏渲染页与 Word 导出依赖的 Markdown 解析、排版运行时、Mermaid 渲染等 |
-| `src/app/i18n*.ts`, `project.inlang/` | 文案源文件（`scripts/generate-native-messages.mjs` 生成 `desktop/ui/shell/messages_gen.go`） |
-| `src/app/services/themeRegistry.ts`, `src/app/styles/export-document.css` | 主题与导出样式源文件（`scripts/generate-native-themes.mjs` 生成 Go 侧主题与样式） |
-| `src/paraglide/` | Inlang/Paraglide 生成的本地化代码（**不要手改**） |
 
 ---
 
@@ -884,5 +424,4 @@
 - **high**: 基于代码扫描确认的职责划分。
 - `desktop/internal/docfs/docfs.go` 未来拆分后需要更新条目。
 - `desktop/internal/config/config.go` 承担了原 SQLite 数据库的全部职责（最近打开、快照、设置），未来若拆分需更新条目。
-- `src/app/i18n.ts` 和 `src/app/i18n.ja.ts` 未单独建条目（已在 Feature Index 本地化节覆盖）。
 

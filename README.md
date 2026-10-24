@@ -51,17 +51,17 @@ brew install --cask nomo
 ## 核心功能
 
 - **Markdown 编辑**：即时预览、源码与双栏模式，输入 `/` 快速插入内容。
-- **丰富内容**：支持表格、代码高亮、数学公式与 Mermaid 图表。
+- **丰富内容**：支持表格、代码高亮、提示块与文字颜色；数学公式与 Mermaid 图表以源码显示。
 - **文件管理**：文件树键入定位、多标签，以及 TXT / JSON 大文件分段编辑。
 - **保存与恢复**：可启用自动保存和 Markdown 本地快照，恢复工作区与阅读位置。
 - **舒适写作**：浅深色主题、[自定义配色主题与字体](docs/custom-themes.md)、可手动开启的精细排版，以及可置顶的 Markdown 小窗。
-- **导出与预览**：导出 HTML / PDF / Word（.docx），Word 正文和表格可编辑，公式与图表转为图片；macOS 支持 Quick Look 快速预览。
+- **导出与预览**：导出 HTML / PDF（可设纸张、边距、页码与页眉页脚）；macOS 支持 Quick Look 快速预览。
 
 版本变化请查看[更新记录](https://github.com/nomo-md/nomo/releases)。
 
 ## 开发
 
-界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`）；公式、Mermaid 与 Word 导出由随包的离屏渲染页完成（`render.html`）。需要 Go 1.27、Node.js 22 与 pnpm 11.5.1。
+界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`），不含 Web 前端代码。需要 Go 1.27；Node.js 22 与 pnpm 11.5.1 只用于 MyGo 命令行、图标生成与格式化。
 
 - macOS：Xcode Command Line Tools；构建 Quick Look 扩展需要完整 Xcode。
 
@@ -69,6 +69,8 @@ brew install --cask nomo
 pnpm install
 pnpm desktop:dev
 ```
+
+检查与测试：`pnpm check`（`go vet`）、`pnpm test`（`go test`）。
 
 ## 参与项目
 
@@ -78,4 +80,4 @@ pnpm desktop:dev
 
 采用 [AGPL-3.0-or-later](./LICENSE) 许可证；商业授权请联系维护者，第三方组件遵循各自许可证。
 
-感谢 MyGo、markdown-it、KaTeX、Mermaid、docx 等开源项目。
+感谢 MyGo、pdfcpu、Lucide 等开源项目。

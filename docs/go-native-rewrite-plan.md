@@ -522,3 +522,28 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **公式偶发缺上标**：升级后的一次启动中，`E=mc^2` 的上标只剩一个点（公式位置正常），移开光标后不恢复，重启后正常。临时转储排查：12 次冷启动（含重新构建后的首次启动）截图逐像素一致且完整；示例文档多批渲染、反复切换主题与缩放时，截图前页面滚动始终为 0，窗口尺寸也未被屏幕限制。未能复现，原因未定（截图与编辑区绘制两侧都可能），未改渲染逻辑。
 - **诊断转储**（`desktop/ui/shell/renderdump.go`，默认关闭）：设置 `NOMO_RENDER_DUMP=<目录>` 启动后，每批渲染写出整页截图（`<批次>-page.png`）、各项裁剪位图（`<批次>-<序号>.png`）与 `<批次>.json`（时间、dpr、截图尺寸、截图前的滚动与视口、各项请求原文与测量框）；在后台 worker 中写，至多 200 批。再出现异常时，对比转储中的位图与界面即可区分是截图还是绘制的问题。
 - 验证：`TestRenderDump`；实机（release）开启时写出 3 个文件、内容与测量一致，未设置时不写文件。
+
+### 9.27 剩余功能补齐与移除前端代码（2026-10-24）
+
+补齐 9.25 未做项与后续清单：
+- **macOS 菜单中文**：`i18n.go` 引入 MyGo 的 `locales/zh-Hans`、`zh-Hant` 语言包并由 `applyAppLocale` 调用 `SetLanguages` / `SetLocale`；`mygo.config.ts` 的 Info.plist 增加 `CFBundleLocalizations`，系统自带菜单项（服务、隐藏等）也随之中文化。
+- **图片编辑**（`mdedit/imageedit.go`、`shell/imagemenu.go`）：右键菜单（预览、复制路径、在文件夹中显示、宽度 25%–100% 与原始、左中右对齐、删除）；拖右边缘缩放、拖动图片移到别处，结果写回为 `<img>` 的 `width` / `align` 或移动原文；双击全屏预览。
+- **应用内更新**（`desktop/update_install.go`、`shell/update.go`）：启动后检查，提示框显示发布说明，可“不再提醒此版本”；Windows 安装版下载安装包（显示进度、按发布的 `checksums.md5` 校验，直连失败走 gh-proxy），“重启并安装”先保存工作区，再以 `/S` 静默安装并重新启动；其他形态打开发布页。升级后首次启动显示该版本的更新日志。
+- **列表中的折叠块**：非顶层的 `<details>` / `<summary>` 标记行按卡片标题显示；插入目录后刷新目录卡片。
+- **多窗口**：工作区记录升级为 v2（每个窗口的文件夹、标签、组合与双栏比例），重启后恢复全部窗口；标签可拖到其他窗口，拖出窗口外成新窗口；中键关闭标签（MyGo 0.6.3 `HandleInput` 的 Button 2）。
+- **托盘**：所有窗口隐藏到托盘时换灰色图标；从托盘、第二实例或打开文件事件恢复窗口时还原。
+- **旧版安装器提示**：Windows 检测到旧 Tauri 版安装器的卸载项时提示到“已安装的应用”中卸载。
+- **双栏源码侧失焦**：快捷键作用域随焦点所在一侧变化，导致源码侧按 Tab 等键时焦点跳走；双栏时固定使用双栏作用域（`TestSplitSourceKeepsFocus`）。
+- **Todo&&Bug.md**：文字颜色（工具栏调色板与 `apply-text-color` 快捷键，写为 `<span style="color:…">`）、提示块扩展别名、自定义标题与 `+` / `-` 折叠、源码模式 HTML 标签/属性/CSS 补全、PDF 导出设置（纸张 A4/A5/Letter/Legal、方向、边距、页码、页眉页脚、一级标题前分页、`<!-- pagebreak -->`）、导出时提示块转为卡片等 13 项。页码与页眉页脚由 pdfcpu 在打印后盖印（WebKit 打印不重复 `position: fixed` 与 `thead`），页眉页脚文字由 MyGo 测试器离屏绘制为透明底位图。
+- **MSIX 与发布流程**：`scripts/msix/*.ps1` 改为 `mygo build` 产物与 `desktop/packaging` 路径；`release.yml` 改为 MyGo 构建矩阵，产物沿用旧文件名以兼容已安装版本的更新检查；`msix.yml` 改用 Go。均未在 Windows 与 CI 上实际运行。
+
+**移除前端代码**：删除 `src/`、`render.html`、Vite / Svelte / TypeScript 配置、前端生成脚本与 Word 导出文档；`messages_gen.go`、`builtin_gen.go` 改名为 `messages.go`、`builtin.go` 直接维护，`export_document.css` 内联原先的 `@import`；`THIRD_PARTY_NOTICES.md` 移到仓库根目录。离屏渲染页一并删除，因此：
+- 公式块、Mermaid 与行内公式在编辑区和导出中都显示源码（`mdedit` 在未注入渲染器时不建渲染对象）；
+- Word 导出移除；
+- 导出不再内联精细排版运行时，PDF 使用浏览器原生换行；
+- 9.26 的离屏渲染诊断转储随渲染页删除。
+`package.json` 只剩 MyGo 命令行、图标与断词数据源和 Prettier；`pnpm check` / `pnpm test` 改为 `go vet` / `go test`。macOS 应用包由 31.5 MB 降到 19.7 MB。
+
+未做：行内 HTML / SVG 渲染（需求不明确）；`^上标^` / `~下标~` 语法（单个 `~` 与 GFM 删除线冲突）；上下标基线（上游）。
+
+验证：`go vet`（macOS、`GOOS=windows`、`GOOS=linux`）、`go test ./desktop/...`、`pnpm install --frozen-lockfile`；新增测试 `TestCalloutHeader`、`TestCalloutFold`、`TestTextColor`、`TestImageEdit`、`TestImageResizeDrag`、`TestMoveImage`、`TestImageDragMove`、`TestUpdateFlow`、`TestInstalledNotes`、`TestHTMLCompletionItems`、`TestNestedDetailsMarkers`、`TestRefreshToc`、`TestSplitSourceKeepsFocus`、`TestPDFLayoutHTML`、`TestExportCallouts`、`TestWorkspaceMultiWindowAndGroups`、`TestAdoptTabsAcrossWindows` 及 `desktop/update_install_test.go`。实机（macOS，release，隔离 HOME）：中文菜单、提示块点击展开、工具栏文字颜色、公式块显示源码、PDF（A5、页码 “n / 5”、一级标题分页、每页页眉页脚、提示块卡片）。未实机：中键关闭、跨窗口与拖出标签（测试器不模拟系统拖放，只测了 `moveTab` / `adoptTabs`）、图片右键与拖动、更新下载安装、托盘图标；Windows 相关全部待 Windows 真机验证。

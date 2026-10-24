@@ -1,6 +1,5 @@
-// Package themes 是原生界面的颜色主题：内置主题由 scripts/generate-native-themes.mjs 从
-// src/app/services/themeRegistry.ts 生成（builtin_gen.go），用户主题读写数据目录 themes/<id>.json，
-// 解析、校验与导出规则与 src/app/services/userThemeDefinition.ts 一致，两个外壳的主题文件互通。
+// Package themes 是原生界面的颜色主题：内置主题在 builtin.go（原由前端主题注册表生成，现直接维护），用户主题
+// 读写数据目录 themes/<id>.json；解析、校验与导出规则沿用原版 userThemeDefinition.ts，旧版保存的主题文件可直接读取。
 package themes
 
 import (

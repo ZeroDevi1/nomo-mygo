@@ -1,4 +1,4 @@
-// 从 hyphenation.en-us（原版精细排版使用的美式英语 Liang 断词模式，见 public/THIRD_PARTY_NOTICES.md）生成 Go 源码，
+// 从 hyphenation.en-us（原版精细排版使用的美式英语 Liang 断词模式，见 THIRD_PARTY_NOTICES.md）生成 Go 源码，
 // 供原生精细排版（desktop/ui/typography）使用；数据原样搬运，不做修改。
 //
 // 用法：node scripts/generate-native-hyphenation.mjs
