@@ -75,4 +75,9 @@ func TestTableCommandCaretContext(t *testing.T) {
 	if ok && before != "" {
 		t.Fatalf("空单元格光标前文字 %q", before)
 	}
+	// 光标应在新单元格内：输入的文字成为该单元格内容。
+	ed.InsertText("X")
+	if !strings.Contains(ed.Doc.Source(), "| 苹果 | X | 3 |") {
+		t.Fatalf("输入后 %q", ed.Doc.Source())
+	}
 }

@@ -54,6 +54,15 @@ type Prefs struct {
 	RenderMode                  string  `json:"renderMode"`
 	DeveloperMode               bool    `json:"developerMode"`
 	SoftwareUpdateAutoCheck     bool    `json:"softwareUpdateAutoCheckEnabled"`
+	// PDF 排版（原生版新增，Todo“PDF 排版设置”）：纸张、方向、四边相同的页边距（毫米，10–40）、页眉页脚文字模板
+	// （{title}、{date}）、页码位置（none / center / right）与一级标题前分页。
+	PDFPaperSize     string  `json:"pdfPaperSize"`
+	PDFOrientation   string  `json:"pdfOrientation"`
+	PDFMarginMm      float64 `json:"pdfMarginMm"`
+	PDFHeader        string  `json:"pdfHeader"`
+	PDFFooter        string  `json:"pdfFooter"`
+	PDFPageNumbers   string  `json:"pdfPageNumbers"`
+	PDFBreakBeforeH1 bool    `json:"pdfBreakBeforeH1"`
 
 	ColorThemeID          string            `json:"colorThemeId"`
 	UIFontFamily          string            `json:"uiFontFamily"`
@@ -79,13 +88,13 @@ type ImageSettings struct {
 	DefaultImageAlign           string `json:"defaultImageAlign"`
 }
 
-// defaultShortcuts 与原版 DEFAULT_SHORTCUT_PREFERENCES 一致（Ctrl 在 macOS 上为 Command）。
+// defaultShortcuts 与原版 DEFAULT_SHORTCUT_PREFERENCES 一致（Ctrl 在 macOS 上为 Command）；apply-text-color 为原生版新增（应用最近使用的文字颜色）。
 var defaultShortcuts = map[string]string{
 	"new-file": "Ctrl+N", "open-file": "Ctrl+O", "save-file": "Ctrl+S", "export-html": "Ctrl+Shift+E",
 	"export-pdf": "Ctrl+Shift+P", "toggle-source": "Ctrl+E", "toggle-theme": "Ctrl+Shift+L",
 	"toggle-focus": "Ctrl+Shift+F", "toggle-toolbar": "Ctrl+Shift+B", "toggle-markdown-mini": "Ctrl+Alt+M",
 	"insert-code-block": "Ctrl+Shift+K", "insert-table": "Ctrl+Shift+T", "insert-math-block": "Ctrl+Shift+M",
-	"menu-link": "Ctrl+K", "menu-clear-format": "Ctrl+\\",
+	"menu-link": "Ctrl+K", "menu-clear-format": "Ctrl+\\", "apply-text-color": "Ctrl+Shift+H",
 }
 
 // defaultPrefs 与原版 DEFAULT_APP_PREFERENCES 一致。
@@ -100,7 +109,8 @@ func defaultPrefs() Prefs {
 		WritingStatsMetric: "words", DefaultCodeBlockLanguage: "ts", DefaultDiagramType: "flowchart", ZoomPercent: 100, CtrlWheelZoomEnabled: true,
 		OutlineDefaultExpandLevel: 2, CodeBlockLineNumbersVisible: true, CodeBlockIndent: "spaces-2",
 		InlineCodeRenderingEnabled: true, CopyMarkdownSyntaxEnabled: true, RenderMode: "hardware",
-		SoftwareUpdateAutoCheck: true, ColorThemeID: "nomo-default", QuickInsertEnabled: true, QuickInsertTrigger: "/",
+		SoftwareUpdateAutoCheck: true, PDFPaperSize: "A4", PDFOrientation: "portrait", PDFMarginMm: 20, PDFPageNumbers: "none",
+		ColorThemeID: "nomo-default", QuickInsertEnabled: true, QuickInsertTrigger: "/",
 		MarkdownLintRuleSet: "relaxed", ShortcutPreferences: maps.Clone(defaultShortcuts),
 		ImageHandlingSettings: ImageSettings{ImageInsertStrategy: "copy-assets", UploadProvider: "picgo",
 			PicgoServerURL: "http://127.0.0.1:36677/upload", PicgoCoreCommand: "picgo", DefaultImageAlign: "none"},
@@ -128,7 +138,9 @@ func (p *Prefs) fields() map[string]any {
 		"inlineCodeRenderingEnabled": &p.InlineCodeRenderingEnabled, "copyMarkdownSyntaxEnabled": &p.CopyMarkdownSyntaxEnabled,
 		"renderMode": &p.RenderMode, "developerMode": &p.DeveloperMode,
 		"softwareUpdateAutoCheckEnabled": &p.SoftwareUpdateAutoCheck,
-		"colorThemeId":                   &p.ColorThemeID, "uiFontFamily": &p.UIFontFamily, "documentFontFamily": &p.DocumentFontFamily,
+		"pdfPaperSize":                   &p.PDFPaperSize, "pdfOrientation": &p.PDFOrientation, "pdfMarginMm": &p.PDFMarginMm,
+		"pdfHeader": &p.PDFHeader, "pdfFooter": &p.PDFFooter, "pdfPageNumbers": &p.PDFPageNumbers, "pdfBreakBeforeH1": &p.PDFBreakBeforeH1,
+		"colorThemeId": &p.ColorThemeID, "uiFontFamily": &p.UIFontFamily, "documentFontFamily": &p.DocumentFontFamily,
 		"monoFontFamily": &p.MonoFontFamily, "quickInsertEnabled": &p.QuickInsertEnabled, "quickInsertTrigger": &p.QuickInsertTrigger,
 		"markdownLintEnabled": &p.MarkdownLintEnabled, "markdownLintRuleSet": &p.MarkdownLintRuleSet,
 		"shortcutPreferences": &p.ShortcutPreferences, "imageHandlingSettings": &p.ImageHandlingSettings,
@@ -194,6 +206,15 @@ func (p *Prefs) normalize() {
 	oneOf(&p.CodeBlockIndent, d.CodeBlockIndent, "spaces-2", "spaces-4", "tab")
 	oneOf(&p.DefaultDiagramType, d.DefaultDiagramType, diagramTypes...)
 	oneOf(&p.RenderMode, d.RenderMode, "hardware", "software")
+	oneOf(&p.PDFPaperSize, d.PDFPaperSize, "A4", "A5", "Letter", "Legal")
+	oneOf(&p.PDFOrientation, d.PDFOrientation, "portrait", "landscape")
+	clampF(&p.PDFMarginMm, 10, 40, d.PDFMarginMm)
+	oneOf(&p.PDFPageNumbers, d.PDFPageNumbers, "none", "center", "right")
+	for _, v := range []*string{&p.PDFHeader, &p.PDFFooter} {
+		if r := []rune(*v); len(r) > 200 {
+			*v = string(r[:200])
+		}
+	}
 }
 
 // Store 把单个偏好写回 config.json；key 为原版设置键。

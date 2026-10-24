@@ -11,13 +11,13 @@ import (
 
 // handleWindowClose 处理窗口关闭请求（在 OnClose 中调用），返回是否已拦截。quitting 为 true 表示由“退出”触发。
 func (s *Shell) handleWindowClose(e *mygo.CloseEvent) bool {
-	if s.quitting || !s.trayOK {
+	if s.quitting || !s.trayOK || s.closeEmpty {
 		return false
 	}
 	switch s.prefs.CloseWindowBehavior {
 	case "close-to-tray":
 		e.PreventDefault()
-		s.win.Hide()
+		s.hideToTray()
 		return true
 	case "ask-every-time":
 		e.PreventDefault()
@@ -59,7 +59,7 @@ func (s *Shell) resolveCloseChoice(behavior string) {
 		s.setPref("closeWindowBehavior")
 	}
 	if behavior == "close-to-tray" {
-		s.win.Hide()
+		s.hideToTray()
 		return
 	}
 	s.quit()
@@ -80,4 +80,28 @@ func (s *Shell) quit() {
 func (s *Shell) showFromTray() {
 	s.win.Show()
 	s.win.Focus()
+	s.hiddenToTray = false
+	s.syncTrayActive()
+}
+
+// ShowWindow 显示并聚焦窗口（第二实例、打开文件事件），窗口隐藏在托盘时一并恢复托盘图标状态。
+func (s *Shell) ShowWindow() { s.showFromTray() }
+
+// hideToTray 把窗口隐藏到托盘。
+func (s *Shell) hideToTray() {
+	s.win.Hide()
+	s.hiddenToTray = true
+	s.syncTrayActive()
+}
+
+// syncTrayActive 让托盘图标反映是否还有可见窗口。
+func (s *Shell) syncTrayActive() {
+	if s.opts.SetTrayActive == nil {
+		return
+	}
+	active := false
+	for _, sh := range registry.shells {
+		active = active || !sh.hiddenToTray
+	}
+	s.opts.SetTrayActive(active)
 }

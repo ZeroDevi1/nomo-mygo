@@ -59,11 +59,21 @@ func lowerExt(name string) string {
 	return ""
 }
 
-// Callout 返回提示块类型（0 note … 4 caution）的图标，对应原版 calloutTypes.ts。
+// calloutIcons 是提示块类型（0 note … 4 caution）的图标名，对应原版 calloutTypes.ts。
+var calloutIcons = [...]string{"info", "lightbulb", "star", "triangle-alert", "octagon-alert"}
+
+// Callout 返回提示块类型（0 note … 4 caution）的图标。
 func Callout(tone int) *ui.SVG {
-	names := [...]string{"info", "lightbulb", "star", "triangle-alert", "octagon-alert"}
-	if tone < 0 || tone >= len(names) {
+	if tone < 0 || tone >= len(calloutIcons) {
 		tone = 0
 	}
-	return Get(names[tone])
+	return Get(calloutIcons[tone])
+}
+
+// CalloutSource 返回提示块类型图标的 SVG 原文（导出 HTML 内联用）。
+func CalloutSource(tone int) string {
+	if tone < 0 || tone >= len(calloutIcons) {
+		tone = 0
+	}
+	return svgs[calloutIcons[tone]]
 }

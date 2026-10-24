@@ -35,3 +35,5 @@ func unregisterWindowsContextMenu(locale i18n.Locale) (*desktopActionPayload, er
 }
 
 func openWindowsSettings(string) error { return errors.New("该设置仅支持 Windows。") }
+
+func legacyInstallerNotice() (bool, error) { return false, nil }

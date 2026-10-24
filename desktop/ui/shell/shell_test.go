@@ -13,6 +13,7 @@ import (
 
 	"nomo/desktop/internal/config"
 	"nomo/desktop/internal/i18n"
+	"nomo/desktop/ui/mdedit"
 )
 
 func newTestShell(t *testing.T, files ...string) (*Shell, *ui.Tester) {
@@ -338,8 +339,8 @@ func TestImageSnippetLikeOriginal(t *testing.T) {
 		{"a.png", `"a"`, "", "center", "<p align=\"center\">\n  <img src=\"a.png\" alt=\"&quot;a&quot;\">\n</p>"},
 	}
 	for _, c := range cases {
-		if got := imageSnippet(c.src, c.alt, c.width, c.align); got != c.want {
-			t.Errorf("imageSnippet(%q) = %q, want %q", c.src, got, c.want)
+		if got := mdedit.ImageSnippet(c.src, c.alt, c.width, c.align); got != c.want {
+			t.Errorf("ImageSnippet(%q) = %q, want %q", c.src, got, c.want)
 		}
 	}
 }
@@ -518,46 +519,25 @@ func TestSplitModeSyncsBothPanes(t *testing.T) {
 	}
 }
 
-func TestComparisonTabs(t *testing.T) {
-	a, b := writeDoc(t, "# 甲文档\n\n甲正文\n"), filepath.Join(t.TempDir(), "b.md")
-	if err := os.WriteFile(b, []byte("# 乙文档\n\n乙正文\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	s, tt := newTestShell(t, a, b)
-	ta, tb := s.tabs[0], s.tabs[1]
-	s.combine(ta, tb)
+// TestSplitSourceKeepsFocus：双栏时点进源码栏后焦点留在源码编辑器，Tab / Shift+Tab 缩进与反缩进列表项。
+func TestSplitSourceKeepsFocus(t *testing.T) {
+	p := writeDoc(t, "- a\n- b\n")
+	s, tt := newTestShell(t, p)
+	s.prefs.SidebarHidden, s.prefs.OutlineVisible = true, false
+	s.setMode(modeSplit)
 	tt.Frame()
-	// 正文由编辑器自绘（不是可访问文本），以两篇都已排版为准。
-	if s.activeTab() != tb || ta.Ed.CacheBytes() == 0 || tb.Ed.CacheBytes() == 0 {
-		t.Fatal("组合后应并排显示两篇，活动为右侧")
-	}
-	if s.tabLabel(ta) != "doc.md | b.md" || !s.tabHidden(tb) {
-		t.Fatalf("标签栏应画成一个组合标签：%q", s.tabLabel(ta))
-	}
-	snapshot(t, tt, "comparison")
-	s.swapComparison(ta)
-	if l, r, _ := s.comparisonOf(ta); l != tb || r != ta || s.activeTab() != tb {
-		t.Fatal("交换左右后左右与活动文档不对")
-	}
-	// 关闭一篇：组合解散，另一篇恢复为普通标签。
-	s.requestClose([]int{tb.ID}, false)
+	tt.ClickAt(670, 138) // 源码栏“- b”行
 	tt.Frame()
-	if ta.partner != 0 || len(s.tabs) != 1 {
-		t.Fatalf("关闭成员后应解散：partner=%d tabs=%d", ta.partner, len(s.tabs))
+	st := s.activeTab().Source()
+	tt.Key(0, ui.KeyHome)
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if got := st.Buffer.String(); got != "- a\n  - b\n" {
+		t.Fatalf("Tab 后 %q", got)
 	}
-}
-
-func TestInlineMarkdownImages(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a b.png"), []byte("\x89PNG\r\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	src := "![甲](<a b.png>) ![乙](a%20b.png \"标题\") ![远程](https://e.com/x.png) <img src=\"a b.png\" width=\"20\">"
-	out := inlineMarkdownImages(src, dir)
-	if strings.Count(out, "data:image/png;base64,") != 3 {
-		t.Fatalf("本地图片应内联 3 处：%s", out)
-	}
-	if !strings.Contains(out, "https://e.com/x.png") || !strings.Contains(out, `"标题"`) || !strings.Contains(out, `width="20"`) {
-		t.Fatalf("远程地址、标题与属性应保留：%s", out)
+	tt.Key(ui.Shift, ui.KeyTab)
+	tt.Frame()
+	if got := st.Buffer.String(); got != "- a\n- b\n" {
+		t.Fatalf("Shift+Tab 后 %q", got)
 	}
 }

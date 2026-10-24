@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
@@ -55,6 +57,10 @@ func (s *Shell) view(c *ui.Context) {
 		s.openDropped(files)
 	}
 	dropping := root.FileDragOver()
+	// 其他窗口拖来的标签落在标签栏之外（或本窗口标签栏未显示）时加到末尾。
+	if d, ok := ui.Drop[tabDrag](root); ok && d.from != s {
+		s.adoptTabs(d.from, d.id, 0)
+	}
 	root.Children(func() {
 		if s.mini.active {
 			s.miniLayout(c)
@@ -69,6 +75,7 @@ func (s *Shell) view(c *ui.Context) {
 	s.dialogs(c)
 	w, h := c.Size()
 	s.emojiPicker(c, ui.Rect{W: w, H: h})
+	s.imagePreviewView(c)
 	if dropping {
 		s.dropHint(c, w, h)
 	}
@@ -302,27 +309,66 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 }
 
-// tabDrag 是标签栏中拖动的标签（按 ID）。
-type tabDrag struct{ id int }
+// tabDrag 是拖动中的标签：from 为来源窗口，id 为标签 ID。同一进程的其他窗口也能接收（DragData 携带同一值）。
+type tabDrag struct {
+	from *Shell
+	id   int
+}
 
-// tabDragTarget 让标签可以拖动排序：拖到另一标签上时，在放下的一侧显示强调色竖线，松开后移到那里
-// （从左往右拖放在目标之后，反之放在之前）。跨窗口拖动标签未实现。
+// tabDragTarget 让标签可以拖动（并支持中键关闭）：在本窗口标签栏内拖到另一标签上排序（从左往右拖放在目标之后，反之放在之前，放下
+// 一侧显示强调色竖线）；拖到其他窗口的标签上移入那个窗口；在所有窗口之外松开时移到新窗口（组合标签整组移动）。
 func (s *Shell) tabDragTarget(el ui.Element, tab *Tab) {
-	el.Drag(tabDrag{tab.ID})
+	el.Drag(tabDrag{s, tab.ID}).DragData(transfer.TextData(tab.Name(s.untitledName)), transfer.DragOptions{
+		Done: func(res transfer.Result) {
+			if res.Canceled && !res.Escaped && res.Err == nil && !pointInWindows(res.Point) && s.win != nil {
+				s.win.Update(func() {
+					if t := s.tabWithID(tab.ID); t != nil && len(s.tabIDsOf(t)) < len(s.tabs) {
+						s.moveToNewWindowAt(t, res.Point)
+					}
+				})
+			}
+		},
+	})
 	if el.Dragging() {
 		el.Opacity(0.5)
 	}
-	if d, over := ui.DragOver[tabDrag](el); over && d.id != tab.ID {
+	// 中键单击关闭标签（组合标签关闭整组），未保存修改照常确认。
+	el.HandleInput(func(ev ui.InputEvent) bool {
+		if ev.Kind == ui.InputPointerDown && ev.Button == 2 {
+			s.requestClose(s.tabIDsOf(tab), false)
+			return true
+		}
+		return false
+	})
+	if d, over := ui.DragOver[tabDrag](el); over && (d.from != s || d.id != tab.ID) {
 		from, to := s.findTabIndex(d.id), s.findTabIndex(tab.ID)
-		if from < to {
+		if d.from == s && from < to {
 			el.Border(2, s.ch.accent).BorderWidth(0, 2, 0, 0)
 		} else {
 			el.Border(2, s.ch.accent).BorderWidth(0, 0, 0, 2)
 		}
 	}
 	if d, ok := ui.Drop[tabDrag](el); ok {
-		s.moveTab(d.id, tab.ID)
+		if d.from == s {
+			s.moveTab(d.id, tab.ID)
+		} else {
+			s.adoptTabs(d.from, d.id, tab.ID)
+		}
 	}
+}
+
+// pointInWindows 报告屏幕点是否落在本进程的某个外壳窗口内。
+func pointInWindows(pt image.Point) bool {
+	for _, sh := range registry.shells {
+		if sh.win == nil {
+			continue
+		}
+		b := sh.win.Bounds()
+		if pt.X >= b.X && pt.X < b.X+b.Width && pt.Y >= b.Y && pt.Y < b.Y+b.Height {
+			return true
+		}
+	}
+	return false
 }
 
 // moveTab 把标签 id 移到标签 target 的位置，活动标签保持不变。
@@ -514,7 +560,12 @@ func (s *Shell) document(c *ui.Context) {
 		if left, _, ok := s.comparisonOf(tab); ok {
 			keyID = left.ID
 		}
-		ck := c.Key(fmt.Sprint(s.mode(), s.split(), keyID))
+		// 双栏时 mode() 随活动一侧（焦点）变化，不能作为键：否则点进另一侧的下一帧整块重建，刚获得的焦点随之丢失。
+		keyMode := s.mode()
+		if s.split() {
+			keyMode = modeSplit
+		}
+		ck := c.Key(fmt.Sprint(keyMode, s.split(), keyID))
 		ui.Column(ck).Grow(1).Fill().Children(func() {
 			var el ui.Element
 			if left, right, ok := s.comparisonOf(tab); ok {
@@ -540,7 +591,7 @@ func (s *Shell) document(c *ui.Context) {
 				ui.Row(ck).Grow(1).Fill().Justify(ui.Center).Padding(16, 0, 0, 0).Children(func() {
 					st := tab.Source()
 					if st.OnCompletion == nil && tab.Kind() == kindMarkdown {
-						st.OnCompletion = func(req editor.CompletionRequest) { s.sourceEmojiCompletion(tab, req) }
+						st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(tab, req) }
 					}
 					el = editor.View(ck, st).Fill().MaxWidth(820)
 				})
@@ -840,6 +891,9 @@ func (s *Shell) dialogs(c *ui.Context) {
 	s.closeChoiceDialog(c)
 	s.draftConflictDialog(c)
 	s.snapshotsDialog(c)
+	s.updateNoticeDialog(c)
+	s.installedNotesDialog(c)
+	s.legacyInstallerDialog(c)
 }
 
 func (s *Shell) toggleSidebar() {

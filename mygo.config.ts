@@ -13,10 +13,8 @@ export default defineConfig({
   main: './desktop',
   out: 'target/mygo',
 
-  devUrl: 'http://127.0.0.1:5173',
-  devCommand: 'pnpm dev',
-  buildCommand: 'pnpm build && node scripts/prepare-desktop-resources.mjs',
-  frontendDist: 'dist',
+  // 原生界面没有 Web 前端（没有 devUrl / frontendDist）；构建前只准备随包资源。
+  buildCommand: 'node scripts/prepare-desktop-resources.mjs',
 
   // 示例文档与其图片以 samples/ 目录随包分发（见 desktop/native.go 的 resolveSampleDocument）。
   resources: ['target/desktop-resources/samples'],
@@ -31,6 +29,11 @@ export default defineConfig({
     signingIdentity: process.env.APPLE_SIGNING_IDENTITY ?? '-',
     ...(existsSync(macosAssetCatalog) ? { icon: macosAssetCatalog } : {}),
     infoPlist: {
+      // 界面文案覆盖的语言：AppKit 据此用中文显示系统菜单项（关于、服务、隐藏、退出、编辑、窗口）；不声明时
+      // 应用被视为只有英文。Nomo 的文案表在 Go 中（desktop/ui/shell/messages.go），不用 MyGo 的 i18n 目录，
+      // 因此在这里手动声明，与 shell.applyAppLocale 的 SetLanguages 一致。
+      CFBundleDevelopmentRegion: 'en',
+      CFBundleLocalizations: ['en', 'zh-Hans', 'zh-Hant'],
       // 声明内嵌的 Quick Look 扩展（由 scripts/build-macos.sh 在 MyGo 构建后放入），
       // 使 App 首次被 LaunchServices 注册时交给 PlugInKit 扫描；主应用不主动执行 pluginkit。
       CFBundlePlugIns: ['Contents/PlugIns/NomoQuickLookPreview.appex'],

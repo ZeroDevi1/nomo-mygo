@@ -57,6 +57,10 @@ type exportPDFInput struct {
 	Margins         *pdfMarginsInput  `json:"margins"`
 	PrintBackground *bool             `json:"print_background"`
 	Outline         []pdfOutlineEntry `json:"outline"`
+	// PageNumbers 为页码位置：center、right 在页脚盖印“n / N”，其他值不加页码。Header、Footer 为页眉、页脚文字
+	// （空为不加），渲染为图片盖印在每页上下边距内。
+	PageNumbers    string `json:"page_numbers"`
+	Header, Footer string
 }
 
 // runPDFExport 在 30 秒期限内完成：渲染 → 校验 → 书签 → 原子写入目标文件。
@@ -106,6 +110,24 @@ func runPDFExport(input exportPDFInput) (*exportResult, error) {
 		} else {
 			applog.Info("Export", fmt.Sprintf("PDF 文档大纲生成完成：%d 项，%d ms", len(input.Outline), time.Since(started).Milliseconds()))
 			final = outlined
+		}
+	}
+	if input.Header != "" || input.Footer != "" {
+		stamped, err := stampHeaderFooter(final, input)
+		if err != nil {
+			applog.Warn("Export", "PDF 页眉页脚盖印失败，保留无页眉页脚的 PDF："+err.Error())
+			warnings = append(warnings, "PDF 已导出，但未能加入页眉页脚")
+		} else {
+			final = stamped
+		}
+	}
+	if input.PageNumbers == "center" || input.PageNumbers == "right" {
+		numbered, err := stampPageNumbers(final, input.PageNumbers, marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Bottom }))
+		if err != nil {
+			applog.Warn("Export", "PDF 页码盖印失败，保留无页码的 PDF："+err.Error())
+			warnings = append(warnings, "PDF 已导出，但未能加入页码")
+		} else {
+			final = numbered
 		}
 	}
 	if ctx.Err() != nil {
@@ -255,8 +277,13 @@ return true;
 
 // paperSizeInches 返回纵向纸张尺寸；只支持 A4 与 Letter，其他值回退 A4。
 func paperSizeInches(paper *string) (float64, float64) {
-	if paper != nil && strings.EqualFold(*paper, "letter") {
+	switch {
+	case paper != nil && strings.EqualFold(*paper, "letter"):
 		return 8.5, 11
+	case paper != nil && strings.EqualFold(*paper, "legal"):
+		return 8.5, 14
+	case paper != nil && strings.EqualFold(*paper, "a5"):
+		return 148 / millimetersPerInch, 210 / millimetersPerInch
 	}
 	if paper != nil && !strings.EqualFold(*paper, "a4") {
 		applog.Warn("Export", "暂不支持的纸张大小："+*paper+"，使用 A4")

@@ -3,6 +3,7 @@ package shell
 import (
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -80,5 +81,38 @@ func TestWindowsTitleBarLayout(t *testing.T) {
 			t.Fatalf("%v：标题栏不应再显示居中文档名", size)
 		}
 		snapshot(t, tt, "windows-"+strconv.Itoa(size[0]))
+	}
+}
+
+// TestPDFLayoutHTML：手动分页符与一级标题分页的样式；页眉页脚的占位符替换。
+func TestPDFLayoutHTML(t *testing.T) {
+	s, _ := newTestShell(t)
+	body := `<article><h1>A</h1><!-- pagebreak --><h1>B</h1></article>`
+	out, css := s.pdfLayoutHTML(body)
+	if !strings.Contains(out, `<div class="nomo-page-break"></div>`) || strings.Contains(css, "h1~h1") {
+		t.Fatalf("默认版式 %q css=%q", out, css)
+	}
+	s.prefs.PDFBreakBeforeH1, s.prefs.PDFHeader, s.prefs.PDFFooter = true, "{title} <x>", " 页脚 "
+	if _, css = s.pdfLayoutHTML(body); !strings.Contains(css, "h1~h1{break-before:page") {
+		t.Fatalf("一级标题分页 css=%q", css)
+	}
+	if l := s.pdfLayout("标题"); l.Header != "标题 <x>" || l.Footer != "页脚" {
+		t.Fatalf("页眉页脚 %+v", l)
+	}
+}
+
+// TestExportCallouts：提示块引用块换成 callout-card（类型、图标、自定义标题），普通引用块与嵌套引用不受影响。
+func TestExportCallouts(t *testing.T) {
+	in := "<blockquote>\n<p>[!warning]- 小心\n正文</p>\n<blockquote>\n<p>内层</p>\n</blockquote>\n</blockquote>\n<blockquote>\n<p>普通</p>\n</blockquote>\n<blockquote>\n<p>[!bug]</p>\n<p>第二段</p>\n</blockquote>"
+	out := exportCallouts(in)
+	if !strings.Contains(out, `<div class="callout-card" data-callout-type="warning">`) || !strings.Contains(out, `<span class="callout-title">小心</span>`) ||
+		!strings.Contains(out, `<div class="callout-body"><p>正文</p>`) || !strings.Contains(out, "<blockquote>\n<p>内层</p>\n</blockquote>") {
+		t.Fatalf("提示块 %q", out)
+	}
+	if !strings.Contains(out, "<blockquote>\n<p>普通</p>\n</blockquote>") {
+		t.Fatalf("普通引用被改写：%q", out)
+	}
+	if !strings.Contains(out, `data-callout-type="caution">`) || !strings.Contains(out, `<span class="callout-title">Bug</span>`) || strings.Contains(out, "[!bug]") {
+		t.Fatalf("扩展类型 %q", out)
 	}
 }

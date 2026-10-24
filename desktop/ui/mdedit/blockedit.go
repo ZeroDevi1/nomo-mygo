@@ -191,7 +191,9 @@ func (e *Editor) TableCommand(pos int, op string) bool {
 	}
 	text, caret := t.render(row, col)
 	e.Replace(t.start, t.end, text)
-	e.Doc.Sel = Selection{Anchor: t.start + caret, Head: t.start + caret}
+	// 光标在单元格内容起点；空单元格（“|  |”）为两个空格之间，输入后即为“| X |”。
+	at := t.start + caret
+	e.Doc.Sel = Selection{Anchor: at, Head: at}
 	return true
 }
 

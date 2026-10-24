@@ -68,7 +68,7 @@ func TestRawBlockKeepsContentIndent(t *testing.T) {
 		d := NewDocument(c.src)
 		var got []string
 		for _, b := range d.Blocks() {
-			rows, _ := buildRows(d, 0, b, maphash.MakeSeed())
+			rows, _ := buildRows(d, 0, b, maphash.MakeSeed(), true)
 			for _, r := range rows {
 				got = append(got, c.src[b.Start+r.a:b.Start+r.b])
 			}

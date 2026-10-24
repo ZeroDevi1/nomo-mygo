@@ -5,7 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"strings"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -334,4 +338,92 @@ func descendantCount(index int, nodes []outlineNode) int {
 		count += 1 + descendantCount(child, nodes)
 	}
 	return count
+}
+
+// stampPageNumbers 在每页底部盖印“页码 / 总页数”（Helvetica 9pt 灰色）：pos 为 center（页脚居中）或 right（页脚
+// 右侧，距右边缘与边距相同）。纵向位置在下边距内、距页面底边约一半边距。
+func stampPageNumbers(data []byte, pos string, bottomMarginInches float64) ([]byte, error) {
+	conf := model.NewDefaultConfiguration()
+	conf.ValidationMode = model.ValidationRelaxed
+	y := max(12, bottomMarginInches*72/2-6.5) // 与页脚文字（band 垂直居中）大致同一基线
+	anchor, x := "bc", 0.0
+	if pos == "right" {
+		anchor, x = "br", -max(18, bottomMarginInches*72)
+	}
+	desc := fmt.Sprintf("font:Helvetica, points:9, pos:%s, off:%.0f %.0f, scale:1 abs, rot:0, fillcol:#888888", anchor, x, y)
+	wm, err := api.TextWatermark(context.Background(), "%p / %P", desc, true, false, types.POINTS, conf)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if err := api.AddWatermarks(context.Background(), bytes.NewReader(data), &out, nil, wm, conf); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// bandScale 是页眉页脚图片的像素密度（每 pt 的像素数）：打印与缩放查看时文字仍清晰。
+const bandScale = 4
+
+// stampHeaderFooter 把页眉、页脚文字渲染为图片（MyGo 无头渲染，字形回退与界面一致，中文无需嵌入字体），盖印在
+// 每页上、下边距的垂直中部：页眉居中；页脚在页码居中时靠左，否则居中。宽度为版心宽度，过长的文字截断。
+func stampHeaderFooter(data []byte, input exportPDFInput) ([]byte, error) {
+	pageW, _ := paperSizeInches(input.PaperSize)
+	if input.Orientation != nil && *input.Orientation == "landscape" {
+		_, pageW = paperSizeInches(input.PaperSize)
+	}
+	left := marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Left })
+	right := marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Right })
+	top := marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Top }) * 72
+	bottom := marginInches(input.Margins, func(m *pdfMarginsInput) float64 { return m.Bottom }) * 72
+	width := (pageW - left - right) * 72
+	const bandH = 14.0 // pt
+	stamp := func(data []byte, text, pos string, dy float64, align ui.Align) ([]byte, error) {
+		img := renderBand(text, width, bandH, align)
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err != nil {
+			return nil, err
+		}
+		conf := model.NewDefaultConfiguration()
+		conf.ValidationMode = model.ValidationRelaxed
+		desc := fmt.Sprintf("pos:%s, off:0 %.1f, scale:%.4f abs, rot:0", pos, dy, 1.0/bandScale)
+		wm, err := api.ImageWatermarkForReader(context.Background(), &buf, desc, true, false, types.POINTS)
+		if err != nil {
+			return nil, err
+		}
+		var out bytes.Buffer
+		if err := api.AddWatermarks(context.Background(), bytes.NewReader(data), &out, nil, wm, conf); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
+	}
+	var err error
+	if input.Header != "" {
+		if data, err = stamp(data, input.Header, "tc", -(top/2 - bandH/2), ui.Center); err != nil {
+			return nil, err
+		}
+	}
+	if input.Footer != "" {
+		align := ui.Center
+		if input.PageNumbers == "center" {
+			align = ui.Start // 页码居中时页脚文字靠左，避免重叠
+		}
+		if data, err = stamp(data, input.Footer, "bc", bottom/2-bandH/2, align); err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
+}
+
+// renderBand 把一行文字渲染为 width × height pt 的透明底图片（bandScale 倍像素），9pt 灰色，单行，超长截断。
+func renderBand(text string, width, height float64, align ui.Align) image.Image {
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.Root().Background(ui.Transparent) // 透明底：不遮挡页码与正文
+		ui.Row(c).Fill().Justify(align).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, text).FontSize(9).TextColor(ui.Hex("#888888")).SingleLine().Shrink(1)
+		})
+	}, int(width), int(height))
+	tt.SetScale(bandScale)
+	tt.Frame()
+	return tt.Image()
 }

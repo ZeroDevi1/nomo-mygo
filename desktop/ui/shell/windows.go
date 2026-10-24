@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"image"
 	"slices"
 
 	"github.com/egoist/mygo"
@@ -12,7 +13,7 @@ import (
 //   - 偏好由所有窗口共享同一个 *Prefs（设置在任一窗口修改，其他窗口下一帧生效）。
 //   - macOS 的系统菜单是全局的：只由第一个窗口安装，菜单命令发给当前聚焦的窗口（current）。
 //   - 托盘只安装一次；“退出”依次关闭全部窗口（各自确认未保存的修改）。
-// 启动恢复只记录主窗口的标签（workspace.go）；跨窗口拖动标签与多窗口布局恢复未实现（原版 tab_transfer）。
+// 标签可在窗口间拖动（view.go 的 tabDragTarget）；全部窗口随工作区恢复（workspace.go），额外窗口不恢复位置与尺寸。
 
 var registry struct {
 	shells                []*Shell
@@ -81,7 +82,10 @@ func unregister(s *Shell) {
 func Current() *Shell { return registry.focused }
 
 // moveToNewWindow 把标签（组合标签整组）移到新窗口：两边共享同一份文档对象，原窗口只是不再显示它。
-func (s *Shell) moveToNewWindow(tab *Tab) {
+func (s *Shell) moveToNewWindow(tab *Tab) { s.moveToNewWindowAt(tab, image.Point{X: -1}) }
+
+// moveToNewWindowAt 同 moveToNewWindow，at.X >= 0 时把新窗口的左上角放在屏幕点 at（拖出标签松手的位置）。
+func (s *Shell) moveToNewWindowAt(tab *Tab, at image.Point) {
 	if s.opts.Config == nil {
 		return
 	}
@@ -116,6 +120,68 @@ func (s *Shell) moveToNewWindow(tab *Tab) {
 		n.addTab(t)
 	}
 	n.Open()
+	if at.X >= 0 {
+		n.win.SetPosition(at.X, at.Y)
+	}
+}
+
+// adoptTabs 把来源窗口 from 中的标签 id（组合标签整组）移到本窗口，放在标签 before 之前（0 表示末尾）。来源窗口
+// 只剩这些标签时关闭它（文档对象随标签移交，不涉及未保存确认）。
+func (s *Shell) adoptTabs(from *Shell, id, before int) {
+	if from == nil || from == s {
+		return
+	}
+	tab := from.tabWithID(id)
+	if tab == nil {
+		return
+	}
+	var moving []*Tab
+	if left, right, ok := from.comparisonOf(tab); ok {
+		moving = []*Tab{left, right}
+	} else {
+		moving = []*Tab{tab}
+	}
+	for _, t := range moving {
+		t.syncFromSource()
+		t.source = nil // 源码编辑器状态绑定原窗口，在新窗口重建
+		t.Ed.ReleaseLayouts()
+		i := from.findTabIndex(t.ID)
+		from.tabs = slices.Delete(from.tabs, i, i+1)
+	}
+	if from.active >= len(from.tabs) {
+		from.active = len(from.tabs) - 1
+	}
+	from.updateTitle()
+	// 标签 ID 只在窗口内唯一：移入时重新编号，组合关系随之更新。
+	ids := map[int]int{}
+	for _, t := range moving {
+		s.nextID++
+		ids[t.ID], t.ID = s.nextID, s.nextID
+	}
+	for _, t := range moving {
+		if t.partner != 0 {
+			t.partner = ids[t.partner]
+		}
+	}
+	at := len(s.tabs)
+	if i := s.findTabIndex(before); before != 0 && i >= 0 {
+		at = i
+	}
+	for k, t := range moving {
+		s.wirePaste(t)
+		s.tabs = slices.Insert(s.tabs, at+k, t)
+	}
+	s.active = -1
+	s.activate(at)
+	if s.win != nil {
+		s.win.Focus()
+	}
+	if len(from.tabs) == 0 && from.win != nil {
+		from.closeEmpty = true // 标签都移走了：直接关闭，不按“关闭到托盘”隐藏
+		from.win.Close()
+	} else if from.win != nil {
+		from.win.Update(func() {})
+	}
 }
 
 // Window 返回外壳的主窗口（Open 之前为 nil）。

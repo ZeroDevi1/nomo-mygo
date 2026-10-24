@@ -18,6 +18,59 @@ type toolbarState struct {
 	width                float64 // 内容宽度滑块的界面值，拖动时写回 prefs.ContentWidthPercent
 	zoomOpen             bool
 	zoom                 float64 // 缩放滑块的界面值，拖动时按 5% 取整写回 prefs.ZoomPercent
+	colorOpen            bool
+	lastColor            string // 最近使用的文字颜色（快捷键 apply-text-color 应用它），空时为色板第一种
+}
+
+// textColors 是文字颜色色板（取 Notion 的文字配色，深浅主题下都可读）。
+var textColors = []string{"#e03e3e", "#d9730d", "#dfab01", "#0f7b6c", "#0b6e99", "#6940a5", "#ad1a72", "#9b9a97"}
+
+// applyTextColor 把选区文字设为 hex 颜色（空串为去掉颜色），记为最近使用的颜色。
+func (s *Shell) applyTextColor(hex string) {
+	t := s.activeTab()
+	if t == nil || s.mode() != modeSemantic {
+		return
+	}
+	if hex == "" && s.tbar.lastColor == "" {
+		hex = textColors[0]
+	}
+	if hex != "" {
+		s.tbar.lastColor = hex
+	}
+	t.Ed.SetTextColor(hex)
+	s.focusEditor = true
+}
+
+// colorPicker 是工具栏文字颜色按钮的色板弹层：色块与“清除文字颜色”。
+func (s *Shell) colorPicker(c *ui.Context, anchor ui.Element) {
+	if anchor.Clicked() {
+		s.tbar.colorOpen = !s.tbar.colorOpen
+	}
+	ui.Popover(c, anchor, &s.tbar.colorOpen, func() {
+		ui.Column(c).Gap(8).Padding(4).Children(func() {
+			ui.Row(c).Gap(6).Children(func() {
+				for _, hex := range textColors {
+					ck := c.Key(hex)
+					sw := ui.ButtonBase(ck).Size(22, 22).Radius(11).Background(ui.Hex(hex)).Tooltip(hex)
+					if hex == s.tbar.lastColor {
+						sw.Border(2, s.ch.accent)
+					}
+					if sw.Clicked() {
+						s.tbar.colorOpen = false
+						s.applyTextColor(hex)
+					}
+				}
+			})
+			if ui.Button(c, s.tr("clearTextColor")).Clicked() {
+				s.tbar.colorOpen = false
+				t := s.activeTab()
+				if t != nil {
+					t.Ed.SetTextColor("")
+					s.focusEditor = true
+				}
+			}
+		})
+	})
 }
 
 const (
@@ -47,7 +100,7 @@ func toolbarFit(w float32, emoji, tools bool) (core, medium, low bool) {
 	if tools {
 		right += toolDivW + segmentedW + 6 + 2*toolBtnW
 	}
-	coreW := float32(9 * toolBtnW)
+	coreW := float32(10 * toolBtnW)
 	mediumW := float32(5*toolBtnW + toolDivW)
 	lowW := float32(7*toolBtnW + toolDivW)
 	core = right+coreW <= w
@@ -78,7 +131,7 @@ func (s *Shell) toolbar(c *ui.Context) {
 		}
 		divider := func() { ui.Box(c).Size(1, 16).Background(s.ch.separator).Margin(0, 6) }
 		if showCore {
-			s.toolbarCore(c, group)
+			s.toolbarCore(c, group, button)
 		}
 		if showMedium {
 			divider()
@@ -108,13 +161,14 @@ func (s *Shell) toolbar(c *ui.Context) {
 }
 
 // toolbarCore 是核心格式组（原版 toolbar-group-core）。
-func (s *Shell) toolbarCore(c *ui.Context, group func(items ...[3]string)) {
+func (s *Shell) toolbarCore(c *ui.Context, group func(items ...[3]string), button func(icon, tip string, on bool) ui.Element) {
 	group([3]string{"heading-1", s.tr("setHeadingOne"), "heading1"},
 		[3]string{"bold", s.tr("toggleBold"), "bold"}, [3]string{"italic", s.tr("toggleItalic"), "italic"},
 		[3]string{"strikethrough", s.tr("toggleStrikethrough"), "strikethrough"}, [3]string{"underline", s.tr("toggleUnderline"), "underline"},
 		[3]string{"highlighter", s.tr("toggleHighlight"), "highlight"},
 		[3]string{"superscript", s.tr("toggleSuperscript"), "superscript"}, [3]string{"subscript", s.tr("toggleSubscript"), "subscript"},
 		[3]string{"link", s.tr("editLink"), "link"})
+	s.colorPicker(c, button("palette", s.tr("textColor"), s.tbar.colorOpen))
 }
 
 // toolbarInserts 是插入组（原版 toolbar-group-low）：表格、代码块、公式、图表、脚注、目录与折叠块。

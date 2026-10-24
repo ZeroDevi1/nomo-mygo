@@ -53,9 +53,16 @@ func (e *Editor) SetImages(im *Images, dir string) {
 	if im == e.images && dir == e.baseDir {
 		return
 	}
+	could := e.canRender()
 	e.images, e.baseDir = im, dir
 	e.layoutGen++
 	e.dirty = true
+	if e.canRender() != could {
+		// 公式块与 Mermaid 的行结构取决于有无渲染器（buildRows）：可用性变化时各块重新展开。
+		for i := range e.entries {
+			e.entries[i].split = false
+		}
+	}
 }
 
 func (e *Editor) imageGen() uint64 {

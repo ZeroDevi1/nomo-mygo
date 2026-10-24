@@ -90,16 +90,19 @@ type Shell struct {
 	// “关闭 Nomo”选择框的状态。
 	installTray         func(show, quit func()) bool
 	trayOK, quitting    bool
+	closeEmpty          bool // 标签全部拖到其他窗口后关闭本窗口（不按关闭到托盘拦截）
+	hiddenToTray        bool // 窗口已隐藏到托盘
+	legacyPrompt        bool // Store 版检测到旧安装版的提示框（winintegration.go）
 	closeChoiceOpen     bool
 	closeChoiceRemember bool
-	// rend 是公式与 Mermaid 的离屏渲染服务（见 render.go），窗口打开后接入图片缓存。
-	rend renderService
 	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
 	images *mdedit.Images
 
-	quick quickState     // 快捷插入菜单，见 quickinsert.go
-	link  linkEditor     // 链接快速编辑浮层，见 linkedit.go
-	snaps snapshotsState // 历史快照窗口，见 snapshots.go
+	quick   quickState     // 快捷插入菜单，见 quickinsert.go
+	link    linkEditor     // 链接快速编辑浮层，见 linkedit.go
+	snaps   snapshotsState // 历史快照窗口，见 snapshots.go
+	preview imagePreview   // 全屏图片预览，见 imagemenu.go
+	upd     updateState    // 软件更新的检查、下载与提示，见 update.go
 	// 双栏模式（split.go）：splitActive 为活动一侧（modeSemantic / modeSource，随焦点切换）；splitPct 为左侧
 	// 宽度百分比的界面值，拖动结束后写入 prefs.SplitLeftPercent；splitSync 记录上次同步滚动时两侧的位置。
 	splitActive string
@@ -113,12 +116,14 @@ type Shell struct {
 	// loadEmoji 加载表情目录（主程序提供，可能耗时十余秒，在后台调用）；为空时不提供表情功能。
 	loadEmoji func(retry bool) ([]emoji.Entry, error)
 
-	pdfExporter func(html, path string, outline []PDFOutlineEntry) error
+	pdfExporter func(html, path string, outline []PDFOutlineEntry, layout PDFLayout) error
 	checkUpdate func() (UpdateInfo, error)
 	dark        bool // 最近一帧的明暗外观（导出 HTML 配色用），在 applyDocumentAppearance 中更新
 	iconSynced  bool // 已把 dark 交给 Options.SetIconTheme；dark 变化时重新同步
 
-	ws workspaceSaver // 主窗口的工作区记录与恢复，见 workspace.go
+	ws windowWS // 本窗口的工作区关闭快照、副本冲突与待恢复窗口，见 workspace.go
+	// closedForWorkspace 为本窗口已按关闭写入工作区（之后不再参与签名与写入）。
+	closedForWorkspace bool
 
 	focusSaved *[3]bool // 专注模式前的侧栏隐藏、大纲显示、工具栏隐藏；nil 表示不在专注模式（不写盘）
 
@@ -138,15 +143,22 @@ type Options struct {
 	// IconLight / IconDark 是应用图标 PNG（浅色 / 深色外观），用于“关于”页；可为空。
 	IconLight, IconDark []byte
 	// ExportPDF 把导出 HTML 打印为 PDF 写到 path（主程序提供，按需创建隐藏 WebView）；为空时不提供 PDF 导出。
-	ExportPDF func(html, path string, outline []PDFOutlineEntry) error
+	ExportPDF func(html, path string, outline []PDFOutlineEntry, layout PDFLayout) error
 	// CheckUpdate 检查新版本（主程序提供，可能耗时数秒，在后台调用）；为空时不显示检查更新。
 	CheckUpdate func() (UpdateInfo, error)
+	// DownloadUpdate 下载最近一次检查到的安装包并校验（主程序提供，在后台调用），progress 报告已下载与总字节；
+	// InstallUpdate 启动安装器并退出应用；ReleaseNotes 读取某个版本的发布说明。为空时不提供对应功能。
+	DownloadUpdate func(progress func(done, total int64)) error
+	InstallUpdate  func() error
+	ReleaseNotes   func(version string) (string, error)
 	// InstallTray 创建托盘图标（主程序提供）：show 恢复窗口，quit 退出；返回托盘是否可用。为空或失败时
 	// “关闭到托盘”不可用，关闭按钮总是关闭窗口。
 	InstallTray func(show, quit func()) bool
 	// SetIconTheme 让 Dock 与托盘图标跟随应用的明暗外观（主程序提供，原版 set_desktop_icon_theme）；首帧与外观
 	// 变化时在后台调用，相同值由主程序去重。为空时图标保持打包版本。
 	SetIconTheme func(dark bool)
+	// SetTrayActive 切换托盘图标的激活状态：所有窗口都隐藏到托盘时为 false（主程序提供，可为空）。
+	SetTrayActive func(active bool)
 	// LoadEmoji 加载表情目录（主程序提供，读缓存或下载，在后台调用）；retry 为 true 时忽略失败冷却。为空时不提供表情功能。
 	LoadEmoji func(retry bool) ([]emoji.Entry, error)
 	// Primary 表示应用的主窗口：记录工作区（打开的文件夹、标签与未保存文档的恢复副本），没有启动参数时恢复上次的
@@ -160,11 +172,12 @@ type Options struct {
 	Folders        []string // 启动时打开的文件夹（取第一个）
 }
 
-// UpdateInfo 是检查更新的结果：Supported 为 false 表示当前安装方式不支持自动更新（如免安装版、
-// 商店版）；Available 时 Version 为新版本号。
+// UpdateInfo 是检查更新的结果：Supported 为 false 表示当前安装方式不由应用检查更新（如商店版、开发构建）；
+// Available 时 Version 为新版本号、Notes 为其发布说明（Markdown）；Installable 表示可在应用内下载并安装（Windows
+// 安装版），否则引导到发布页。
 type UpdateInfo struct {
-	Supported, Available bool
-	Version              string
+	Supported, Available, Installable bool
+	Version, Notes                    string
 }
 
 // New 读取偏好与最近记录，并打开启动参数中的文档。
@@ -233,6 +246,15 @@ func (s *Shell) setPref(key string) {
 	}
 }
 
+// applyAppLocale 让 MyGo 自身的文字（系统菜单的“关于 / 隐藏 / 退出”、编辑与窗口菜单、对话框按钮）以及文字引擎的
+// 汉字字形选择跟随界面语言：声明 Nomo 文案覆盖的语言，再按设置 interfaceLanguage 指定或跟随系统（"system"）。
+// 不声明时 MyGo 视应用为纯英文，中文界面下的系统菜单项显示英文。
+func applyAppLocale(pref string) {
+	mygo.App.SetLanguages("en", "zh-Hans", "zh-Hant")
+	tag := map[string]string{"zh-CN": "zh-Hans", "zh-TW": "zh-Hant", "en-US": "en"}[pref]
+	mygo.App.SetLocale(tag)
+}
+
 // applyAppearance 让整个应用（窗口材质、系统控件、标题栏按钮）使用 themeMode 指定的明暗，
 // 而不只是改控件主题；否则强制深色时 macOS 的 vibrancy 材质仍是浅色。
 func applyAppearance(mode string) {
@@ -259,7 +281,6 @@ func (s *Shell) Open() *mygo.Window {
 		StateKey: stateKey, TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
 	})
 	s.post = s.win.Update
-	s.images.SetRenderer(s.rend.render)
 	s.win.OnClose(func(e *mygo.CloseEvent) {
 		if s.closingAll && len(s.closing) == 0 {
 			return
@@ -285,14 +306,17 @@ func (s *Shell) Open() *mygo.Window {
 		s.finishWorkspaceClose()
 		unregister(s)
 		s.images.Close()
-		s.rend.close()
 		if s.settings != nil {
 			s.settings.win.Close()
 		}
 	})
 	if first {
+		applyAppLocale(s.prefs.InterfaceLanguage)
 		s.installMenu()
+		s.startUpdateTasks()
+		s.checkLegacyInstaller()
 	}
+	s.openPendingWindows()
 	s.updateTitle()
 	if s.installTray != nil && !registry.trayInstalled {
 		registry.trayOK = s.installTray(func() {
@@ -389,8 +413,10 @@ func (s *Shell) addTab(t *Tab) {
 	s.activate(len(s.tabs) - 1)
 }
 
+// wirePaste 接上外壳对编辑器的钩子：粘贴图片、双击图片预览。
 func (s *Shell) wirePaste(t *Tab) {
 	t.Ed.PasteData = func(d transfer.Data) bool { return s.pasteData(t, d) }
+	t.Ed.OnImageOpen = func(src string) { s.openImagePreview(t, src) }
 }
 
 // OpenExternal 打开从系统传入的文档（启动参数、Finder 双击、第二实例）：窗口尚未打开文件夹且没有已保存路径或
@@ -562,6 +588,10 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 		return
 	}
 	t.syncFromSource()
+	// 目录区列表随标题更新（保存时改写一次，可撤销）；源码模式的缓冲随之同步。
+	if !t.plain && t.Ed.RefreshToc() && t.source != nil {
+		t.syncToSource()
+	}
 	if t.Path == "" || as {
 		name := t.Name(s.untitledName)
 		go func() {

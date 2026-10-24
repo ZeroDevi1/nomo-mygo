@@ -3,8 +3,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -19,7 +21,12 @@ import (
 
 // Windows 安装形态（供更新检查判断是否提供更新）：Store 包、NSIS 安装版或免安装版。
 
-const uninstallKey = `Software\Microsoft\Windows\CurrentVersion\Uninstall\Nomo`
+// uninstallKeys 是安装器登记卸载信息的键：MyGo 的 NSIS 安装器按应用标识（com.nomo.desktop）登记；Tauri 时期的
+// 安装器登记为 Nomo，升级前装的版本仍在那里。
+var uninstallKeys = []string{
+	`Software\Microsoft\Windows\CurrentVersion\Uninstall\` + appIdentifier,
+	`Software\Microsoft\Windows\CurrentVersion\Uninstall\Nomo`,
+}
 
 var (
 	kernel32                        = winapi.NewLazySystemDLL("kernel32.dll")
@@ -68,8 +75,10 @@ func readRegistryString(root registry.Key, path, name string) (string, bool) {
 func installLocations() []string {
 	var locations []string
 	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
-		if location, ok := readRegistryString(root, uninstallKey, "InstallLocation"); ok {
-			locations = append(locations, strings.Trim(strings.TrimSpace(location), `"`))
+		for _, key := range uninstallKeys {
+			if location, ok := readRegistryString(root, key, "InstallLocation"); ok {
+				locations = append(locations, strings.Trim(strings.TrimSpace(location), `"`))
+			}
 		}
 	}
 	return locations
@@ -119,4 +128,33 @@ func currentInstallationKind() (installationKind, error) {
 		return installationInstaller, nil
 	}
 	return installationPortable, nil
+}
+
+// launchInstallerAndExit 启动更新安装器并退出应用：经隐藏的 cmd 等应用退出（约 2 秒）后静默安装（MyGo 的 NSIS
+// 安装器支持 /S，装到登记的同一目录），完成后重新打开 Nomo；随后应用立即退出，释放被占用的可执行文件。
+// 调用方应先保存工作区（未保存文档的恢复副本），重新打开后照常恢复。
+func launchInstallerAndExit(installer string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("读取 Nomo 可执行文件路径失败：%w", err)
+	}
+	if strings.ContainsAny(installer+exe, `"%^&|<>`) {
+		return errors.New("更新路径包含 cmd 无法安全传递的字符")
+	}
+	script := fmt.Sprintf(`/c timeout /t 2 /nobreak >nul & "%s" /S & start "" "%s"`, installer, exe)
+	comspec := os.Getenv("ComSpec")
+	if comspec == "" {
+		comspec = `C:\Windows\System32\cmd.exe`
+	}
+	cmd := exec.Command(comspec)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe ` + script, HideWindow: true,
+		CreationFlags: winapi.CREATE_NEW_PROCESS_GROUP | winapi.DETACHED_PROCESS}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动更新安装器失败：%w", err)
+	}
+	go func() {
+		destroyAppTray()
+		mygo.App.Exit(0)
+	}()
+	return nil
 }

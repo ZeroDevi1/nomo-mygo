@@ -326,6 +326,9 @@ func (e *Editor) Run(name string) bool {
 		e.insertCommentBlock()
 	case "mathBlock":
 		e.wrapLines("$$\n", "\n$$")
+	case "pageBreak":
+		// 手动分页符：PDF 导出时换成分页（shell/export.go 的 pdfLayoutHTML），编辑区显示为注释卡片。
+		e.insertBlock("<!-- pagebreak -->")
 	case "callout":
 		e.insertBlock("> [!NOTE]\n> ")
 	case "clearFormat":
@@ -683,7 +686,7 @@ func (e *Editor) Focused() bool { return e.focused }
 
 // ContextTarget 描述最近一次右键位置的目标，外壳据此组织编辑区右键菜单（对应原版 contextMenu.ts 的
 // ContextMenuTarget）。Kind 为 "selection"（右键落在非空选区内）、"details"（折叠块标题行）、"table"、"code"、
-// "math"（公式块）、"mermaid"、"link"、"heading" 或 "text"；Href 为链接地址，Level 为标题级别，Lang 为代码块语言，
+// "math"（公式块）、"mermaid"、"image"、"link"、"heading" 或 "text"；Href 为链接或图片地址，Level 为标题级别，Lang 为代码块语言，
 // DetailsKey、DetailsOpen 为折叠块的键与默认展开，Pos 为右键位置的原文偏移（块命令据此定位）。
 type ContextTarget struct {
 	Kind        string
@@ -727,6 +730,9 @@ func (e *Editor) ContextTarget() ContextTarget {
 	}
 	if b.Kind == parser.Heading {
 		return ContextTarget{Kind: "heading", Level: d.md.Block(b.Index).Level}
+	}
+	if ref, ok := e.ImageAt(pos); ok {
+		return ContextTarget{Kind: "image", Href: ref.Src, Pos: pos}
 	}
 	if ins, k, ok := e.linkInline(pos); ok {
 		return ContextTarget{Kind: "link", Href: ins[k].Dest, Pos: pos}
@@ -780,4 +786,42 @@ func (e *Editor) linkInline(pos int) ([]parser.Inline, int, bool) {
 		}
 	}
 	return nil, 0, false
+}
+
+// CodeAt 报告原文偏移 pos 是否位于代码或公式中（代码块、公式块、front matter、行内代码与公式），源码模式的
+// HTML / CSS 补全据此不在代码里弹出。
+func (d *Document) CodeAt(pos int) bool {
+	i, _ := d.BlockAt(pos)
+	if i < 0 {
+		return false
+	}
+	top := d.blocks[i]
+	switch top.Kind {
+	case KindFrontMatter, parser.CodeBlock, parser.MathBlock:
+		return true
+	}
+	b := top.Index
+	for {
+		next := -1
+		for c := range d.md.Children(b) {
+			if cb := d.md.Block(c); cb.Start <= pos && pos <= cb.End {
+				next = c
+				break
+			}
+		}
+		if next < 0 {
+			break
+		}
+		b = next
+	}
+	switch d.md.Block(b).Kind {
+	case parser.CodeBlock, parser.MathBlock:
+		return true
+	}
+	for _, in := range d.md.Inlines(b) {
+		if (in.Kind == parser.Code || in.Kind == parser.Math) && in.Start < pos && pos < in.End {
+			return true
+		}
+	}
+	return false
 }

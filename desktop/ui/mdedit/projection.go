@@ -9,8 +9,13 @@ import (
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
-// style 是显示片段的样式位。
-type style uint16
+// style 是显示片段的样式位；高 8 位（stColorShift 起）为文字颜色在 projection.colors 中的下标 + 1，0 表示默认颜色。
+type style uint32
+
+const (
+	stColorShift       = 16
+	stColorMask  style = 0xff << stColorShift
+)
 
 const (
 	stBold style = 1 << iota
@@ -26,6 +31,7 @@ const (
 	stComment   // HTML 注释
 	stFootRef   // 脚注引用：显示为标签（原版 sup.footnote-ref 显示 id）
 	stSmall     // <sup>、<sub>：按正文 75% 字号显示（同脚注标签）；MyGo 的排版片段没有基线偏移，不做上下错位
+	stKbd       // <kbd>：按键样式（等宽、较深底色与圆角）
 )
 
 // run 是一段可见原文。src 偏移相对所在行（片段）的起点，块整体平移时投影仍然有效。
@@ -41,10 +47,11 @@ type run struct {
 // projection 是一个叶子块（段落、标题、表格单元格）的显示投影：原文去掉隐藏标记后的
 // 文本及其映射。显示文本是独立副本，不引用整篇原文，缓存它不会让旧版本原文常驻。
 type projection struct {
-	text string
-	runs []run
-	u16  int // 显示文本的 UTF-16 长度
-	objs []imgObj
+	text   string
+	runs   []run
+	u16    int // 显示文本的 UTF-16 长度
+	objs   []imgObj
+	colors []ui.Color // 行内 HTML 指定的文字颜色（<span style="color:…">、<font color>），由样式高位引用
 }
 
 // objChar 是行内图片在显示文本中的占位字符（U+FFFC），布局时按图片尺寸成为行内对象。
@@ -77,12 +84,14 @@ type leafOpts struct {
 	callout bool
 	// rawCode 为 true 时行内代码按原文显示（反引号可见、无代码样式），对应 inlineCodeRenderingEnabled 关闭。
 	rawCode bool
+	// noRender 为 true 时行内公式按原文显示（代码样式），不作为渲染对象（没有渲染器时）。
+	noRender bool
 }
 
 // projectLeaf 为解析器块 idx（原文区间 [start, end)）生成投影。
 func projectLeaf(d *Document, idx, start, end int, ex expansion, o leafOpts) *projection {
 	src := d.Source()[start:end]
-	pb := projBuilder{src: src, ex: ex, p: &projection{}, rawCode: o.rawCode}
+	pb := projBuilder{src: src, ex: ex, p: &projection{}, rawCode: o.rawCode, noRender: o.noRender}
 	ins := d.md.Inlines(idx)
 	if len(ins) == 0 {
 		pb.emit(0, len(src), 0, true)
@@ -125,13 +134,14 @@ func projectIdentity(text string) *projection {
 }
 
 type projBuilder struct {
-	src     string
-	ex      expansion
-	rawCode bool // 见 leafOpts.rawCode
-	p       *projection
-	pos     int // 已处理到的原文偏移（相对片段起点）
-	b       strings.Builder
-	u16     int
+	src      string
+	ex       expansion
+	rawCode  bool // 见 leafOpts.rawCode
+	noRender bool // 见 leafOpts.noRender
+	p        *projection
+	pos      int // 已处理到的原文偏移（相对片段起点）
+	b        strings.Builder
+	u16      int
 }
 
 // emit 处理 [a, z)：可见时追加为显示片段，否则跳过。a 之前未被任何节点认领的
@@ -264,7 +274,7 @@ func (pb *projBuilder) inside(a, z int) bool {
 var htmlStyles = map[string]style{
 	"strong": stBold, "b": stBold, "em": stItalic, "i": stItalic,
 	"u": stUnderline, "ins": stUnderline, "s": stStrike, "del": stStrike, "strike": stStrike,
-	"mark": stMark, "code": stCode, "span": 0, "sup": stSmall, "sub": stSmall, "kbd": stCode, "a": stLink,
+	"mark": stMark, "code": stCode, "span": 0, "font": 0, "sup": stSmall, "sub": stSmall, "kbd": stKbd, "a": stLink,
 }
 
 // htmlTag 解析单个 HTML 标签，返回小写标签名与是否为结束、自闭合标签。
@@ -388,6 +398,9 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 					}{name, cur})
 					pb.emit(a, z, cur|stMarker, show)
 					cur |= add
+					if c, ok := tagColor(name, src); ok {
+						cur = cur&^stColorMask | pb.colorIndex(c)<<stColorShift
+					}
 					break
 				}
 				pb.emit(a, z, cur|stRaw, true)
@@ -404,6 +417,10 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 				break
 			}
 			// $…$ 与 $$…$$：光标严格位于原文内时显示原文，否则显示渲染结果（原版 math_inline）。
+			if pb.noRender {
+				pb.emit(a, z, cur|stCode, true)
+				break
+			}
 			if tex, kind := inlineMath(pb.src[a:z]); tex != "" && !pb.inside(a, z) {
 				pb.object(a, z, imgObj{render: kind, src: tex, alt: tex}, cur)
 				break
@@ -471,27 +488,76 @@ func isASCIIPunct(c byte) bool {
 	return c >= '!' && c <= '/' || c >= ':' && c <= '@' || c >= '[' && c <= '`' || c >= '{' && c <= '~'
 }
 
-// calloutTypes 与原版 calloutTypes.ts 一致：类型、默认标题。
+// calloutTypes 与原版 calloutTypes.ts 一致：类型、默认标题；下标即配色与图标（tones / icons.Callout）。
 var calloutTypes = []struct{ name, label string }{
 	{"note", "Note"}, {"tip", "Tip"}, {"important", "Important"}, {"warning", "Warning"}, {"caution", "Caution"},
 }
 
-// calloutType 返回段落开头 [!TYPE] 的类型序号，不是提示块时返回 -1。
-func calloutType(src string) int {
+// calloutAliases 是 Obsidian 等常用的扩展类型，按语义归入上面的五种配色；默认标题为类型名首字母大写。
+var calloutAliases = map[string]int{
+	"abstract": 0, "summary": 0, "tldr": 0, "info": 0, "todo": 0, "quote": 0, "cite": 0,
+	"hint": 1, "success": 1, "check": 1, "done": 1,
+	"question": 2, "help": 2, "faq": 2, "example": 2,
+	"attention": 3,
+	"failure":   4, "fail": 4, "missing": 4, "danger": 4, "error": 4, "bug": 4,
+}
+
+// calloutHeader 是提示块首行 [!TYPE]±  标题 的解析结果：tone 为配色序号，fold 为 '+'（可折叠，默认展开）、'-'
+// （默认收起）或 0（不可折叠），title 为自定义标题（空表示用默认标题），label 为默认标题。
+type calloutHeader struct {
+	tone         int
+	fold         byte
+	title, label string
+}
+
+// parseCalloutHeader 解析段落开头的提示块标记行；不是提示块时 ok 为 false。未知类型按 note 处理（同 Obsidian）。
+func parseCalloutHeader(src string) (h calloutHeader, ok bool) {
 	n := calloutMarkerLen(src)
 	if n == 0 {
-		return -1
+		return h, false
 	}
-	name := strings.ToLower(src[2 : n-1])
+	end := strings.IndexByte(src, ']')
+	name := strings.ToLower(src[2:end])
+	h.tone, h.label = 0, strings.ToUpper(name[:1])+name[1:]
 	for i, t := range calloutTypes {
 		if t.name == name {
-			return i
+			h.tone, h.label = i, t.label
 		}
+	}
+	if i, ok := calloutAliases[name]; ok {
+		h.tone = i
+	}
+	rest := src[end+1 : n]
+	if rest != "" && (rest[0] == '+' || rest[0] == '-') {
+		h.fold, rest = rest[0], rest[1:]
+	}
+	h.title = strings.TrimSpace(rest)
+	return h, true
+}
+
+// ParseCallout 解析提示块标记行（[!TYPE]±  标题），供导出使用：tone 为配色序号（0 note … 4 caution），typ 为
+// 配色对应的类型名，title 为显示标题（自定义标题，没有时为默认标题）。不是提示块时 ok 为 false。
+func ParseCallout(src string) (tone int, typ, title string, ok bool) {
+	h, ok := parseCalloutHeader(src)
+	if !ok {
+		return 0, "", "", false
+	}
+	title = h.title
+	if title == "" {
+		title = h.label
+	}
+	return h.tone, calloutTypes[h.tone].name, title, true
+}
+
+// calloutType 返回段落开头 [!TYPE] 的配色序号，不是提示块时返回 -1。
+func calloutType(src string) int {
+	if h, ok := parseCalloutHeader(src); ok {
+		return h.tone
 	}
 	return -1
 }
 
-// calloutMarkerLen 返回开头 [!TYPE] 标记的字节长度，没有时返回 0。
+// calloutMarkerLen 返回开头标记行（[!TYPE]、可选的 +/- 与同一行的自定义标题，不含换行）的字节长度，没有时返回 0。
 func calloutMarkerLen(src string) int {
 	if !strings.HasPrefix(src, "[!") {
 		return 0
@@ -500,7 +566,10 @@ func calloutMarkerLen(src string) int {
 	if end < 3 || strings.ContainsAny(src[2:end], " \n") {
 		return 0
 	}
-	return end + 1
+	if nl := strings.IndexByte(src, '\n'); nl >= 0 {
+		return nl
+	}
+	return len(src)
 }
 
 // toDisp 把片段内原文偏移映射为显示 UTF-16 偏移；落在隐藏标记内时取其后的
@@ -597,4 +666,18 @@ func (e *Editor) footnoteHit(pt ui.Point) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// colorIndex 返回颜色在投影颜色表中的下标 + 1（相同颜色复用），表满（255 种）时返回 0（默认颜色）。
+func (pb *projBuilder) colorIndex(c ui.Color) style {
+	for i, x := range pb.p.colors {
+		if x == c {
+			return style(i + 1)
+		}
+	}
+	if len(pb.p.colors) >= 255 {
+		return 0
+	}
+	pb.p.colors = append(pb.p.colors, c)
+	return style(len(pb.p.colors))
 }

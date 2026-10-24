@@ -342,3 +342,27 @@ func unregisterWindowsContextMenu(locale i18n.Locale) (*desktopActionPayload, er
 	}
 	return &desktopActionPayload{OK: true, Message: i18n.Text(locale, "context_menu_unregistered_message")}, nil
 }
+
+const legacyInstallerCheckMarker = "legacy-installer-check-complete"
+
+// legacyInstallerNotice 在 Store 包首次运行时检测是否仍存在旧的安装版（MyGo 或 Tauri 安装器登记的目录中有卸载程序），
+// 只检测并提示一次（LocalState 标记）。
+func legacyInstallerNotice() (bool, error) {
+	if !isPackaged() {
+		return false, nil
+	}
+	marker, err := packageLocalStateFile(legacyInstallerCheckMarker)
+	if err != nil {
+		return false, err
+	}
+	if info, err := os.Stat(marker); err == nil && info.Mode().IsRegular() {
+		return false, nil
+	}
+	prompt := false
+	for _, location := range installLocations() {
+		if info, err := os.Stat(filepath.Join(location, "uninstall.exe")); err == nil && info.Mode().IsRegular() {
+			prompt = true
+		}
+	}
+	return prompt, writeMarker(marker)
+}

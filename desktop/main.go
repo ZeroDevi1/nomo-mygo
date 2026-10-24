@@ -1,5 +1,5 @@
 // Command desktop 是 Nomo 的桌面程序：MyGo 原生界面（desktop/ui/shell）与文件、托盘、导出、更新检查等原生能力。
-// 公式、Mermaid 与 Word 导出经隐藏窗口中的离屏渲染页（render.html）完成。
+// 没有 Web 前端；PDF 导出把 Go 生成的 HTML 交给按需创建的隐藏 WebView 打印。
 package main
 
 import (
@@ -32,7 +32,7 @@ func main() {
 	}
 	applog.Init(logsDir, config.IsDeveloperMode(dataDir))
 
-	// 离屏渲染页与 PDF 导出用隐藏的 WebView2：浏览器参数须在环境初始化前通过环境变量设置（MyGo 不提供该选项）。
+	// PDF 导出用隐藏的 WebView2：浏览器参数须在环境初始化前通过环境变量设置（MyGo 不提供该选项）。
 	if runtime.GOOS == "windows" {
 		os.Setenv(webview2ArgsEnv, webview2BrowserArgs(os.Getenv(webview2ArgsEnv), config.IsSoftwareRenderMode(dataDir)))
 	}

@@ -170,3 +170,44 @@ func (e *Editor) insertInlineMath() {
 	e.Doc.Sel = Selection{Anchor: a + 1, Head: a + 1 + len(tex)}
 	e.Doc.hist.seal()
 }
+
+// RefreshToc 把各目录区（<!-- toc --> … <!-- /toc -->）的列表原文更新为当前标题（原版目录随标题自动更新）；
+// 有变化时作为一次独立的撤销步改写并返回 true。外壳在保存前调用，编辑过程中不改写原文（目录卡片已实时显示）。
+func (e *Editor) RefreshToc() bool {
+	d := e.Doc
+	if !d.hasToc {
+		return false
+	}
+	list := tocList(d.Headings())
+	want := tocStartMarker + "\n" + list
+	if list != "" {
+		want += "\n"
+	}
+	want += tocEndMarker
+	changed := false
+	// 从后往前改写，前面目录区的偏移不受影响。
+	for k := len(d.blocks) - 1; k >= 0; k-- {
+		b := d.blocks[k]
+		if b.Kind != KindToc {
+			continue
+		}
+		src := d.Source()
+		end := strings.Index(src[b.Start:], tocEndMarker)
+		if end < 0 {
+			continue
+		}
+		z := b.Start + end + len(tocEndMarker)
+		if src[b.Start:z] == want {
+			continue
+		}
+		if !changed {
+			d.hist.seal()
+		}
+		e.applyEdit(d.Replace(b.Start, z, want, editOther))
+		changed = true
+	}
+	if changed {
+		d.hist.seal()
+	}
+	return changed
+}

@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,18 +40,6 @@ func (s *Shell) loadThemes() {
 
 // currentTheme 返回 colorThemeId 对应的主题；主题已不存在（如被删除）时回退默认。
 func (s *Shell) currentTheme() *themes.Theme { return themes.Find(s.themes, s.prefs.ColorThemeID) }
-
-// editorColors 把主题令牌映射为编辑器配色；classic 为经典块样式（引用、提示块使用 *ClassicBackground）。
-// renderThemeOf 返回公式与图表渲染使用的配色：正文前景、文档背景与 Mermaid 主题名。
-func renderThemeOf(t *themes.Theme, dark bool) renderTheme {
-	tok := t.Tokens(dark)
-	css := func(c ui.Color) string { return fmt.Sprintf("rgba(%d,%d,%d,%.3f)", c.R, c.G, c.B, float32(c.A)/255) }
-	i := 0
-	if dark {
-		i = 1
-	}
-	return renderTheme{fg: css(tok("foreground")), bg: css(tok("documentBackground")), mermaid: t.Variants[i].Mermaid}
-}
 
 func editorColors(t *themes.Theme, dark, classic bool) *mdedit.Colors {
 	tok := t.Tokens(dark)
@@ -112,10 +99,6 @@ func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 			dir = filepath.Dir(tab.Path)
 		}
 		tab.Ed.SetImages(s.images, dir)
-		// 公式与图表按当前主题渲染；主题变化后丢弃旧的渲染结果。
-		if s.rend.setTheme(renderThemeOf(t, false), renderThemeOf(t, true)) {
-			s.images.InvalidateRenders()
-		}
 		tab.Ed.SetLabels(mdedit.Labels{Comment: s.tr("comment"), Toc: s.tr("toc"), NoHeadings: s.tr("documentHasNoHeadings"),
 			DetailsTitle: s.tr("detailsTitlePlaceholder"), InlineComment: s.tr("inlineComment")})
 		if tab.source != nil {

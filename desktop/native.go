@@ -37,8 +37,7 @@ func runNativeShell(args []string) {
 		}
 		w.Update(func() {
 			target.OpenExternal(append(t.folderPaths, t.markdownPaths...))
-			w.Show()
-			w.Focus()
+			target.ShowWindow()
 		})
 	}
 	mygo.App.OnOpenFile(func(path string) { deliver(externalOpenTargets{markdownPaths: []string{path}}) })
@@ -57,8 +56,9 @@ func runNativeShell(args []string) {
 			Files: targets.markdownPaths, Folders: targets.folderPaths, IconLight: appIconLight, IconDark: appIconDark,
 			ExportPDF: exportNativePDF, CheckUpdate: checkNativeUpdate,
 			LoadEmoji:   func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appIdentifier, retry) },
-			InstallTray: installNativeTray, SetIconTheme: setDesktopIconTheme,
-			Primary: true, SampleDocument: resolveSampleDocument, Windows: nativeWindowsIntegration()})
+			InstallTray: installNativeTray, SetIconTheme: setDesktopIconTheme, SetTrayActive: setTrayActive,
+			Primary: true, SampleDocument: resolveSampleDocument, Windows: nativeWindowsIntegration(),
+			DownloadUpdate: downloadUpdate, InstallUpdate: installUpdate, ReleaseNotes: releaseNotes})
 		win = sh.Open()
 		applyAppIcon(win)
 		applog.Info("Native", "原生外壳已启动")
@@ -80,19 +80,23 @@ func applyAppIcon(win *mygo.Window) {
 	}
 }
 
-// exportNativePDF 用 WebView 版的 PDF 管线（按需创建的隐藏窗口打印，含书签后处理）导出原生外壳生成的
-// HTML；纸张、方向与边距同原版：A4、纵向、20mm。
-func exportNativePDF(html, path string, outline []shell.PDFOutlineEntry) error {
+// exportNativePDF 用隐藏窗口打印原生外壳生成的 HTML（含书签后处理），纸张、方向、边距与页码按设置“PDF 导出”。
+func exportNativePDF(html, path string, outline []shell.PDFOutlineEntry, layout shell.PDFLayout) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("创建导出目录失败：%w", err)
 	}
-	paper, orientation, background := "A4", "portrait", true
+	paper, orientation, background := layout.Paper, "portrait", true
+	if layout.Landscape {
+		orientation = "landscape"
+	}
+	m := layout.MarginMm
 	entries := make([]pdfOutlineEntry, len(outline))
 	for i, o := range outline {
 		entries[i] = pdfOutlineEntry{MarkerURI: o.MarkerURI, Title: o.Title, Level: o.Level}
 	}
 	_, err := runPDFExport(exportPDFInput{HTMLContent: html, FilePath: path, PaperSize: &paper, Orientation: &orientation,
-		Margins: &pdfMarginsInput{Top: 20, Right: 20, Bottom: 20, Left: 20}, PrintBackground: &background, Outline: entries})
+		Margins: &pdfMarginsInput{Top: m, Right: m, Bottom: m, Left: m}, PrintBackground: &background, Outline: entries,
+		PageNumbers: layout.PageNumbers, Header: layout.Header, Footer: layout.Footer})
 	return err
 }
 
@@ -102,7 +106,8 @@ func checkNativeUpdate() (shell.UpdateInfo, error) {
 	if err != nil {
 		return shell.UpdateInfo{}, err
 	}
-	return shell.UpdateInfo{Supported: p.Supported, Available: p.Available, Version: p.Version}, nil
+	return shell.UpdateInfo{Supported: p.Supported, Available: p.Available, Installable: p.Available && updateInstallable(),
+		Version: p.Version, Notes: p.Notes}, nil
 }
 
 // installNativeTray 为原生外壳创建托盘：单击恢复主窗口（Linux 只能显示菜单），菜单为“打开 Nomo / 退出”，

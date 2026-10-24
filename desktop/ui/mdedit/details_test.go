@@ -193,3 +193,27 @@ func TestDetailsIndexShiftMatchesRebuild(t *testing.T) {
 		}
 	}
 }
+
+// TestNestedDetailsMarkers：列表中的折叠块与未配对的顶层标记显示为标题行 / 分隔线预览，不再显示原文。
+func TestNestedDetailsMarkers(t *testing.T) {
+	src := "- item\n\n  <details>\n  <summary>内层 <b>标题</b></summary>\n\n  body\n\n  </details>\n\n<details>\n<summary>未配对</summary>\n"
+	ed, tt := newTester(t, src, 800, 600)
+	tt.Frame()
+	var kinds []uint8
+	for i := range ed.entries {
+		for _, r := range ed.ensure(i).rows {
+			if r.htmlKind == previewDetailsMark {
+				kinds = append(kinds, r.htmlKind)
+			}
+		}
+	}
+	if len(kinds) != 3 {
+		t.Fatalf("标记预览行 %d 个，应为 3（列表内开始、结束与未配对的开始）", len(kinds))
+	}
+	if got := detailsMarkHTML("<details open>\n<summary>A <code>x</code></summary>"); got != "<p><strong>▾ A <code>x</code></strong></p>" {
+		t.Fatalf("开始标记预览 %q", got)
+	}
+	if got := detailsMarkHTML("</details>"); got != "<hr>" {
+		t.Fatalf("结束标记预览 %q", got)
+	}
+}

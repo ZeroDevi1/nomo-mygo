@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/docfs"
+	"nomo/desktop/ui/icons"
 	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
 )
@@ -30,8 +30,7 @@ import (
 // PDF 把同一份 HTML 交给 Options.ExportPDF（主程序用按需创建的隐藏 WebView 打印，导出完即销毁，
 // 不常驻）；标题前插入书签标记，由主程序转换为 PDF 书签。
 //
-// 公式与 Mermaid 与原版一样内联 KaTeX HTML（附内联字体的 KaTeX 样式）与 SVG，由离屏渲染页生成（render.go
-// 的 markup，在写出前于后台调用）；渲染不可用或失败时保留源码并附错误说明。
+// 公式与 Mermaid 不渲染（没有离屏渲染页）：公式导出 TeX 原文（等宽显示），Mermaid 导出为代码块。
 //
 // 与原版的差异：代码高亮用 MyGo editor 的 Tokenizer 与 GitHub 配色（原版为 Shiki），未知语言不高亮；
 // 提示块按引用块显示，不附带精细排版运行时。
@@ -72,6 +71,8 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 			return "<details open" + m[len("<details"):]
 		})
 	}
+
+	out = exportCallouts(out)
 
 	// 标题：加 id（与原版目录锚点一样按标题文字生成，重复时追加序号）与 PDF 书签标记。
 	var outline []PDFOutlineEntry
@@ -122,16 +123,22 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 	if f := s.prefs.DocumentFontFamily; f != "" {
 		vars += "--md-editor-font-document: " + f + ";"
 	}
-	css := themes.ExportCSS + "\n:root{" + vars + "}"
+	// 公式不再渲染（没有离屏渲染页），导出 TeX 原文，按等宽字体显示。
+	css := themes.ExportCSS + "\n:root{" + vars + "}" +
+		"\n.markdown-body .math{font-family:var(--md-editor-font-mono,ui-monospace,monospace);white-space:pre-wrap}"
+	title := strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName)))
+	page := `<article class="nomo-export markdown-body">` + out + `</article>`
 	if forPDF {
 		css += "\n.nomo-pdf-outline-heading{position:relative}.nomo-pdf-outline-marker{position:absolute;top:0;left:0;display:block;" +
 			"width:1px;height:1px;overflow:hidden;color:transparent;font-size:0;line-height:0;text-decoration:none}"
+		var extra string
+		page, extra = s.pdfLayoutHTML(page)
+		css += extra
 	}
 	block := "modern"
 	if s.prefs.DocumentStyleID == "nomo-classic" {
 		block = "classic"
 	}
-	title := strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName)))
 	doc := `<!DOCTYPE html>
 <html lang="` + s.locale.Tag() + `" data-theme="` + scheme + `" data-color-theme="` + html.EscapeString(t.ID) +
 		`" data-theme-style="` + html.EscapeString(t.StyleProfile) + `" data-document-style="` + html.EscapeString(s.prefs.DocumentStyleID) +
@@ -142,11 +149,100 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
   <title>` + html.EscapeString(title) + `</title>
   <style>` + strings.ReplaceAll(css, "</style", `<\/style`) + `</style>
 </head>
-<body><article class="nomo-export markdown-body">` + out + `</article>
+<body>` + page + `
 </body>
 </html>
 `
 	return doc, outline
+}
+
+// PDFLayout 是 PDF 的版式参数（设置“PDF 导出”）：纸张（A4 / A5 / Letter / Legal）、横向、四边页边距（毫米）、
+// 页码位置（none / center / right）与已替换占位符的页眉、页脚文字。页码与页眉页脚由主程序在打印后逐页盖印
+// （WebKit 打印不逐页重复固定定位元素与表头）；分页在导出 HTML 中实现（pdfLayoutHTML）。
+type PDFLayout struct {
+	Paper          string
+	Landscape      bool
+	MarginMm       float64
+	PageNumbers    string
+	Header, Footer string
+}
+
+// pdfLayout 返回当前设置的版式；title 替换页眉页脚中的 {title}，{date} 为导出日期。
+func (s *Shell) pdfLayout(title string) PDFLayout {
+	p := s.prefs
+	fill := func(t string) string {
+		return strings.TrimSpace(strings.NewReplacer("{title}", title, "{date}", time.Now().Format("2006-01-02")).Replace(t))
+	}
+	return PDFLayout{Paper: p.PDFPaperSize, Landscape: p.PDFOrientation == "landscape", MarginMm: p.PDFMarginMm,
+		PageNumbers: p.PDFPageNumbers, Header: fill(p.PDFHeader), Footer: fill(p.PDFFooter)}
+}
+
+// calloutOpenRe 匹配解析器输出的提示块开头：引用块的第一个段落以 [!TYPE]（可带 +/- 与标题）开始。
+var calloutOpenRe = regexp.MustCompile(`<blockquote>\s*<p>(\[![^\]\s]+\][+-]?[^\n<]*)(?:\n|<br\s*/?>\s*)?`)
+
+// exportCallouts 把提示块的引用块换成原版导出的结构（callout-card > callout-header（图标、标题）+ callout-body），
+// 导出样式按 data-callout-type 着色。只含标记行的段落随之去掉；对应的 </blockquote> 按嵌套层级找到并换成卡片结尾。
+func exportCallouts(out string) string {
+	var b strings.Builder
+	at := 0
+	for {
+		m := calloutOpenRe.FindStringSubmatchIndex(out[at:])
+		if m == nil {
+			break
+		}
+		start, end := at+m[0], at+m[1]
+		tone, typ, title, ok := mdedit.ParseCallout(html.UnescapeString(out[at+m[2] : at+m[3]]))
+		closeAt := matchingBlockquoteClose(out, start)
+		if !ok || closeAt < 0 {
+			b.WriteString(out[at:end])
+			at = end
+			continue
+		}
+		b.WriteString(out[at:start])
+		b.WriteString(`<div class="callout-card" data-callout-type="` + typ + `"><div class="callout-header"><span class="callout-icon">` +
+			icons.CalloutSource(tone) + `</span><span class="callout-title">` + html.EscapeString(title) + `</span></div><div class="callout-body"><p>`)
+		body := out[end:closeAt]
+		body = strings.Replace(body, "<p></p>", "", 1) // 只有标记行的段落
+		b.WriteString(exportCallouts(body))
+		b.WriteString("</div></div>")
+		at = closeAt + len("</blockquote>")
+	}
+	b.WriteString(out[at:])
+	return strings.ReplaceAll(b.String(), `<div class="callout-body"><p></p>`, `<div class="callout-body">`)
+}
+
+// matchingBlockquoteClose 返回从 start（一个 <blockquote> 的位置）起与之配对的 </blockquote> 的位置，找不到时为 -1。
+func matchingBlockquoteClose(s string, start int) int {
+	depth := 0
+	for i := start; i < len(s); {
+		switch {
+		case strings.HasPrefix(s[i:], "<blockquote>"):
+			depth++
+			i += len("<blockquote>")
+		case strings.HasPrefix(s[i:], "</blockquote>"):
+			depth--
+			if depth == 0 {
+				return i
+			}
+			i += len("</blockquote>")
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
+// pageBreakRe 匹配手动分页符 <!-- pagebreak -->（解析器原样输出 HTML 注释块）。
+var pageBreakRe = regexp.MustCompile(`(?i)<!--\s*page-?break\s*-->`)
+
+// pdfLayoutHTML 按 PDF 设置改写导出正文并返回附加样式：手动分页符换成分页元素；开启时一级标题前分页（第一个除外）。
+func (s *Shell) pdfLayoutHTML(body string) (string, string) {
+	body = pageBreakRe.ReplaceAllString(body, `<div class="nomo-page-break"></div>`)
+	css := "\n.nomo-page-break{break-after:page;page-break-after:always;height:0}"
+	if s.prefs.PDFBreakBeforeH1 {
+		css += "\n.nomo-export h1~h1{break-before:page;page-break-before:always}"
+	}
+	return body, css
 }
 
 // stripFrontMatter 去掉开头的 YAML front matter（导出与原版一样不包含元数据）。
@@ -195,75 +291,6 @@ func highlightCodeHTML(out string, dark bool) string {
 		b.WriteString("</code></pre>")
 		return b.String()
 	})
-}
-
-var (
-	exportMathRe    = regexp.MustCompile(`(?s)<span class="math (inline|display)">(.*?)</span>|<div class="math display">(.*?)</div>`)
-	exportMermaidRe = regexp.MustCompile(`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
-)
-
-// renderExportMarkup 把导出 HTML 中的公式与 Mermaid 源码替换为渲染结果（在后台调用，可能耗时数秒）。没有
-// 公式与图表、或离屏渲染不可用（测试中没有窗口）时原样返回；单项失败时保留源码并附错误说明（原版同样处理）。
-func (s *Shell) renderExportMarkup(doc string, dark bool) string {
-	if s.win == nil || !strings.Contains(doc, `class="math `) && !strings.Contains(doc, "language-mermaid") {
-		return doc
-	}
-	type hit struct {
-		a, z int
-		kind string
-		src  string
-	}
-	var hits []hit
-	for _, m := range exportMathRe.FindAllStringSubmatchIndex(doc, -1) {
-		h := hit{a: m[0], z: m[1]}
-		if m[2] >= 0 {
-			h.kind, h.src = map[string]string{"inline": mdedit.RenderMathInline, "display": mdedit.RenderMathDisplay}[doc[m[2]:m[3]]], doc[m[4]:m[5]]
-		} else {
-			h.kind, h.src = mdedit.RenderMathDisplay, doc[m[6]:m[7]]
-		}
-		hits = append(hits, h)
-	}
-	for _, m := range exportMermaidRe.FindAllStringSubmatchIndex(doc, -1) {
-		hits = append(hits, hit{a: m[0], z: m[1], kind: mdedit.RenderMermaid, src: doc[m[2]:m[3]]})
-	}
-	if len(hits) == 0 {
-		return doc
-	}
-	slices.SortFunc(hits, func(x, y hit) int { return x.a - y.a })
-	reqs := make([]mdedit.RenderRequest, len(hits))
-	for k, h := range hits {
-		reqs[k] = mdedit.RenderRequest{Kind: h.kind, Src: html.UnescapeString(h.src)}
-	}
-	items, css, err := s.rend.markup(reqs, dark)
-	if err != nil {
-		applog.Warn("Export", "导出时渲染公式与图表失败，保留源码："+err.Error())
-		return doc
-	}
-	var b strings.Builder
-	at := 0
-	for k, h := range hits {
-		b.WriteString(doc[at:h.a])
-		it := items[k]
-		tag, class := "div", "math-block"
-		if h.kind == mdedit.RenderMathInline {
-			tag, class = "span", "math-inline"
-		}
-		if it.err != "" {
-			b.WriteString(doc[h.a:h.z] + `<span class="nomo-render-error">` + html.EscapeString(it.err) + `</span>`)
-		} else if h.kind == mdedit.RenderMermaid {
-			// 与原版导出结构一致：.mermaid-block > .mermaid-block-rendered（export-document.css 居中、限宽）。
-			b.WriteString(`<div class="mermaid-block"><div class="mermaid-block-rendered">` + it.html + `</div></div>`)
-		} else {
-			b.WriteString("<" + tag + ` class="` + class + `">` + it.html + "</" + tag + ">")
-		}
-		at = h.z
-	}
-	b.WriteString(doc[at:])
-	out := b.String()
-	if css != "" {
-		out = strings.Replace(out, "</style>", "\n"+strings.ReplaceAll(css, "</style", `<\/style`)+"</style>", 1)
-	}
-	return out
 }
 
 func stripFrontMatter(src string) string {
@@ -325,26 +352,6 @@ func inlineImage(dir, src string) string {
 	return "data:" + typ + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
-// withTypography 在开启精细排版时把原版的离线排版运行时与选项内联到导出文档（与原版 exportService 的
-// buildExportHtml 相同）：HTML 打开时按窗口宽度精排，PDF 打印前由主程序调用 __NOMO_PREPARE_PRINT__ 按版心重排
-// （desktop/export.go）。在后台写出任务中调用；取得运行时失败时导出不含精排并记日志，不阻止导出。
-func (s *Shell) withTypography(doc string, enabled bool) string {
-	if !enabled || s.win == nil {
-		return doc
-	}
-	runtime, err := s.rend.typographyRuntime()
-	if err != nil {
-		applog.Warn("Export", "精细排版运行时不可用，导出不含精细排版："+err.Error())
-		return doc
-	}
-	script := `<script id="nomo-typography-options" type="application/json">{"enabled":true,"profile":"zh-CN","hanging":true}</script>
-  <script>` + strings.ReplaceAll(runtime, "</script", `<\/script`) + "</script>\n"
-	if i := strings.LastIndex(doc, "</body>"); i >= 0 {
-		return doc[:i] + script + doc[i:]
-	}
-	return doc + script
-}
-
 // exportHTML 选择保存位置后写出 HTML（配色跟随当前明暗外观）。
 func (s *Shell) exportHTML() {
 	tab := s.activeTab()
@@ -352,11 +359,8 @@ func (s *Shell) exportHTML() {
 		return
 	}
 	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() error {
-		dark, kp := s.dark, s.prefs.TypographyEnabled
-		doc, _ := s.exportDocument(tab, dark, false)
-		return func() error {
-			return docfs.WriteFileAtomically(path, []byte(s.withTypography(s.renderExportMarkup(doc, dark), kp)))
-		}
+		doc, _ := s.exportDocument(tab, s.dark, false)
+		return func() error { return docfs.WriteFileAtomically(path, []byte(doc)) }
 	})
 }
 
@@ -368,66 +372,9 @@ func (s *Shell) exportPDF() {
 		return
 	}
 	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() error {
-		kp := s.prefs.TypographyEnabled
+		layout := s.pdfLayout(strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName))))
 		doc, outline := s.exportDocument(tab, false, true)
-		return func() error {
-			return s.pdfExporter(s.withTypography(s.renderExportMarkup(doc, false), kp), path, outline)
-		}
-	})
-}
-
-// exportWord 导出 .docx（原版 wordExportService）：在离屏渲染页中复用原版的文档模型与打包，本地图片先内联为
-// data URL；写出成功后在状态栏附上降级说明（如 GIF 只取首帧、HTML 保留为源码）。
-func (s *Shell) exportWord() {
-	tab := s.activeTab()
-	if tab == nil || s.win == nil {
-		return
-	}
-	s.exportTo(tab, "docx", "Word", "exportWordSuccess", func(path string) func() error {
-		dir := ""
-		if tab.Path != "" {
-			dir = filepath.Dir(tab.Path)
-		}
-		md := inlineMarkdownImages(tab.Doc.Source(), dir)
-		title := strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName)))
-		return func() error {
-			data, warnings, err := s.rend.word(md, title)
-			if err != nil {
-				return err
-			}
-			if err := docfs.WriteFileAtomically(path, data); err != nil {
-				return err
-			}
-			if len(warnings) > 0 {
-				applog.Info("Export", "Word 导出降级："+strings.Join(warnings, "；"))
-			}
-			return nil
-		}
-	})
-}
-
-var (
-	mdImageRe   = regexp.MustCompile(`(!\[[^\]]*\]\(\s*)(<[^>]+>|[^)\s]+)`)
-	htmlImageRe = regexp.MustCompile(`(<img\b[^>]*?\ssrc=")([^"]+)(")`)
-)
-
-// inlineMarkdownImages 把 Markdown 图片与 <img> 的本地地址替换为 data URL（单张至多 maxInlineImage），远程
-// 地址与读取失败的保持原样。
-func inlineMarkdownImages(src, dir string) string {
-	src = mdImageRe.ReplaceAllStringFunc(src, func(m string) string {
-		sub := mdImageRe.FindStringSubmatch(m)
-		path := strings.TrimSuffix(strings.TrimPrefix(sub[2], "<"), ">")
-		if data := inlineImage(dir, path); data != "" {
-			return sub[1] + data
-		}
-		return m
-	})
-	return htmlImageRe.ReplaceAllStringFunc(src, func(m string) string {
-		sub := htmlImageRe.FindStringSubmatch(m)
-		if data := inlineImage(dir, html.UnescapeString(sub[2])); data != "" {
-			return sub[1] + data + sub[3]
-		}
-		return m
+		return func() error { return s.pdfExporter(doc, path, outline, layout) }
 	})
 }
 

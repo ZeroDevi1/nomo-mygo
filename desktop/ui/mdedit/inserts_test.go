@@ -112,3 +112,23 @@ func TestEmptyFootnoteDefinition(t *testing.T) {
 		t.Fatalf("空定义应显示一行原文，得到 %d 行", n)
 	}
 }
+
+// TestRefreshToc：标题变化后刷新目录区列表；未变化时不改写，撤销恢复原列表。
+func TestRefreshToc(t *testing.T) {
+	src := "# A\n\n<!-- toc -->\n- [A](#a)\n<!-- /toc -->\n\n## B\n"
+	ed := NewEditor(NewDocument(src))
+	if !ed.RefreshToc() {
+		t.Fatal("新增标题后应刷新目录")
+	}
+	want := "# A\n\n<!-- toc -->\n- [A](#a)\n  - [B](#b)\n<!-- /toc -->\n\n## B\n"
+	if got := ed.Doc.Source(); got != want {
+		t.Fatalf("刷新后 %q", got)
+	}
+	if ed.RefreshToc() {
+		t.Fatal("没有变化时不应改写")
+	}
+	ed.Run("undo")
+	if ed.Doc.Source() != src {
+		t.Fatalf("撤销后 %q", ed.Doc.Source())
+	}
+}

@@ -17,8 +17,8 @@ import (
 	"nomo/desktop/internal/applog"
 )
 
-// 软件更新检查：从 GitHub Release 读取最新版本，直连失败（可重试错误）时经 gh-proxy 重试。原生界面只提示新版本并
-// 打开发布页，不在应用内下载安装；Microsoft Store 包由商店管理，非 Windows 平台与开发构建不检查。
+// 软件更新检查：从 GitHub Release 读取最新版本，直连失败（可重试错误）时经 gh-proxy 重试。Windows 安装版可在应用内
+// 下载并安装（update_install.go），其他形态提示新版本并打开发布页；Microsoft Store 包由商店管理，开发构建不检查。
 
 const (
 	githubLatestReleaseAPI    = "https://api.github.com/repos/nomo-md/nomo/releases/latest"
@@ -34,6 +34,7 @@ const (
 	installationInstaller   installationKind = "installer"
 	installationPortable    installationKind = "portable"
 	installationStore       installationKind = "store"
+	installationManual      installationKind = "manual" // macOS / Linux：检查并提示，手动升级
 	installationUnsupported installationKind = "unsupported"
 )
 
@@ -45,6 +46,7 @@ type softwareUpdateCheck struct {
 	CurrentVersion   string
 	InstallationKind installationKind
 	Version          string
+	Notes            string // 新版本的 Release 说明（Markdown）
 }
 
 // appVersion 返回构建时链接的应用版本；go run 等未链接版本的开发构建返回 0.0.0。
@@ -80,12 +82,23 @@ func checkSoftwareUpdate() (*softwareUpdateCheck, error) {
 	if err != nil {
 		return nil, err
 	}
-	result.Supported, result.Available, result.Version = true, newer, version
+	result.Supported, result.Available, result.Version, result.Notes = true, newer, version, release.Body
+	if newer {
+		rememberUpdateCandidate(release, version, kind)
+	}
 	return result, nil
 }
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
+	TagName string               `json:"tag_name"`
+	Body    string               `json:"body"`
+	Assets  []githubReleaseAsset `json:"assets"`
+}
+
+type githubReleaseAsset struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	URL  string `json:"browser_download_url"`
 }
 
 type requestFailure struct {
@@ -124,7 +137,8 @@ func githubProxyURL(original string) (string, bool) {
 	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", false
 	}
-	allowed := parsed.Host == "api.github.com" && (parsed.Path == "/repos/nomo-md/nomo/releases/latest" || parsed.Path == "/repos/LIXianSenQwQ/nomo/releases/latest") ||
+	allowed := parsed.Host == "api.github.com" && (parsed.Path == "/repos/nomo-md/nomo/releases/latest" || parsed.Path == "/repos/LIXianSenQwQ/nomo/releases/latest" ||
+		strings.HasPrefix(parsed.Path, "/repos/nomo-md/nomo/releases/tags/")) ||
 		parsed.Host == "github.com" && (strings.HasPrefix(parsed.Path, "/nomo-md/nomo/releases/download/") || strings.HasPrefix(parsed.Path, "/LIXianSenQwQ/nomo/releases/download/"))
 	if !allowed {
 		return "", false
@@ -174,8 +188,13 @@ func contextWithTimeout(timeout time.Duration) (context.Context, context.CancelF
 
 // fetchLatestGithubRelease 返回最新 Release 与实际使用的来源（proxy 为 true 表示 gh-proxy）。
 func fetchLatestGithubRelease() (*githubRelease, bool, error) {
+	return fetchGithubRelease(githubLatestReleaseAPI)
+}
+
+// fetchGithubRelease 读取 api 指向的 Release，直连失败（可重试错误）时经 gh-proxy 重试。
+func fetchGithubRelease(api string) (*githubRelease, bool, error) {
 	fetch := func(proxy bool) (*githubRelease, error) {
-		data, err := fetchSmall(githubLatestReleaseAPI, proxy, "请求 GitHub Release 失败")
+		data, err := fetchSmall(api, proxy, "请求 GitHub Release 失败")
 		if err != nil {
 			return nil, err
 		}

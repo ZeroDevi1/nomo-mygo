@@ -196,6 +196,13 @@ type Editor struct {
 	drag    dragMode
 	dragY   float32
 	dragPos float32
+	// resize 为拖动图片右边缘调整宽度的状态（drag == dragImage 时非空）；edgeHover 为指针停在图片右边缘上，
+	// 编辑区光标显示为左右调整。见 imageedit.go。
+	resize    *imageResize
+	move      *imageMove // 拖动图片换位置（drag == dragImageMove 时非空）
+	edgeHover bool
+	// OnImageOpen 在双击图片时调用（外壳打开预览），src 为图片原文中的地址；为空时双击图片按普通双击处理。
+	OnImageOpen func(src string)
 
 	// highlights 是查找结果（字节区间，升序），current 为当前项下标，-1 表示无；
 	// 由外壳的查找栏设置，编辑后由外壳重新查找。
@@ -235,11 +242,13 @@ type Editor struct {
 	tocHash uint64
 	// folds 为折叠块的临时展开状态（键为“<details”的偏移，随编辑平移），foldGen 在其变化时递增；dview 缓存
 	// 折叠视图（detailsState），dhad 表示上次同步时文档含折叠块，dsyncVer 为上次同步标记块的原文版本。
-	folds    map[int]bool
-	foldGen  uint64
-	dview    *detailsView
-	dhad     bool
-	dsyncVer uint64
+	folds map[int]bool
+	// calloutFolds 为提示块的临时展开状态（键为引用块起点的偏移，随编辑平移），见 calloutfold.go。
+	calloutFolds map[int]bool
+	foldGen      uint64
+	dview        *detailsView
+	dhad         bool
+	dsyncVer     uint64
 	// opts 为外壳设置中影响编辑区的选项（SetOptions）。
 	opts Options
 	// kpWidths 缓存精细排版用的空格与连字符宽度（按字体，kpGlyphWidths）。
@@ -254,6 +263,8 @@ const (
 	dragNone dragMode = iota
 	dragText
 	dragScrollbar
+	dragImage
+	dragImageMove
 )
 
 // NewEditor 创建绑定 doc 的编辑器视图。
@@ -273,8 +284,12 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	t := c.Theme()
 	e.setTheme(t)
 	e.svc, e.hasSvc = c.Services(), true
+	cursor := ui.CursorText
+	if e.edgeHover || e.resize != nil {
+		cursor = ui.CursorResizeEW
+	}
 	box := ui.Box(c).Fill().Clip().Background(e.pal.background).
-		Role(ui.RoleTextField).Label("Markdown").Cursor(ui.CursorText).
+		Role(ui.RoleTextField).Label("Markdown").Cursor(cursor).
 		HandleTextInput(e).HandleInput(e.input).Draw(e.draw)
 	e.focused = box.Focused()
 	return box
@@ -411,6 +426,7 @@ func (e *Editor) applyEdit(ed Edit) {
 		return
 	}
 	e.remapFolds(ed.Change)
+	e.remapCalloutFolds(ed.Change)
 	if ed.Removed == 1 && ed.Inserted == 1 && e.patchRowEdit(ed.First, ed.Change) {
 		e.hasGoal = false
 		e.reveal = true
@@ -451,7 +467,7 @@ func (e *Editor) applyEdit(ed Edit) {
 func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 	en := &e.entries[i]
 	top := e.Doc.blocks[i]
-	rows, frames := buildRows(e.Doc, i, top, e.seed)
+	rows, frames := buildRows(e.Doc, i, top, e.seed, e.canRender())
 	e.applyLineNumbers(rows, frames)
 	// 折叠块正文按层级缩进（行哈希按缩进前计算，行内容相同的布局仍可继承）。
 	inset, rinset := e.detailsInset(i)
@@ -526,7 +542,10 @@ func (e *Editor) layoutRows(en *entry) {
 	y := float32(0)
 	for k := 0; k < len(en.rows); {
 		band := en.rows[k].band
-		y += en.rows[k].before
+		// 收起的提示块正文不占间距；首行的上间距含标题行，保留。
+		if !en.rows[k].folded || calloutFirstRow(en, k) {
+			y += en.rows[k].before
+		}
 		j := k
 		h := float32(0)
 		for j < len(en.rows) && en.rows[j].band == band {
@@ -536,7 +555,10 @@ func (e *Editor) layoutRows(en *entry) {
 		for m := k; m < j; m++ {
 			en.rows[m].y, en.rows[m].bandH = y, h
 		}
-		y += h + en.rows[j-1].after
+		if !en.rows[j-1].folded {
+			y += en.rows[j-1].after
+		}
+		y += h
 		k = j
 	}
 	en.height = y
@@ -635,7 +657,11 @@ func (e *Editor) ensureRow(i, k int) bool {
 		ex.inBlock = ex.inBlock && ex.caret > 0 && ex.caret < r.b-r.a
 	}
 	sig := e.signature(top, r, ex)
-	hidden := e.fenceHidden(top, r)
+	folded := e.calloutRowHidden(i, en, k)
+	if folded != r.folded {
+		r.folded, en.ydirty = folded, true
+	}
+	hidden := e.fenceHidden(top, r) || folded
 	// 代码行的着色取决于行首 Tokenizer 状态，状态变化（如上文开了块注释）时重排。
 	var fr *frame
 	var hlIn uint64
@@ -662,7 +688,7 @@ func (e *Editor) ensureRow(i, k int) bool {
 		}
 	} else {
 		if r.kind == rowText {
-			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode})
+			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode, noRender: !e.canRender()})
 		} else if r.htmlImg && !ex.inBlock {
 			p = projectHTMLImages(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
 		} else if r.htmlKind != previewNone && !ex.inBlock {
@@ -737,6 +763,13 @@ func (e *Editor) spans(p *projection, sizes [][2]float32) []ui.Span {
 			sp.Background = e.pal.codeBg
 			sp.Radius = 3
 		}
+		if r.st&stKbd != 0 {
+			sp.Font = e.monoFont()
+			sp.Size = bodySize * e.scale * 0.85
+			sp.Background = e.pal.codeBorder
+			sp.Radius = 4
+			sp.Weight = 500
+		}
 		if r.st&stMark != 0 {
 			sp.Background = e.pal.mark
 			sp.Radius = 2
@@ -755,6 +788,8 @@ func (e *Editor) spans(p *projection, sizes [][2]float32) []ui.Span {
 			sp.Color = e.pal.link
 		case r.st&stImage != 0:
 			sp.Color = e.pal.muted
+		case r.st&stColorMask != 0 && int(r.st>>stColorShift) <= len(p.colors):
+			sp.Color = p.colors[r.st>>stColorShift-1]
 		}
 		spans = append(spans, sp)
 	}
@@ -1228,3 +1263,16 @@ func (e *Editor) hit(pt ui.Point) int {
 	s := e.segOf(v.i, v.k)
 	return s.toSrc(s.layout.IndexAt(ui.Point{X: x - s.x, Y: pt.Y - v.y - s.padTop}), false)
 }
+
+// calloutFirstRow 报告第 k 行是否为某个提示块的首行。
+func calloutFirstRow(en *entry, k int) bool {
+	for _, f := range en.frames {
+		if f.kind == frameCallout && f.first == k {
+			return true
+		}
+	}
+	return false
+}
+
+// canRender 报告是否接入了公式与图表渲染器（Images.SetRenderer）。没有时公式与 Mermaid 显示原文，不显示占位。
+func (e *Editor) canRender() bool { return e.images != nil && e.images.render != nil }

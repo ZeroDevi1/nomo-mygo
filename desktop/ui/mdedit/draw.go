@@ -27,7 +27,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 	for _, v := range e.vblocks {
 		en := &e.entries[v.i]
 		for _, f := range en.frames {
-			e.drawFrame(p, en, f, x0, r.Y+v.top, r)
+			e.drawFrame(p, v.i, en, f, x0, r.Y+v.top, r)
 		}
 	}
 	e.drawDetails(p, x0, r.Y)
@@ -84,6 +84,8 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		c.Y += r.Y
 		p.Fill(c, e.pal.caret, 0)
 	}
+	e.drawImageResize(p, r)
+	e.drawImageMove(p, r)
 	if total, pos := e.scrollMetrics(); total > r.H {
 		th := max(24, r.H*r.H/total)
 		ty := (r.H - th) * min(1, pos/max(1, total-r.H))
@@ -147,7 +149,7 @@ func (e *Editor) prefetch(budget time.Duration) bool {
 }
 
 // drawFrame 画跨行装饰；top 为块顶部的窗口坐标。屏幕外的装饰由 Painter 剔除。
-func (e *Editor) drawFrame(p *ui.Painter, en *entry, f frame, x0, top float32, view ui.Rect) {
+func (e *Editor) drawFrame(p *ui.Painter, i int, en *entry, f frame, x0, top float32, view ui.Rect) {
 	first, last := &en.rows[f.first], &en.rows[f.last]
 	y0, y1 := top+first.y, top+last.y+last.bandH
 	if y1 < view.Y || y0 > view.Y+view.H {
@@ -184,7 +186,24 @@ func (e *Editor) drawFrame(p *ui.Painter, en *entry, f frame, x0, top float32, v
 		// 标题：类型图标 + 默认标题，对应原版 calloutTypes.ts 的 icon 与 label。
 		is := 16 * e.scale
 		p.Icon(icons.Callout(f.tone), ui.Rect{X: x + quoteIndent, Y: titleY + 4, W: is, H: is}, t.fg)
-		p.RichText(x+quoteIndent+is+6, titleY+2, 0, ui.Span{Text: calloutTypes[clamp(f.tone, 0, 4)].label, Weight: 600, Color: t.fg, Size: bodySize * e.scale})
+		title := f.callout.title
+		if title == "" {
+			title = f.callout.label
+		}
+		if title == "" {
+			title = calloutTypes[clamp(f.tone, 0, 4)].label
+		}
+		p.RichText(x+quoteIndent+is+6, titleY+2, max(1, w-quoteIndent-is-40), ui.Span{Text: title, Weight: 600, Color: t.fg, Size: bodySize * e.scale})
+		if f.callout.fold != 0 {
+			// 可折叠提示块：标题行右侧的展开箭头（收起时朝右）。
+			ic := icons.Get("chevron-right")
+			r := ui.Rect{X: x + w - is - 12, Y: titleY + 4, W: is, H: is}
+			if e.calloutOpen(e.Doc.blocks[i], &f) {
+				p.Icon(icons.Get("chevron-down"), r, t.fg)
+			} else {
+				p.Icon(ic, r, t.fg)
+			}
+		}
 	case frameCode, frameFront:
 		box := ui.Rect{X: x, Y: y0 - codePadY, W: w, H: y1 - y0 + 2*codePadY}
 		p.Fill(box, e.pal.codeBg, 8)

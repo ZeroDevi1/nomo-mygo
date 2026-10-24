@@ -32,7 +32,7 @@ func (s *Shell) splitView(c *ui.Context, tab *Tab, ck *ui.Context) (semantic ui.
 	tab.syncToSource()
 	st := tab.Source()
 	if st.OnCompletion == nil {
-		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceEmojiCompletion(tab, req) }
+		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(tab, req) }
 	}
 	semPane := func() {
 		semantic = s.editorView(ck, tab)

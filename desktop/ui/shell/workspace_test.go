@@ -23,7 +23,7 @@ func TestWorkspaceRestore(t *testing.T) {
 	s.NewDocument()
 	s.activeTab().Ed.SetSource("draft body\n")
 	s.activate(1)
-	s.persistWorkspace(s.tabs, true, false)
+	s.persistWorkspace(false)
 
 	r := New(Options{Config: cfg, Locale: i18n.ZhCN, Primary: true})
 	if len(r.tabs) != 3 {
@@ -41,7 +41,7 @@ func TestWorkspaceRestore(t *testing.T) {
 
 	// 保存后不再引用的副本随下次写入删除。
 	r.tabs[0].markSaved(r.tabs[0].text())
-	r.persistWorkspace(r.tabs, true, false)
+	r.persistWorkspace(false)
 	p, _ := config.MarkdownStorePath(r.draftsDir(), config.HashText("# A edited\n"))
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
 		t.Fatalf("旧副本未删除：%v", err)
@@ -55,7 +55,7 @@ func TestWorkspaceDraftConflict(t *testing.T) {
 	a := writeDoc(t, "disk v1\n")
 	s := New(Options{Config: cfg, Locale: i18n.ZhCN, Primary: true, Files: []string{a}})
 	s.tabs[0].Ed.SetSource("draft\n")
-	s.persistWorkspace(s.tabs, true, false)
+	s.persistWorkspace(false)
 	later := time.Now().Add(5 * time.Second)
 	if err := os.WriteFile(a, []byte("disk v2\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -90,7 +90,8 @@ func TestWorkspaceCloseDropsDiscarded(t *testing.T) {
 	}
 }
 
-// TestTabDragReorder：把第一个标签拖到第二个标签上，排到它之后，活动标签（第三个）不变。
+// TestTabDragReorder：标签拖到另一标签上排到它之后（从左往右），活动标签不变。拖动本身是系统拖放（DragData，
+// 为了跨窗口），无头测试器不模拟回投，这里验证放下后的排序。
 func TestTabDragReorder(t *testing.T) {
 	dir := t.TempDir()
 	var paths []string
@@ -101,22 +102,10 @@ func TestTabDragReorder(t *testing.T) {
 		}
 		paths = append(paths, p)
 	}
-	s, tt := newTestShell(t, paths...)
-	s.prefs.SidebarHidden = true // 资源管理器里也有同名项，Find 会先找到它
-	tt.Frame()
+	s, _ := newTestShell(t, paths...)
 	active := s.activeTab()
-	first, _ := tt.Find(s.tabLabel(s.tabs[0]))
-	second, _ := tt.Find(s.tabLabel(s.tabs[1])) // 活动标签的名字也在标题栏中，不用它
 	ids := []int{s.tabs[0].ID, s.tabs[1].ID, s.tabs[2].ID}
-	tt.Press(first.X+first.W/2, first.Y+first.H/2)
-	for k := 1; k <= 10; k++ {
-		f := float32(k) / 10
-		tt.Move(first.X+first.W/2+(second.X-first.X)*f, first.Y+first.H/2)
-		tt.Frame()
-	}
-	tt.Release(second.X+second.W/2, second.Y+second.H/2)
-	tt.Frame()
-	tt.Frame()
+	s.moveTab(ids[0], ids[1])
 	got := []int{s.tabs[0].ID, s.tabs[1].ID, s.tabs[2].ID}
 	if got[0] != ids[1] || got[1] != ids[0] || got[2] != ids[2] {
 		t.Fatalf("拖动后顺序 %v，应为 %v", got, []int{ids[1], ids[0], ids[2]})
@@ -144,5 +133,71 @@ func TestDropOnEmptyWorkspace(t *testing.T) {
 	tt.Frame()
 	if len(s.tabs) != 1 || s.tabs[0].Path != md {
 		t.Fatalf("拖放的文档未打开：%d 个标签", len(s.tabs))
+	}
+}
+
+// TestWorkspaceMultiWindowAndGroups：两个窗口都写入工作区（主窗口在前），组合标签关系与左栏比例随之恢复；
+// 单独关闭非最后一个窗口后不再记录它。
+func TestWorkspaceMultiWindowAndGroups(t *testing.T) {
+	dir := t.TempDir()
+	cfg, _ := config.Load(filepath.Join(dir, config.FileName))
+	docs := t.TempDir()
+	path := func(n string) string {
+		p := filepath.Join(docs, n)
+		_ = os.WriteFile(p, []byte("# "+n+"\n"), 0o644)
+		return p
+	}
+	a, b, c := path("a.md"), path("b.md"), path("c.md")
+	main := New(Options{Config: cfg, Locale: i18n.ZhCN, Primary: true, Files: []string{a, b}})
+	other := New(Options{Config: cfg, Locale: i18n.ZhCN, Files: []string{c}})
+	main.combine(main.tabs[0], main.tabs[1])
+	main.tabs[0].comparePct = 30
+	register(main)
+	register(other)
+	defer func() { unregister(main); unregister(other) }()
+	main.persistWorkspace(false)
+
+	r := New(Options{Config: cfg, Locale: i18n.ZhCN, Primary: true})
+	if len(r.tabs) != 2 || len(r.ws.pending) != 1 {
+		t.Fatalf("主窗口 %d 个标签，待恢复窗口 %d 个", len(r.tabs), len(r.ws.pending))
+	}
+	left, right, ok := r.comparisonOf(r.tabs[0])
+	if !ok || left.Path != a || right.Path != b || left.comparePct != 30 {
+		t.Fatalf("组合标签未恢复：ok=%v", ok)
+	}
+	w2 := New(Options{Config: cfg, Locale: i18n.ZhCN})
+	if !w2.restoreWindow(r.ws.pending[0]) || w2.tabs[0].Path != c {
+		t.Fatal("第二个窗口未恢复")
+	}
+
+	// 还有主窗口时单独关闭第二个窗口：工作区只剩主窗口。
+	other.finishWorkspaceClose()
+	unregister(other)
+	if ws := main.readWorkspace(); len(ws) != 1 || len(ws[0].Tabs) != 2 {
+		t.Fatalf("关闭第二个窗口后工作区 %d 个窗口", len(ws))
+	}
+}
+
+// TestAdoptTabsAcrossWindows：把另一窗口的组合标签整组移入本窗口，重新编号后组合关系保留，来源窗口不再显示它们。
+func TestAdoptTabsAcrossWindows(t *testing.T) {
+	docs := t.TempDir()
+	path := func(n string) string {
+		p := filepath.Join(docs, n)
+		_ = os.WriteFile(p, []byte("# "+n+"\n"), 0o644)
+		return p
+	}
+	from, _ := newTestShell(t, path("a.md"), path("b.md"), path("c.md"))
+	to, _ := newTestShell(t, path("d.md"))
+	from.combine(from.tabs[0], from.tabs[1])
+	to.adoptTabs(from, from.tabs[0].ID, to.tabs[0].ID)
+	if len(from.tabs) != 1 || len(to.tabs) != 3 {
+		t.Fatalf("移动后来源 %d 个、目标 %d 个标签", len(from.tabs), len(to.tabs))
+	}
+	left, right, ok := to.comparisonOf(to.tabs[0])
+	if !ok || filepath.Base(left.Path) != "a.md" || filepath.Base(right.Path) != "b.md" || to.tabs[2].Path != path("d.md") {
+		t.Fatalf("组合关系或位置不对：ok=%v", ok)
+	}
+	if to.activeTab() != to.tabs[1] && to.activeTab() != to.tabs[0] {
+		t.Fatal("移入的标签应为活动标签")
 	}
 }

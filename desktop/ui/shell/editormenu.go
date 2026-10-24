@@ -20,7 +20,7 @@ func (s *Shell) editorView(c *ui.Context, tab *Tab) ui.Element {
 }
 
 // editorMenu 填充语义编辑区的右键菜单，按右键位置的目标给出不同的项（原版 App.svelte 的
-// buildEditorContextMenuItems）：选区、折叠块标题、表格、代码块、公式、图表、链接、标题与普通文本。
+// buildEditorContextMenuItems）：选区、折叠块标题、表格、代码块、公式、图表、图片、链接、标题与普通文本。
 func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 	tg := tab.Ed.ContextTarget()
 	run := func(m *ui.Menu, label, cmd string) {
@@ -39,6 +39,12 @@ func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 		}
 	}
 	switch tg.Kind {
+	case "image":
+		s.imageMenu(c, m, tab, tg)
+		m.Separator()
+		m.EditItems()
+		tail()
+		return
 	case "table", "code", "math", "mermaid":
 		s.blockMenu(c, m, tab, tg)
 		m.Separator()

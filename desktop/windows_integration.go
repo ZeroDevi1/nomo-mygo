@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/i18n"
 	"nomo/desktop/ui/shell"
 )
@@ -72,7 +73,15 @@ func nativeWindowsIntegration() *shell.WindowsIntegration {
 			}
 			return result(unregisterWindowsContextMenu(effectiveLocale()))
 		},
-		OpenDefaultApps: func() error { return openWindowsSettings("ms-settings:defaultapps") },
+		OpenDefaultApps:   func() error { return openWindowsSettings("ms-settings:defaultapps") },
+		OpenInstalledApps: func() error { return openWindowsSettings("ms-settings:appsfeatures") },
+		LegacyInstaller: func() bool {
+			prompt, err := legacyInstallerNotice()
+			if err != nil {
+				applog.Warn("Windows", "检测旧安装版失败："+err.Error())
+			}
+			return prompt
+		},
 	}
 }
 

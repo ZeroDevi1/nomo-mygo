@@ -818,6 +818,9 @@ const (
 	previewMath    // 公式块（$$…$$）
 	previewMermaid // ```mermaid 代码块
 	previewDetails // 折叠块标记（details.go）
+	// previewDetailsMark 是不构成折叠框架的折叠块标记（列表、引用中的折叠块，或未配对的标记）：开始标记显示为
+	// “▾ 标题”行，结束标记显示为细分隔线；不支持折叠，光标进入时显示原文。
+	previewDetailsMark
 )
 
 // projectHTMLPreview 生成 HTML 块、公式块与 Mermaid 块收起时的投影：整块为一个对象。
@@ -832,6 +835,10 @@ func projectHTMLPreview(text string, kind uint8) *projection {
 	case previewMermaid:
 		code := fencedContent(text)
 		pb.object(0, len(text), imgObj{render: RenderMermaid, src: code, alt: code}, 0)
+		return pb.finish()
+	}
+	if kind == previewDetailsMark {
+		pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: detailsMarkHTML(text)}}, 0)
 		return pb.finish()
 	}
 	pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: text, comment: kind == previewComment, toc: kind == previewToc, details: kind == previewDetails}}, 0)
@@ -869,4 +876,21 @@ func (e *Editor) syncToc() {
 		}
 	}
 	e.dirty = true
+}
+
+// detailsMarkHTML 把不构成框架的折叠块标记换成可预览的 HTML：每个开始标记一行加粗的“▾ 标题”（标题保留行内
+// HTML），结束标记为分隔线。
+func detailsMarkHTML(src string) string {
+	closes, opens, ok := parseDetailsMarker(src)
+	if !ok {
+		return src
+	}
+	var b strings.Builder
+	for range closes {
+		b.WriteString("<hr>")
+	}
+	for _, o := range opens {
+		b.WriteString("<p><strong>▾ " + o.summary + "</strong></p>")
+	}
+	return b.String()
 }

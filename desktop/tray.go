@@ -30,6 +30,7 @@ var trayState struct {
 	mu             sync.Mutex
 	tray           *mygo.Tray
 	dark           bool
+	inactive       bool  // 窗口全部隐藏到托盘时为 true，托盘显示未激活（灰色）图标
 	appliedIconSet *bool // nil 表示尚未应用过桌面图标主题
 }
 
@@ -95,16 +96,30 @@ func destroyAppTray() {
 	}
 }
 
-// trayIcon 返回当前深浅色的托盘图标（48px PNG，高 DPI 下缩放）。
+// trayIcon 返回当前深浅色与激活状态的托盘图标（48px PNG，高 DPI 下缩放）。
 func trayIcon() []byte {
 	trayState.mu.Lock()
-	theme := "light"
+	theme, state := "light", "active"
 	if trayState.dark {
 		theme = "dark"
 	}
+	if trayState.inactive {
+		state = "inactive"
+	}
 	trayState.mu.Unlock()
-	icon, _ := iconAssets.ReadFile("packaging/icons/nomo/tray/nomo-tray-" + theme + "-active-48.png")
+	icon, _ := iconAssets.ReadFile("packaging/icons/nomo/tray/nomo-tray-" + theme + "-" + state + "-48.png")
 	return icon
+}
+
+// setTrayActive 切换托盘图标的激活状态（原版：窗口全部隐藏到托盘时显示未激活图标）；状态未变化时跳过。
+func setTrayActive(active bool) {
+	trayState.mu.Lock()
+	changed := trayState.inactive == active
+	trayState.inactive = !active
+	trayState.mu.Unlock()
+	if changed {
+		applyTrayIcon()
+	}
 }
 
 func applyTrayIcon() {

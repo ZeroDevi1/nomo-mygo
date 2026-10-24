@@ -43,7 +43,6 @@ func (s *Shell) menuGroups() []menuGroup {
 			{id: "saveAs", label: "saveAs", mods: cmd | shift, key: ui.KeyS, run: func(s *Shell) { s.save(s.activeTab(), true, nil) }},
 			custom(command{id: "exportHtml", label: "exportHtml", sep: true, run: (*Shell).exportHTML}, "export-html"),
 			custom(command{id: "exportPdf", label: "exportPdf", run: (*Shell).exportPDF}, "export-pdf"),
-			{id: "exportWord", label: "exportWord", run: (*Shell).exportWord},
 			{id: "snapshots", label: "documentSnapshotsEllipsis", sep: true, run: (*Shell).openSnapshots},
 			{id: "close", label: "closeCurrentFile", mods: cmd, key: ui.KeyW, sep: true, run: func(s *Shell) {
 				if t := s.activeTab(); t != nil {
@@ -66,6 +65,7 @@ func (s *Shell) menuGroups() []menuGroup {
 			format("strikethrough", "strikethrough", alt|shift, ui.Key5), format("highlight", "highlight", 0, 0),
 			format("inlineCode", "inlineCode", cmd, ui.KeyBackquote), custom(format("link", "link", 0, 0), "menu-link"),
 			custom(format("clearFormat", "clearStyle", 0, 0), "menu-clear-format"),
+			custom(command{id: "textColor", label: "applyTextColor", run: func(s *Shell) { s.applyTextColor(s.tbar.lastColor) }}, "apply-text-color"),
 			{id: "unorderedList", label: "unorderedList", mods: cmd | shift, key: ui.KeyBracketRight, sep: true, run: func(s *Shell) { s.run("unorderedList") }},
 			format("orderedList", "orderedList", cmd|shift, ui.KeyBracketLeft), format("taskList", "taskList", cmd|shift, ui.KeyX),
 			format("quote", "quote", cmd|shift, ui.KeyQ), format("callout", "callout", cmd|shift, ui.KeyA),
@@ -74,6 +74,7 @@ func (s *Shell) menuGroups() []menuGroup {
 			custom(format("mathBlock", "mathBlock", 0, 0), "insert-math-block"),
 			format("mermaid", "mermaidDiagram", 0, 0),
 			custom(format("table", "table", 0, 0), "insert-table"), format("horizontalRule", "horizontalRule", 0, 0),
+			format("pageBreak", "insertPageBreak", 0, 0),
 			{id: "image", label: "image", run: (*Shell).pickImages},
 		}},
 		{"view", []command{

@@ -114,7 +114,7 @@ func (e *Editor) entryPos(s seg, atEnd bool) int {
 	}
 	r := &e.entries[s.i].rows[s.k]
 	top := e.Doc.blocks[s.i]
-	p := projectLeaf(e.Doc, top.Index+r.rel, s.base, s.end, expansion{}, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode})
+	p := projectLeaf(e.Doc, top.Index+r.rel, s.base, s.end, expansion{}, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode, noRender: !e.canRender()})
 	return s.base + p.toSrc(0, false)
 }
 
@@ -653,13 +653,34 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			e.toggleTask(at)
 			return true
 		}
+		if i, fi, ok := e.calloutToggleHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Mods&ui.Shift == 0 {
+			e.toggleCallout(i, fi)
+			return true
+		}
 		if f, ok := e.detailsToggleHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Mods&ui.Shift == 0 { // 连点每次都切换
 			e.toggleDetails(f)
 			return true
 		}
+		if at, rc, ok := e.imageEdgeHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {
+			e.resize = &imageResize{at: at, x0: ev.X, rect: rc, w: rc.W}
+			e.drag = dragImage
+			return true
+		}
+		if at, ok := e.imageHit(ui.Point{X: ev.X, Y: ev.Y}); ok && at >= 0 && ev.Clicks == 2 && e.OnImageOpen != nil {
+			if ref, ok := e.ImageAt(at); ok {
+				e.OnImageOpen(ref.Src)
+				return true
+			}
+		}
 		if at, ok := e.imageHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {
 			if at < 0 { // 目录条目：跳到标题（imageHit 以 -1-pos 表示）
 				e.JumpTo(-1 - at)
+				return true
+			}
+			// 图片：按下后拖动换位置，没有拖动时松开按单击处理（光标进入图片原文）。
+			if ref, ok := e.ImageAt(at); ok {
+				e.move = &imageMove{ref: ref, at: at, x0: ev.X, y0: ev.Y, drop: at}
+				e.drag = dragImageMove
 				return true
 			}
 			e.setHead(at, false)
@@ -692,7 +713,27 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 		e.hasGoal = false
 		return true
 	case ui.InputPointerMove:
+		if ev.Button < 0 { // 未按键的悬停：只更新图片右边缘的调整光标
+			_, _, edge := e.imageEdgeHit(ui.Point{X: ev.X, Y: ev.Y})
+			if edge != e.edgeHover {
+				e.edgeHover = edge
+				return true
+			}
+			return false
+		}
 		switch {
+		case e.drag == dragImageMove && ev.Button == 0 && e.move != nil:
+			mv := e.move
+			if !mv.moved && (ev.X-mv.x0)*(ev.X-mv.x0)+(ev.Y-mv.y0)*(ev.Y-mv.y0) < imageMoveStart*imageMoveStart {
+				return true
+			}
+			mv.moved, mv.drop = true, e.hit(ui.Point{X: ev.X, Y: ev.Y})
+			e.dirty = true
+			return true
+		case e.drag == dragImage && ev.Button == 0 && e.resize != nil:
+			e.resize.w = clampF(e.resize.rect.W+ev.X-e.resize.x0, 24, max(24, e.viewW-e.resize.rect.X-8))
+			e.dirty = true
+			return true
 		case e.drag == dragScrollbar && ev.Button == 0:
 			total, _ := e.scrollMetrics()
 			e.scrollTo(e.dragPos + (ev.Y-e.dragY)*total/max(1, e.viewH))
@@ -702,6 +743,22 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			return true
 		}
 	case ui.InputPointerUp:
+		if e.drag == dragImageMove {
+			mv := e.move
+			e.drag, e.move, e.dirty = dragNone, nil, true
+			if mv != nil && mv.moved {
+				e.moveImageTo(mv.ref, mv.drop)
+			} else if mv != nil {
+				e.setHead(mv.at, false)
+				e.hasGoal = false
+			}
+			return true
+		}
+		if e.drag == dragImage {
+			e.drag = dragNone
+			e.finishImageResize()
+			return true
+		}
 		if e.drag != dragNone {
 			e.drag = dragNone
 			return true

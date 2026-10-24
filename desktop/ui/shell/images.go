@@ -3,7 +3,6 @@ package shell
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/imageasset"
+	"nomo/desktop/ui/mdedit"
 )
 
 // 图片插入（对应原版 src/app/services/imageInsertion.ts）：粘贴、拖放或菜单选择的图片按
@@ -122,7 +122,7 @@ func (s *Shell) insertImages(tab *Tab, in []imageInput) {
 			if len(done) > 0 {
 				parts := make([]string, len(done))
 				for i, it := range done {
-					parts[i] = imageSnippet(it.src, it.alt, set.DefaultImageWidth, set.DefaultImageAlign)
+					parts[i] = mdedit.ImageSnippet(it.src, it.alt, set.DefaultImageWidth, set.DefaultImageAlign)
 				}
 				s.insertBlock(t, strings.Join(parts, "\n"))
 			}
@@ -181,36 +181,6 @@ func padBlock(before, after, snippet string) string {
 		snippet += "\n"
 	}
 	return snippet
-}
-
-var (
-	altUnsafe  = regexp.MustCompile(`[\[\]\n\r]`)
-	destEscape = strings.NewReplacer("&", "&amp;", `\`, `\\`, "(", `\(`, ")", `\)`, "<", `\<`, ">", `\>`)
-	attrEscape = strings.NewReplacer("&", "&amp;", `"`, "&quot;", "<", "&lt;", ">", "&gt;")
-)
-
-// imageSnippet 生成图片标记，规则同原版 insertSourceMarkdown / createImageMarkdown：
-// 指定对齐时用 <p align> 包裹 <img>，只指定宽度时用 <img width>，否则为 ![alt](src)。
-func imageSnippet(src, alt, width, align string) string {
-	switch {
-	case align == "left" || align == "center" || align == "right":
-		tag := `<img src="` + attrEscape.Replace(src) + `" alt="` + attrEscape.Replace(alt) + `"`
-		if width != "" {
-			tag += ` width="` + attrEscape.Replace(width) + `"`
-		}
-		return `<p align="` + align + "\">\n  " + tag + ">\n</p>"
-	case width != "":
-		return `<img src="` + attrEscape.Replace(src) + `" alt="` + attrEscape.Replace(alt) + `" width="` + attrEscape.Replace(width) + `">`
-	}
-	safeAlt := strings.TrimSpace(altUnsafe.ReplaceAllString(alt, " "))
-	if safeAlt == "" {
-		safeAlt = "image"
-	}
-	dest := destEscape.Replace(src)
-	if strings.ContainsAny(src, " \t\n\r\f\v") {
-		dest = "<" + dest + ">"
-	}
-	return "![" + safeAlt + "](" + dest + ")"
 }
 
 func (s *Shell) tabWithID(id int) *Tab {

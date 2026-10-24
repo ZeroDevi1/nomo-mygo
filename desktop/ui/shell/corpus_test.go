@@ -6,6 +6,7 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -350,7 +351,12 @@ func corpusProtocol(t *testing.T, root string) {
 	t.Log("\n" + report.String())
 }
 
-// imageRefs 返回 Markdown 图片与 <img> 的地址（与 inlineMarkdownImages 识别的写法相同）。
+var (
+	mdImageRe   = regexp.MustCompile(`(!\[[^\]]*\]\(\s*)(<[^>]+>|[^)\s]+)`)
+	htmlImageRe = regexp.MustCompile(`(<img\b[^>]*?\ssrc=")([^"]+)(")`)
+)
+
+// imageRefs 返回 Markdown 图片与 <img> 的地址。
 func imageRefs(src string) []string {
 	var out []string
 	for _, m := range mdImageRe.FindAllStringSubmatch(src, -1) {

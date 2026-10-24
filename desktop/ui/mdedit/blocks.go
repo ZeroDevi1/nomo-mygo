@@ -76,6 +76,7 @@ type row struct {
 	padTop    float32 // 文字在行框内的上下留白（单元格、代码块首末行）
 	padBottom float32
 	callout   bool // 段落以 [!TYPE] 开头
+	folded    bool // 所在提示块收起（calloutfold.go）：高度与间距为 0
 	quoteFg   bool // 位于引用内：使用引用文字色
 	tone      int  // 位于提示块内：提示类型序号，否则 -1
 	// 列表项标记，只在项的第一行设置：marker 为“•”或“3.”，task 为 0/1/2
@@ -148,6 +149,10 @@ type frame struct {
 	rinset      float32 // 折叠块正文的右内缩，绘制宽度与表格可用宽度从中扣除
 	tone        int     // 提示块类型
 	lang        string
+	// 提示块（frameCallout）：callout 为标记行（标题与 +/-）；keyRel、endRel 为引用块在顶层块内的原文范围，
+	// 折叠状态以 keyRel 的绝对偏移为键（见 calloutfold.go）。
+	callout        calloutHeader
+	keyRel, endRel int
 	// 表格（frameTable）：cols 为各列宽度，tableW 为总宽，viewW 为可见宽度（内容区去掉缩进），scrollX 为
 	// 横向滚动偏移（0 ≤ scrollX ≤ tableW−viewW），由 layoutTables 计算、scrollTable 修改。
 	cols                   []float32
@@ -169,6 +174,7 @@ type blockBuilder struct {
 	band   int
 	// pending 是下一行的额外上间距（容器开头的外边距与内边距）。
 	pending float32
+	render  bool // 有公式与图表渲染器（Editor.canRender）
 }
 
 // container 描述行所处的容器上下文。
@@ -181,8 +187,9 @@ type container struct {
 	nesting int // 列表嵌套层数，决定项目符号样式
 }
 
-func buildRows(d *Document, ti int, top Block, seed maphash.Seed) ([]row, []frame) {
-	bb := &blockBuilder{d: d, top: top, src: d.Source(), seed: seed}
+// buildRows 把顶层块 ti 展开为行与装饰；render 为是否有公式与图表渲染器（没有时公式块与 Mermaid 按原文显示）。
+func buildRows(d *Document, ti int, top Block, seed maphash.Seed, render bool) ([]row, []frame) {
+	bb := &blockBuilder{d: d, top: top, src: d.Source(), seed: seed, render: render}
 	if d.details().marker(ti) != nil {
 		// 折叠块标记：整块一行，收起时为标题行或卡片底边（detailsview.go），光标严格位于块内时显示原文。
 		bb.add(row{kind: rowLine, role: roleHTML, htmlKind: previewDetails, a: 0, b: top.End - top.Start, tone: -1, after: paraAfter / 2})
@@ -289,7 +296,7 @@ func (bb *blockBuilder) block(i int, c container) {
 		role := map[parser.Kind]rowRole{parser.CodeBlock: roleCode, parser.HTMLBlock: roleHTML, parser.MathBlock: roleMath}[b.Kind]
 		f := len(bb.rows)
 		// 公式块与 Mermaid 代码块整块一行：收起时显示渲染结果（居中），光标严格位于块内时显示原文。
-		if kind := renderBlockKind(b); kind != previewNone {
+		if kind := renderBlockKind(b); kind != previewNone && bb.render {
 			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
 			bb.pending += blockMargin - paraAfter
 			bb.add(row{kind: rowLine, role: role, htmlKind: kind, align: ui.Center, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
@@ -312,6 +319,11 @@ func (bb *blockBuilder) block(i int, c container) {
 			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
 			bb.add(row{kind: rowLine, role: roleHTML, htmlImg: true, align: align, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
 			bb.closePad(paraSpacing(c))
+		} else if _, _, ok := parseDetailsMarker(bb.src[b.Start:b.End]); ok && b.Kind == parser.HTMLBlock {
+			// 不构成折叠框架的折叠块标记（顶层配对的标记在 split 开头按 previewDetails 处理，不会到这里）。
+			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
+			bb.add(row{kind: rowLine, role: roleHTML, htmlKind: previewDetailsMark, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
+			bb.closePad(paraSpacing(c))
 		} else if kind := htmlBlockKind(bb.src[b.Start:b.End]); kind != previewNone && b.Kind == parser.HTMLBlock {
 			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
 			bb.add(row{kind: rowLine, role: roleHTML, htmlKind: kind, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
@@ -322,8 +334,11 @@ func (bb *blockBuilder) block(i int, c container) {
 		}
 	case parser.Quote:
 		tone := -1
+		var head calloutHeader
 		if first, ok := bb.firstChild(i); ok && bb.d.md.Block(first).Kind == parser.Paragraph {
-			tone = calloutType(bb.src[bb.d.md.Block(first).Start:])
+			if h, ok := parseCalloutHeader(bb.src[bb.d.md.Block(first).Start:]); ok {
+				tone, head = h.tone, h
+			}
 		}
 		inner := c
 		inner.indent += quoteIndent
@@ -348,7 +363,8 @@ func (bb *blockBuilder) block(i int, c container) {
 		if tone >= 0 {
 			kind = frameCallout
 		}
-		bb.frames = append(bb.frames, frame{kind: kind, first: f, last: len(bb.rows) - 1, indent: c.indent, tone: tone})
+		bb.frames = append(bb.frames, frame{kind: kind, first: f, last: len(bb.rows) - 1, indent: c.indent, tone: tone,
+			callout: head, keyRel: bb.rel(b.Start), endRel: bb.rel(b.End)})
 		bb.closePad(quotePad + blockMargin)
 	case parser.List:
 		inner := c

@@ -37,11 +37,7 @@ type settingsWindow struct {
 	confirmTheme bool
 	testing      bool
 	testResult   string
-	// updating/update 为“关于”页检查更新的状态与结果文案；updateAvailable 时显示查看更新。
-	updating        bool
-	update          string
-	updateAvailable bool
-	win32           winState // “Windows 集成”分组，见 winintegration.go
+	win32        winState // “Windows 集成”分组，见 winintegration.go
 }
 
 type settingsCategory struct{ id, label, icon string }
@@ -202,6 +198,17 @@ func (sw *settingsWindow) page(c *ui.Context) {
 				[]string{"reload-external", "overwrite-external", "ignore"},
 				[]string{s.tr("externalFileChangeBehaviorReload"), s.tr("externalFileChangeBehaviorOverwrite"), s.tr("externalFileChangeBehaviorIgnore")})
 		})
+		sw.section(c, "pdfExportSettings", func() {
+			sw.choice(c, "pdfPaperSize", "pdfPaperSize", &p.PDFPaperSize, []string{"A4", "A5", "Letter", "Legal"}, []string{"A4", "A5", "Letter", "Legal"})
+			sw.choice(c, "pdfOrientation", "pdfOrientation", &p.PDFOrientation, []string{"portrait", "landscape"},
+				[]string{s.tr("pdfPortrait"), s.tr("pdfLandscape")})
+			sw.slider(c, "pdfMargin", "pdfMarginMm", &p.PDFMarginMm, 10, 40, 1, "%.0f mm", false)
+			sw.text(c, "pdfHeader", "pdfHeader", &p.PDFHeader, "{title}", "", false, trimmed)
+			sw.text(c, "pdfFooter", "pdfFooter", &p.PDFFooter, "{date}", "", false, trimmed)
+			sw.choice(c, "pdfPageNumbers", "pdfPageNumbers", &p.PDFPageNumbers, []string{"none", "center", "right"},
+				[]string{s.tr("pdfPageNumbersNone"), s.tr("pdfPageNumbersCenter"), s.tr("pdfPageNumbersRight")})
+			sw.toggle(c, "pdfBreakBeforeH1", "pdfBreakBeforeH1", &p.PDFBreakBeforeH1)
+		})
 		sw.windowsIntegration(c)
 	case "images":
 		img := &p.ImageHandlingSettings
@@ -328,6 +335,7 @@ func (sw *settingsWindow) choiceDisabled(c *ui.Context, label, key string, v *st
 			sw.s.setPref(key)
 			if key == "interfaceLanguage" {
 				sw.s.locale = i18n.ResolvePreference(*v, sw.s.systemLocale)
+				applyAppLocale(*v)
 				sw.s.installMenu()
 			}
 		}
@@ -473,6 +481,7 @@ func (sw *settingsWindow) shortcuts(c *ui.Context) {
 		{"toggle-focus", "showHideExplorer"}, {"toggle-toolbar", "showHideToolbar"},
 		{"insert-code-block", "insertCodeBlock"}, {"insert-table", "insertTable"},
 		{"insert-math-block", "insertMathBlock"}, {"menu-link", "editLink"}, {"menu-clear-format", "clearStyle"},
+		{"apply-text-color", "applyTextColor"},
 	}
 	for _, r := range rows {
 		v := s.prefs.ShortcutPreferences[r.id]
@@ -492,42 +501,27 @@ func (sw *settingsWindow) shortcuts(c *ui.Context) {
 	}
 }
 
-// updateRow 是“关于”页的检查更新：后台检查，有新版本时提供打开发布页的按钮（原生外壳暂不内置
-// 下载安装，安装包从发布页获取）。
+// updateRow 是“关于”页的检查更新：后台检查；Windows 安装版可下载并重启安装，其他形态打开发布页。状态与启动检查
+// 共用（Shell.upd，见 update.go）。
 func (sw *settingsWindow) updateRow(c *ui.Context) {
 	s := sw.s
-	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-		label := s.tr("softwareUpdateCheckNow")
-		if sw.updating {
-			label = s.tr("softwareUpdateCheckingShort")
+	u := &s.upd
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			label := s.tr("softwareUpdateCheckNow")
+			if u.checking {
+				label = s.tr("softwareUpdateCheckingShort")
+			}
+			if ui.Button(c, label).Disabled(u.checking || u.downloading || u.installing).Clicked() {
+				s.runUpdateCheck(false)
+			}
+			s.updateActions(c)
+		})
+		if t := s.updateStatusText(); t != "" {
+			ui.Text(c, t).FontSize(12).Wrap().TextColor(c.Theme().TextMuted)
 		}
-		if ui.Button(c, label).Disabled(sw.updating).Clicked() {
-			sw.updating, sw.update, sw.updateAvailable = true, "", false
-			go func() {
-				info, err := s.checkUpdate()
-				s.postToSettings(func() {
-					sw.updating = false
-					switch {
-					case err != nil:
-						sw.update = s.tr("softwareUpdateFailed") + " " + err.Error()
-					case !info.Supported:
-						sw.update = s.tr("softwareUpdateUnsupported")
-					case info.Available:
-						sw.update, sw.updateAvailable = s.tr("softwareUpdateReleaseTitle", "version", strings.TrimPrefix(info.Version, "v")), true
-					default:
-						sw.update = s.tr("softwareUpdateUpToDate")
-					}
-					if sw.win != nil {
-						sw.win.Update(func() {})
-					}
-				})
-			}()
-		}
-		if sw.updateAvailable && ui.Button(c, s.tr("softwareUpdateViewDetails")).Clicked() {
-			c.Services().OpenURL("https://github.com/nomo-md/nomo/releases/latest")
-		}
-		if sw.update != "" {
-			ui.Text(c, sw.update).FontSize(12).Wrap().TextColor(c.Theme().TextMuted).Shrink(1)
+		if u.downloading && u.total > 0 {
+			ui.Progress(c, float64(u.done)/float64(u.total)).Width(320)
 		}
 	})
 }

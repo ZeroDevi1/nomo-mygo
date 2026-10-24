@@ -431,13 +431,16 @@ func TestRenderObjectsMathAndMermaid(t *testing.T) {
 	if r := &ed.entries[1].rows[0]; len(r.proj.objs) != 0 {
 		t.Fatal("光标在公式块内应显示原文")
 	}
-	// 没有渲染函数时按原文框显示，不崩溃。
-	ed2, tt2 := newTester(t, "$x$\n", 400, 300)
+	// 没有渲染函数时公式按原文显示（不作为渲染对象，也不显示占位），公式块按原文行显示。
+	ed2, tt2 := newTester(t, "$x$\n\n$$\ny=2\n$$\n", 400, 300)
 	ed2.SetImages(NewImages(func(func()) {}, DefaultImageBudget), "")
-	ed2.Doc.SetSelection(Selection{4, 4})
+	ed2.Doc.SetSelection(Selection{0, 0})
 	tt2.Frame()
-	if en := ed2.imageEntry(ed2.entries[0].rows[0].proj.objs[0]); en == nil || en.state != imageFailed {
-		t.Fatal("无渲染函数时应标记失败")
+	if p := ed2.entries[0].rows[0].proj; len(p.objs) != 0 || p.text != "$x$" {
+		t.Fatalf("无渲染函数时行内公式应显示原文：%+v", p)
+	}
+	if r := &ed2.entries[1].rows[0]; r.htmlKind == previewMath {
+		t.Fatal("无渲染函数时公式块不应作为渲染块")
 	}
 }
 

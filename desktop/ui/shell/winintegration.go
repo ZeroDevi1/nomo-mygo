@@ -10,6 +10,35 @@ type WindowsIntegration struct {
 	ContextMenuStatus func() (IntegrationStatus, error)
 	SetContextMenu    func(on bool) (string, error)
 	OpenDefaultApps   func() error
+	OpenInstalledApps func() error
+	// LegacyInstaller 报告 Store 包是否检测到仍装着旧的安装版（只在首次运行时为 true）。
+	LegacyInstaller func() bool
+}
+
+// checkLegacyInstaller 在主窗口打开后后台检测旧安装版，检测到时提示（原版 legacyInstallerPromptOpen）。
+func (s *Shell) checkLegacyInstaller() {
+	w := s.opts.Windows
+	if w == nil || w.LegacyInstaller == nil || !s.opts.Primary {
+		return
+	}
+	go func() {
+		if w.LegacyInstaller() {
+			s.post(func() { s.legacyPrompt = true })
+		}
+	}()
+}
+
+// legacyInstallerDialog 提示手动卸载旧安装版，可打开系统“已安装的应用”。
+func (s *Shell) legacyInstallerDialog(c *ui.Context) {
+	if !s.legacyPrompt {
+		return
+	}
+	switch ui.AlertDialog(c, &s.legacyPrompt, s.tr("legacyInstallerTitle"), s.tr("legacyInstallerMessage"), s.tr("close"), s.tr("legacyInstallerOpenApps")) {
+	case 1:
+		if w := s.opts.Windows; w != nil && w.OpenInstalledApps != nil {
+			go func() { _ = w.OpenInstalledApps() }()
+		}
+	}
 }
 
 // IntegrationStatus 是一项集成的当前状态：On 为已注册（右键菜单为已启用），Managed 为由 MSIX 包清单管理。
