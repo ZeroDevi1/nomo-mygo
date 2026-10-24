@@ -481,8 +481,13 @@ func (s *Shell) documentTools(c *ui.Context) {
 		s.setMode(modes[mode])
 	}
 	ui.Box(c).Width(6)
+	// 查找栏开着时再点一次关闭（与“完成”、Esc 相同）。
 	if s.toolButton(c, "search", s.tr("searchReplace"), s.finding).Clicked() {
-		s.openFind(false)
+		if s.finding {
+			s.finding = false
+		} else {
+			s.openFind(false)
+		}
 	}
 	if s.toolButton(c, "list-tree", s.tr("showOutline"), s.prefs.OutlineVisible).Clicked() {
 		s.toggleOutline()
