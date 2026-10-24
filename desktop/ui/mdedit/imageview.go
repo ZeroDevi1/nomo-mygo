@@ -1,6 +1,7 @@
 package mdedit
 
 import (
+	"encoding/base64"
 	"strconv"
 	"strings"
 
@@ -296,11 +297,69 @@ func (e *Editor) imageHit(pt ui.Point) (int, bool) {
 	return 0, false
 }
 
-// htmlImageTags 是只含图片的 HTML 块中允许出现的标签（容器与换行），其余内容（文字、其他标签）
+// htmlImageTags 是只含图片的 HTML 块中允许出现的标签（容器、换行与内嵌 SVG），其余内容（文字、其他标签）
 // 使该块按原文显示。
-var htmlImageTags = map[string]bool{"img": true, "p": true, "div": true, "a": true, "center": true, "span": true, "br": true, "picture": true}
+var htmlImageTags = map[string]bool{"img": true, "svg": true, "p": true, "div": true, "a": true, "center": true, "span": true, "br": true, "picture": true}
 
-// htmlTags 依次返回 s 中的 HTML 标签与注释（区间），遇到标签外的非空白文字时 ok 为 false。
+// svgDataURI 把内嵌 <svg> 元素的原文转为图片缓存可加载的 data URI：与图片共用加载、尺寸与缓存淘汰
+// （缓存键为原文散列，同一内容只解码一次）。MyGo 只绘制 SVG 的形状，不执行脚本、不加载外部资源。
+func svgDataURI(markup string) string {
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(markup))
+}
+
+// tagEnd 返回从 s[i]（“<”）开始的标签结尾（“>”之后）的偏移，引号内的“>”不算；没有结尾时返回 -1。
+func tagEnd(s string, i int) int {
+	q := byte(0)
+	for z := i + 1; z < len(s); z++ {
+		switch {
+		case q != 0 && s[z] == q:
+			q = 0
+		case q == 0 && (s[z] == '"' || s[z] == '\''):
+			q = s[z]
+		case q == 0 && s[z] == '>':
+			return z + 1
+		}
+	}
+	return -1
+}
+
+// svgElementEnd 返回从 s[i]（<svg 开始标签）起整个 svg 元素（含嵌套的 svg 与结束标签）的结尾偏移；
+// 未闭合时返回 -1。
+func svgElementEnd(s string, i int) int {
+	depth := 0
+	for k := i; k < len(s); {
+		j := strings.IndexByte(s[k:], '<')
+		if j < 0 {
+			return -1
+		}
+		k += j
+		e := tagEnd(s, k)
+		if e < 0 {
+			return -1
+		}
+		if name, closing, self, ok := htmlTag(s[k:e]); ok && name == "svg" {
+			switch {
+			case closing:
+				depth--
+			case !self:
+				depth++
+			}
+			if depth == 0 {
+				return e
+			}
+		}
+		k = e
+	}
+	return -1
+}
+
+// isSVGStart 报告 s[i:] 是否以 <svg 开始标签开头。
+func isSVGStart(s string, i int) bool {
+	return len(s) >= i+5 && strings.EqualFold(s[i:i+4], "<svg") && strings.IndexByte(" \t\r\n/>", s[i+4]) >= 0
+}
+
+// htmlTags 依次返回 s 中的 HTML 标签与注释（区间），内嵌的 <svg> 元素整体作为一项；遇到标签外的非空白文字
+// 时 ok 为 false。
 func htmlTags(s string, fn func(a, z int)) (ok bool) {
 	for i := 0; i < len(s); {
 		switch c := s[i]; {
@@ -312,6 +371,13 @@ func htmlTags(s string, fn func(a, z int)) (ok bool) {
 				return false
 			}
 			i += 4 + end + 3
+		case c == '<' && isSVGStart(s, i):
+			z := svgElementEnd(s, i)
+			if z < 0 {
+				return false
+			}
+			fn(i, z)
+			i = z
 		case c == '<':
 			z, q := i+1, byte(0)
 			for ; z < len(s) && (q != 0 || s[z] != '>'); z++ {
@@ -358,6 +424,9 @@ func htmlImagesOnly(s string) (ui.Align, bool) {
 			}
 			imgs++
 		}
+		if name == "svg" {
+			imgs++
+		}
 		if v := strings.ToLower(htmlAttr(tag, "align")); !aligned && v != "" {
 			align, aligned = map[string]ui.Align{"center": ui.Center, "right": ui.End}[v], true
 		}
@@ -381,6 +450,14 @@ func projectHTMLImages(text string) *projection {
 			}
 			pb.emit(pb.pos, a, 0, false)
 			pb.object(a, z, imgObj{src: htmlAttr(tag, "src"), width: htmlAttr(tag, "width"), alt: htmlAttr(tag, "alt")}, 0)
+			prevImg = true
+		case name == "svg" && !closing:
+			if prevImg && gap >= 0 && gap < a {
+				pb.emit(pb.pos, gap, 0, false)
+				pb.replace(gap, a, " ", 0)
+			}
+			pb.emit(pb.pos, a, 0, false)
+			pb.object(a, z, imgObj{src: svgDataURI(tag), alt: "SVG"}, 0)
 			prevImg = true
 		case name == "br":
 			pb.emit(pb.pos, a, 0, false)

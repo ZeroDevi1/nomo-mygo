@@ -61,7 +61,11 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 	src := stripFrontMatter(tab.Doc.Source())
 	body := parser.New(parser.Default | parser.ExtDollarMath)
 	body.Set(src)
-	out := highlightCodeHTML(body.HTML(), dark)
+	// ^上标^、~下标~ 不是解析器语法，先改写为 <sup>、<sub> 再生成 HTML（规则同编辑区，见 mdedit/script.go）。
+	if expanded := mdedit.ExpandScripts(body); expanded != src {
+		body.Set(expanded)
+	}
+	out := highlightCodeHTML(sanitizeExportHTML(body.HTML()), dark)
 	if forPDF {
 		// 打印前展开全部折叠块（原版 exportPrint 在布局前把 details.open 设为 true），PDF 中正文完整。
 		out = detailsTagRe.ReplaceAllStringFunc(out, func(m string) string {

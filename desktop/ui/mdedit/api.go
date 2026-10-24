@@ -292,9 +292,9 @@ func (e *Editor) Run(name string) bool {
 	case "underline":
 		e.toggleWrapPair("<u>", "</u>")
 	case "superscript":
-		e.toggleWrapPair("<sup>", "</sup>")
+		e.toggleScript("^", "<sup>", "</sup>")
 	case "subscript":
-		e.toggleWrapPair("<sub>", "</sub>")
+		e.toggleScript("~", "<sub>", "</sub>")
 	case "inlineComment":
 		e.insertInlineComment()
 	case "mathInline":
@@ -366,6 +366,25 @@ func (e *Editor) toggleWrapPair(open, close string) {
 		e.Doc.Sel = Selection{Anchor: a + len(open), Head: z + len(open)}
 	}
 	e.Doc.hist.seal()
+}
+
+// toggleScript 切换选区的上标或下标：选区已被 marker（^ 或 ~）或 open/close 标签包住时去掉；否则选区不含空白时
+// 用 marker 包住（^x^、~x~），含空白时 marker 语法不成立，改用标签。
+func (e *Editor) toggleScript(marker, open, close string) {
+	src := e.Doc.Source()
+	a, z := e.Doc.Sel.Range()
+	switch {
+	case a >= len(open) && z+len(close) <= len(src) && src[a-len(open):a] == open && src[z:z+len(close)] == close,
+		strings.ContainsAny(src[a:z], " \t\r\n"):
+		e.toggleWrapPair(open, close)
+	case a >= 1 && z < len(src) && src[a-1:a] == marker && src[z:z+1] == marker && a < z && scriptSpan(src, a-1, z+1) == z:
+		inner := cloneString(src[a:z])
+		e.applyEdit(e.Doc.Replace(a-1, z+1, inner, editOther))
+		e.Doc.Sel = Selection{Anchor: a - 1, Head: z - 1}
+		e.Doc.hist.seal()
+	default:
+		e.toggleWrapPair(marker, marker)
+	}
 }
 
 // insertLink 把选区变成 [选区]()，光标放进括号等待输入地址。

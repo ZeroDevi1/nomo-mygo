@@ -270,11 +270,12 @@ func (pb *projBuilder) inside(a, z int) bool {
 	return pb.ex.inBlock && pb.ex.caret > a && pb.ex.caret < z
 }
 
-// htmlStyles 是原版可编辑 HTML 中按样式渲染的行内标签。
+// htmlStyles 是按样式渲染的行内 HTML 标签：原版可编辑 HTML 的标签，加上浏览器默认带样式的常见语义标签。
 var htmlStyles = map[string]style{
 	"strong": stBold, "b": stBold, "em": stItalic, "i": stItalic,
 	"u": stUnderline, "ins": stUnderline, "s": stStrike, "del": stStrike, "strike": stStrike,
 	"mark": stMark, "code": stCode, "span": 0, "font": 0, "sup": stSmall, "sub": stSmall, "kbd": stKbd, "a": stLink,
+	"small": stSmall, "samp": stCode, "var": stItalic, "cite": stItalic, "dfn": stItalic, "abbr": 0, "time": 0, "bdi": 0,
 }
 
 // htmlTag 解析单个 HTML 标签，返回小写标签名与是否为结束、自闭合标签。
@@ -307,6 +308,7 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 		st   style
 	}
 	cur := st
+loop:
 	for i < end {
 		in := ins[i]
 		a, z := in.Start-base, in.End-base
@@ -361,6 +363,9 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 			}
 			show := pb.expanded(a, z)
 			inner := cur | kindStyle(in.Kind)
+			if in.Kind == parser.Strikethrough && subscriptStrike(pb.src[a:z]) {
+				inner = cur | stSmall // 单个 ~ 且内容无空白：下标（见 script.go）
+			}
 			pb.emit(a, ca, inner|stMarker, show)
 			pb.inlines(ins, i+1, in.Next, base, inner)
 			pb.emit(cz, z, inner|stMarker, show)
@@ -372,6 +377,16 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 			}
 			name, closing, selfClosing, ok := htmlTag(src)
 			show := pb.expanded(a, z)
+			if ok && name == "svg" && !closing && !selfClosing {
+				// 行内 <svg>…</svg>：开始标签到配对的结束标签整体显示为图片，光标严格位于其中时显示原文。
+				if j := svgClose(ins, pb.src, i, end, base); j >= 0 {
+					if zz := ins[j].End - base; !pb.inside(a, zz) {
+						pb.object(a, zz, imgObj{src: svgDataURI(pb.src[a:zz]), alt: "SVG"}, cur)
+						i = ins[j].Next
+						continue loop
+					}
+				}
+			}
 			switch {
 			case ok && name == "img" && !closing && !pb.inside(a, z) && htmlAttr(src, "src") != "":
 				pb.object(a, z, imgObj{src: htmlAttr(src, "src"), width: htmlAttr(src, "width"), alt: htmlAttr(src, "alt")}, cur)
@@ -440,15 +455,47 @@ func (pb *projBuilder) inlines(ins []parser.Inline, i, end, base int, st style) 
 	}
 }
 
+// svgClose 返回与 ins[i]（<svg 开始标签）配对的 </svg> 行内节点下标（同级、计入嵌套），没有时返回 -1。
+func svgClose(ins []parser.Inline, src string, i, end, base int) int {
+	depth := 0
+	for j := i; j < end; j = ins[j].Next {
+		if ins[j].Kind != parser.HTML {
+			continue
+		}
+		if name, closing, self, ok := htmlTag(src[ins[j].Start-base : ins[j].End-base]); ok && name == "svg" {
+			switch {
+			case closing:
+				depth--
+			case !self:
+				depth++
+			}
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return -1
+}
+
 // text 处理文本节点；escaped 表示其中有反斜杠转义或实体。转义用的“\”只在光标
-// 位于本片段时显示；实体在光标触及时显示原文，否则显示解码结果。
+// 位于本片段时显示；实体在光标触及时显示原文，否则显示解码结果。^上标^、~下标~ 的定界符按标记处理
+// （光标触及时显示），内容按小字号显示。
 func (pb *projBuilder) text(a, z int, escaped bool, st style) {
-	if !escaped {
+	if !escaped && !strings.ContainsAny(pb.src[a:z], "^~") {
 		pb.emit(a, z, st, true)
 		return
 	}
 	for k := a; k < z; k++ {
 		switch c := pb.src[k]; {
+		case c == '^' || c == '~':
+			if q := scriptSpan(pb.src, k, z); q > 0 {
+				show := pb.expanded(k, q+1)
+				pb.emit(k, k+1, st|stMarker, show)
+				pb.emit(k+1, q, st|stSmall, true)
+				pb.emit(q, q+1, st|stMarker, show)
+				k = q
+			}
+		case !escaped:
 		case c == '\\' && k+1 < z && isASCIIPunct(pb.src[k+1]):
 			pb.emit(k, k+1, st|stMarker, pb.ex.inBlock)
 			k++

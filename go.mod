@@ -7,6 +7,7 @@ require (
 	github.com/go-text/typesetting v0.3.5
 	github.com/pdfcpu/pdfcpu v0.16.3
 	golang.org/x/image v0.47.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
 )
@@ -19,7 +20,6 @@ require (
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
 )
 
 tool github.com/egoist/mygo/cmd/mygo

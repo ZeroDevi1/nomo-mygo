@@ -47,6 +47,9 @@
 | 图片编辑（拖边缩放、拖动移位、右键菜单、预览） | `desktop/ui/mdedit/imageedit.go` | `input.go`（拖动与双击）, `desktop/ui/shell/imagemenu.go`（菜单与全屏预览） | 修改宽度/对齐写回原文的规则、拖动命中与绘制、图片菜单项 |
 | 文字颜色 | `desktop/ui/mdedit/textcolor.go` | `projection.go`（`style` 高位颜色索引）, `desktop/ui/shell/toolbar.go`（`colorPicker`） | 修改颜色解析、`<span style="color">` 写回、调色板 |
 | 提示块标题与折叠 | `desktop/ui/mdedit/calloutfold.go` | `projection.go`（`parseCalloutHeader`）, `blocks.go`, `draw.go`（`drawFrame`） | 修改提示块别名、自定义标题、`+`/`-` 折叠语法与点击展开 |
+| 上下标语法（^上标^、~下标~） | `desktop/ui/mdedit/script.go` | `projection.go`（`text`、删除线改判）, `api.go`（`toggleScript`）, `desktop/ui/shell/export.go`（`ExpandScripts`） | 修改上下标与 GFM 删除线的分工规则、工具栏写法、导出改写 |
+| 内嵌 SVG 显示 | `desktop/ui/mdedit/imageview.go`（`svgDataURI`、`svgElementEnd`） | `projection.go`（`svgClose`）, `images.go`（data URI 解码） | 修改 HTML 块与段落内 `<svg>` 作为图片显示的识别规则 |
+| 导出 HTML 安全清理 | `desktop/ui/shell/sanitize.go` | `export.go`（`exportDocument`） | 修改导出时去掉的元素、属性与 URL 协议 |
 | 源码模式 HTML 补全 | `desktop/ui/shell/htmlcomplete.go` | `desktop/ui/mdedit/api.go`（`Document.CodeAt`） | 修改标签/属性/CSS 补全项与触发条件 |
 | 双栏模式 | `desktop/ui/shell/split.go` | `tab.go`（双向同步）, `desktop/ui/mdedit/api.go`（`TopSourceOffset`、`ScrollToSource`） | 修改双栏布局、比例保存、活动一侧与滚动同步 |
 | 组合标签 | `desktop/ui/shell/compare.go` | `view.go`（标签栏、右键菜单）, `tab.go`（`partner`） | 修改组合/解散/交换、并排显示与活动文档 |

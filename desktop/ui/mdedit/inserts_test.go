@@ -65,7 +65,7 @@ func TestToolbarInserts(t *testing.T) {
 	ed, tt := newTester(t, "段落", 600, 400)
 	ed.Doc.SetSelection(Selection{Anchor: 0, Head: len("段落")})
 	ed.Run("superscript")
-	if got := ed.Doc.Source(); got != "<sup>段落</sup>" {
+	if got := ed.Doc.Source(); got != "^段落^" { // 选区无空白时用 ^上标^ 语法（见 toggleScript）
 		t.Fatalf("上标：%q", got)
 	}
 	ed.Run("superscript")

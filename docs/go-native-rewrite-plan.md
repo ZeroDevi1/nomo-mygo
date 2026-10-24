@@ -558,3 +558,15 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - **CI**：`release.yml`、`msix.yml` 去掉 Node 与 pnpm 步骤，改用 `go tool mygo`；`msix.yml` 的触发路径改为 `mygo.json`。均未在 CI 上实际运行。
 
 验证：`go vet ./...`（另加 `GOOS=windows` / `GOOS=linux` 的 `./desktop/...`）、`go test ./...`；`SKIP_DMG=1 MACOS_PLATFORM=darwin/arm64 bash scripts/build-macos.sh`（版本 0.6.2、`Assets.car` 与 `CFBundleIconName=AppIcon`、`Resources/samples`、Quick Look 扩展签名校验通过）；`go tool mygo build -platform windows/amd64,linux/amd64` 产出 `Nomo.exe`、deb 与 tar.gz（本机无 NSIS，未产出 Windows 安装包）。未验证：MSIX 脚本与 Windows 安装包（需 Windows）。
+
+### 9.29 公式块闭合行、上下标语法与内嵌 HTML / SVG（2026-10-24）
+
+- **公式块缺闭合 `$$`**：MyGo 解析器收尾公式块时用最后一段内容的结尾覆盖块尾，闭合定界符行不在任何块内，语义模式下不显示（无渲染器后按源码显示时才暴露）。`mdedit.blockSourceEnd` 把闭合行（`$$` / `\]`，可带引用前缀与缩进；与内容同行时补到行尾）计入顶层块与行展开；原先只在块级命令里补的 `blockEnd` 随之删除。上游问题未报告。
+- **上下标**（`mdedit/script.go`，Pandoc 规则）：`^x^` 为上标、内容不含空白的单个 `~x~` 为下标（含词内 `H~2~O`）；`~~x~~` 与 `~a b~` 仍是 GFM 删除线。编辑区以 75% 字号显示（MyGo 文字片段没有基线偏移，上下标不错位），定界符按标记处理；导出前改写为 `<sup>` / `<sub>`；保存不改原文。工具栏上标、下标在选区无空白时写 `^x^` / `~x~`，有空白时写标签，再次点击取消。注意：词内单个 `~` 成对出现（如 `1~2~3`）会按下标显示。
+- **内嵌 HTML / SVG 支持范围**：
+  - 编辑区：行内样式标签（原有 strong、em、u、s、mark、code、sup、sub、kbd、a、span / font 颜色，新增 small、samp、var、cite、dfn、abbr、time、bdi）；HTML 块按白名单静态预览；`<img>`（含 .svg 文件）与内嵌 `<svg>…</svg>`（段落内或只含图片 / SVG 的 HTML 块）显示为图片，光标进入时显示原文。SVG 由 MyGo 绘制形状，不画文字、不执行脚本、不加载外部资源；块内含空行被 CommonMark 拆开的 SVG 按原文显示。其余 HTML 按原文显示。
+  - 导出：原始 HTML 原样进入导出，但先经 `shell/sanitize.go` 清理：去掉 script、iframe、frameset、object、applet（连同内容）与 frame、embed、base、meta、link，去掉 on* 事件属性、srcdoc、formaction，去掉 href / src 等属性中的 javascript: / vbscript: 与 data:（src 允许 data:image/）。未改动的标签按原文输出。
+  - 保存：以上都只影响显示与导出，原文不变。
+- `golang.org/x/net` 从间接依赖变为直接依赖（导出清理使用其 html 分词器），未引入新模块。
+
+验证：`go vet ./...`（另加 Windows / Linux 的 `./desktop/...`）、`go test ./...`；新增 `TestMathBlockClosingLine`、`TestScriptSyntax`、`TestExpandScripts`、`TestToggleScript`、`TestInlineSVG`、`TestSanitizeExportHTML`，随机编辑索引测试加入 `$$` 插入；`TestToolbarInserts` 的上标预期从 `<sup>` 改为 `^段落^`（行为按待办项变更）。离屏截图（`NOMO_SNAPSHOT_DOC`）核对上下标、删除线、公式块闭合行、行内与块级 SVG 和新增行内标签。未在真机窗口中验证（本机已运行的 Nomo 与测试构建共用 bundle id，无法单独截取测试窗口）；导出 PDF 中的上下标与 SVG 未实际导出检查。
