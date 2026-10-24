@@ -126,6 +126,28 @@ func TestOpenEditSwitchModesAndClose(t *testing.T) {
 	}
 }
 
+// 从标签栏关闭非末尾标签：关闭在绘制标签栏的循环中发生，不能因 s.tabs 被就地删除而崩溃。
+func TestCloseFirstTabFromTabBar(t *testing.T) {
+	first := filepath.Join(t.TempDir(), "first.md")
+	if err := os.WriteFile(first, []byte("# 一\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := writeDoc(t, "# 二\n")
+	s, tt := newTestShell(t)
+	s.OpenFiles([]string{first, second}) // 不经 OpenExternal：避免打开文件夹后资源管理器里也有同名项
+	tt.Frame()
+	if err := tt.RightClick("first.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("关闭标签页"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(s.tabs) != 1 || s.activeTab() == nil || s.activeTab().Path != second {
+		t.Fatalf("关闭第一个标签后状态不对：%d 个标签", len(s.tabs))
+	}
+}
+
 func TestFindHighlightsAndReplaceAll(t *testing.T) {
 	p := writeDoc(t, "苹果 和 苹果 还有 Apple\n")
 	s, tt := newTestShell(t, p)

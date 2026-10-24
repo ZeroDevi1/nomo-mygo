@@ -155,8 +155,9 @@ func (s *Shell) macContent(c *ui.Context) {
 // macTabs 是 Safari / Finder 风格的标签栏：等宽标签，悬停显示关闭按钮。
 func (s *Shell) macTabs(c *ui.Context) {
 	ui.Row(c).Height(tabBarH - 4).FillWidth().Background(s.ch.tabBar).AlignItems(ui.Stretch).Children(func() {
-		for i, tab := range s.tabs {
-			if s.tabHidden(tab) {
+		for _, tab := range s.barTabs() {
+			i := s.findTabIndex(tab.ID)
+			if i < 0 || s.tabHidden(tab) {
 				continue
 			}
 			ck := c.Key(tab.ID)
@@ -262,8 +263,9 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Height(tabBarH).FillWidth().Padding(4, 8, 0, 8).Gap(2).AlignItems(ui.End).Children(func() {
 		ui.Row(c).Grow(1).Gap(2).Clip().AlignItems(ui.End).Children(func() {
-			for i, tab := range s.tabs {
-				if s.tabHidden(tab) {
+			for _, tab := range s.barTabs() {
+				i := s.findTabIndex(tab.ID)
+				if i < 0 || s.tabHidden(tab) {
 					continue
 				}
 				ck := c.Key(tab.ID)
@@ -308,6 +310,11 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 }
+
+// barTabs 返回标签栏本帧遍历用的快照：关闭按钮、右键菜单、中键与拖放会在遍历中就地修改 s.tabs，
+// 而 slices.Delete 会把尾部空出的元素置 nil，直接遍历 s.tabs 会在关闭非末尾标签后取到 nil 而崩溃。
+// 调用方须按 ID 重新查位置并跳过本帧已移除的标签。
+func (s *Shell) barTabs() []*Tab { return slices.Clone(s.tabs) }
 
 // tabDrag 是拖动中的标签：from 为来源窗口，id 为标签 ID。同一进程的其他窗口也能接收（DragData 携带同一值）。
 type tabDrag struct {
