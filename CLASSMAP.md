@@ -32,7 +32,7 @@
 | 正文行高（行距排版） | `desktop/ui/mdedit/lines.go` | `view.go`（`ensureRow`）, `blocks.go`（`rowLead`）, `draw.go` | 修改行距规则、加行距后的命中测试、选区与逐行绘制 |
 | 折叠块（details） | `desktop/ui/mdedit/details.go`（识别与配对）、`detailsview.go`（视图与命令） | `blocks.go`（标记行）、`htmlpreview.go`（`previewDetails`）、`desktop/ui/shell/editormenu.go` | 修改折叠标记语法、配对与增量平移、卡片绘制、折叠隐藏与自动展开、插入/默认展开/取消折叠 |
 | 编辑区选项（代码块行号、Tab 缩进、行内代码、复制语法、默认插入） | `desktop/ui/mdedit/options.go` | `desktop/ui/shell/editoroptions.go`（设置到选项、图表模板、Ctrl 滚轮） | 修改原版 editor.updateOptions 对应的显示与插入行为 |
-| 精细排版（Knuth–Plass 断行，纯计算） | `desktop/ui/typography`（`knuthplass.go`、`rules.go`、`hyphenation.go`） | `scripts/generate-native-hyphenation.mjs`（生成 `hyphen_en_us_gen.go`）、`testdata/crosscheck.json`（原版依赖对照数据） | 修改 KP 求解、标点禁则/压缩/悬挂、中西文空白、英文断词 |
+| 精细排版（Knuth–Plass 断行，纯计算） | `desktop/ui/typography`（`knuthplass.go`、`rules.go`、`hyphenation.go`） | `hyphen_en_us.go`（hyphenation.en-us 0.2.1 原样数据）、`testdata/crosscheck.json`（原版依赖对照数据） | 修改 KP 求解、标点禁则/压缩/悬挂、中西文空白、英文断词 |
 | 精细排版接入编辑区 | `desktop/ui/mdedit/kp.go`（测量、规则输入、逐行排版）、`kplines.go`（多行布局映射） | `view.go`（`ensureRow`）、`lines.go`（`adjacentY`） | 修改精排适用范围、测量与绘制 |
 | 单行修补（大表格/长代码块按键） | `desktop/ui/mdedit/patch.go` | `view.go`（`applyEdit`）、`document.go`（`checkpoints`） | 修改块内编辑的增量路径与 UTF-16 检查点 |
 | 原文到显示的投影 | `desktop/ui/mdedit/projection.go` | `view.go` | 修改行内标记就地展开/隐藏、行内 HTML 标签样式、实体解码、提示块标记、显示与原文偏移映射 |
@@ -86,7 +86,8 @@
 | Markdown 格式检查（状态栏与问题列表） | `desktop/ui/shell/lint.go` | `desktop/ui/mdlint` | 修改检查调度、防抖、问题弹层与跳转 |
 | 导出 HTML / PDF | `desktop/ui/shell/export.go` | `desktop/ui/themes/export.go`, `desktop/native.go`（`exportNativePDF`）, `desktop/export.go` | 修改导出文档结构、图片内联、提示块卡片、分页标记、PDF 书签标记与版式（`PDFLayout`） |
 | 界面文案 | `desktop/ui/shell/messages.go`（直接维护） | `i18n.go`（语言选择、MyGo 内置文案语言包） | 新增或修改界面文案（简体、繁体、英文同步） |
-| 图标（生成） | `scripts/generate-native-icons.mjs` | `desktop/ui/icons/icons_gen.go` | 所用 Lucide 图标变化后重新生成 |
+| 界面图标（Lucide） | `desktop/ui/icons/lucide.go`（直接维护） | `icons.go` | 增删界面所用图标 |
+| MyGo 应用配置（名称、版本、图标、随包资源、文件关联、Info.plist） | `mygo.json` | `desktop/packaging/samples`（示例文档）, `go.mod` 的 `tool`（`go tool mygo`） | 修改版本号、打包资源或平台配置；版本号唯一来源 |
 | 应用与界面图标 | `desktop/ui/icons/icons.go` | `desktop/appicon.go`, `desktop/native.go` | 修改文件类型图标、提示块图标、应用图标（窗口 / Dock / 关于页） |
 | 内置主题、导出样式与 Quick Look 主题表 | `desktop/ui/themes/builtin.go`（直接维护） | `export_document.css`, `desktop/packaging/macos/NomoQuickLookPreview/BuiltinThemes.swift` | 修改内置配色或导出样式；改内置主题时同步 Quick Look 主题表 |
 | 主题解析、校验与导出 | `desktop/ui/themes/themes.go` | `export.go` | 修改用户主题 JSON 规则（与 userThemeDefinition.ts 一致）、颜色解析、导出 CSS 变量 |
@@ -151,10 +152,9 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| macOS 构建、Quick Look 嵌入与 DMG | `scripts/build-macos.sh` | `scripts/build-macos-quicklook.sh`, `scripts/verify-macos-bundle.sh`, `desktop/packaging/macos/NomoQuickLookPreview/`, `mygo.config.ts` | 修改 MyGo 产物后处理、扩展架构/版本同步、由内向外签名（扩展保留沙盒 entitlements，主应用不带 `--deep`）或 DMG 生成 |
-| Linux 本地构建与安装 | `scripts/build-linux.sh` | `mygo.config.ts` | 修改 DEB/RPM 构建、产物定位或安装；DEB 优先通过 apt-get 解析依赖，失败时保留错误 |
-| SVG 图标与平台资源生成 | `scripts/generate-icons.mjs` | `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, `scripts/compile-macos-appicon.sh`, `desktop/tray.go` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 和移动端保持母版造型 |
-| Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.config.ts` | 修改 Store 包身份、版本映射、MyGo 构建与产物复制、图标 PRI 生成、Shell 扩展封装或上传产物 |
+| macOS 构建、Quick Look 嵌入与 DMG | `scripts/build-macos.sh` | `scripts/build-macos-quicklook.sh`, `scripts/verify-macos-bundle.sh`, `desktop/packaging/macos/NomoQuickLookPreview/`, `mygo.json` | 修改 MyGo 产物后处理、扩展架构/版本同步、由内向外签名（扩展保留沙盒 entitlements，主应用不带 `--deep`）或 DMG 生成 |
+| SVG 图标与平台资源生成 | `scripts/icons/main.go`（`go run ./scripts/icons`） | `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, `desktop/packaging/icons/nomo/macos/AppIcon.icon`（mygo.json 的 `macos.icon`）, `desktop/tray.go` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 保持母版造型 |
+| Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.json` | 修改 Store 包身份、版本映射、MyGo 构建与产物复制、图标 PRI 生成、Shell 扩展封装或上传产物 |
 
 ## Code Unit Entries
 

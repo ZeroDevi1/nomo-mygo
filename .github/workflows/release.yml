@@ -70,19 +70,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@11.5.1 --activate
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Install NSIS
         if: matrix.platform == 'windows/amd64'
         run: sudo apt-get update && sudo apt-get install -y nsis
@@ -97,7 +84,7 @@ jobs:
             # 含 Quick Look 扩展的 .app 与 .dmg（scripts/build-macos.sh 调用 mygo build 后嵌入扩展并重新签名）。
             MACOS_PLATFORM='${{ matrix.platform }}' bash scripts/build-macos.sh
           else
-            pnpm exec mygo build -platform '${{ matrix.platform }}'
+            go tool mygo build -platform '${{ matrix.platform }}'
           fi
 
       - name: Collect release assets

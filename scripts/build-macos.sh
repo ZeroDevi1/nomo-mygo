@@ -7,7 +7,7 @@
 # 最后自行打包 DMG。主应用其余内容保持 MyGo 的签名不动。
 #
 # 环境变量：
-#   APPLE_SIGNING_IDENTITY  签名身份，默认 ad hoc（-），与 mygo.config.ts 一致。
+#   APPLE_SIGNING_IDENTITY  签名身份，默认 ad hoc（-），经 -sign 传给 mygo build。
 #   MACOS_PLATFORM          MyGo 目标平台，默认 darwin/universal；单架构时同步决定扩展架构。
 #   SKIP_DMG=1              只产出 .app。
 set -euo pipefail
@@ -40,9 +40,9 @@ esac
 
 cd "$ROOT_DIR"
 
-# 1. 主应用：图标资源目录须先于 mygo build 生成，mygo.config.ts 按其是否存在决定图标来源。
-bash scripts/compile-macos-appicon.sh
-pnpm exec mygo build -platform "$PLATFORM" -skip-dmg
+# 1. 主应用：MyGo 用 actool 把 mygo.json 的 macos.icon（Icon Composer 文档）编译为跟随外观的 Assets.car，
+#    需要 Xcode 26 及以上；缺少时 MyGo 只给警告，随后的 verify-macos-bundle.sh 会因缺少 Assets.car 失败。
+go tool mygo build -platform "$PLATFORM" -skip-dmg -sign "$IDENTITY"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
   echo "MyGo did not produce $APP_BUNDLE." >&2

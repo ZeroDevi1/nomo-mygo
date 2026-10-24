@@ -140,11 +140,12 @@ func installNativeTray(show, quit func()) bool {
 	return true
 }
 
-// sampleDocumentResource 是随安装包分发的示例文档在资源目录中的相对路径（mygo.config.ts 的 resources）。
+// sampleDocumentResource 是随安装包分发的示例文档在资源目录中的相对路径（mygo.json 的 resources 把
+// desktop/packaging/samples 整个目录打包为 samples/）。
 const sampleDocumentResource = "samples/sample.md"
 
 // resolveSampleDocument 依次在资源目录与可执行文件旁查找非空的示例文档；开发运行（mygo dev 不打包资源）时回退到
-// 当前目录的 sample.md。直接打开安装目录中的文件，不复制到用户数据目录（与原版一致）。
+// 仓库内的 desktop/packaging/samples/sample.md。直接打开安装目录中的文件，不复制到用户数据目录（与原版一致）。
 func resolveSampleDocument() (string, error) {
 	var candidates []string
 	if resources, err := mygo.App.Path(mygo.PathResources); err == nil {
@@ -155,7 +156,7 @@ func resolveSampleDocument() (string, error) {
 		candidates = append(candidates, filepath.Join(dir, sampleDocumentResource), filepath.Join(dir, "resources", sampleDocumentResource))
 	}
 	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(wd, filepath.Base(sampleDocumentResource)))
+		candidates = append(candidates, filepath.Join(wd, "desktop", "packaging", sampleDocumentResource))
 	}
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Size() > 0 {

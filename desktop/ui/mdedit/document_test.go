@@ -41,7 +41,7 @@ func checkIndex(t *testing.T, d *Document) {
 }
 
 func TestIncrementalIndexMatchesFullParse(t *testing.T) {
-	src := repoFile(t, "sample.md")
+	src := repoFile(t, "desktop/packaging/samples/sample.md")
 	d := NewDocument(src)
 	rng := rand.New(rand.NewSource(1))
 	inserts := []string{"a", "中", "😀", "\n", "\n\n", "**", "# ", "- ", "```\n", "`", "[x](y)"}
@@ -58,7 +58,7 @@ func TestIncrementalIndexMatchesFullParse(t *testing.T) {
 }
 
 func TestOpenSaveIsByteIdentical(t *testing.T) {
-	for _, name := range []string{"sample.md", "README.md"} {
+	for _, name := range []string{"desktop/packaging/samples/sample.md", "README.md"} {
 		src := repoFile(t, name)
 		d := NewDocument(src)
 		if d.Source() != src {
@@ -168,7 +168,7 @@ func TestRecollectMatchesFullParse(t *testing.T) {
 	inserts := []string{"a", "中", "\n", "\n\n", "# ", "- ", "1. ", "> ", "    ", "===\n", "---\n", "```\n", "~~~",
 		"<!-- toc -->\n", "<!-- /toc -->\n", "|a|b|\n|-|-|\n", "  continued", "<div>\n", "[^1]: note\n", "$$\n"}
 	for seed := int64(1); seed <= 6; seed++ {
-		d := NewDocument(repoFile(t, "sample.md"))
+		d := NewDocument(repoFile(t, "desktop/packaging/samples/sample.md"))
 		rng := rand.New(rand.NewSource(seed))
 		for i := 0; i < 300; i++ {
 			s := d.Source()
@@ -198,7 +198,7 @@ func TestChunkedTreeMatchesWholeParse(t *testing.T) {
 	inserts := []string{"a", "中", "\n", "\n\n", "# ", "- ", "1. ", "> ", "    ", "===\n", "```\n", "~~~\n", "<!-- ",
 		" -->", "<script>\n", "$$\n", "|a|b|\n|-|-|\n", "  continued", "**b**", "[x](y)", "[r]: /u\n", "[^1]: n\n"}
 	var kept []string
-	for _, line := range strings.Split(repoFile(t, "sample.md"), "\n") {
+	for _, line := range strings.Split(repoFile(t, "desktop/packaging/samples/sample.md"), "\n") {
 		if !hasDefinitions(line) { // 含定义的文档不分段
 			kept = append(kept, line)
 		}
@@ -253,7 +253,7 @@ func TestChunkedTreeMatchesWholeParse(t *testing.T) {
 // TestStatsIncremental 随机编辑后，增量维护的写作统计与整篇重算一致。
 func TestStatsIncremental(t *testing.T) {
 	inserts := []string{"a", "word", " ", "\n", "中文", "かな", "x1", "-", "😀", "", "foo bar\nbaz"}
-	d := NewDocument(repoFile(t, "sample.md"))
+	d := NewDocument(repoFile(t, "desktop/packaging/samples/sample.md"))
 	_ = d.Stats()
 	rng := rand.New(rand.NewSource(7))
 	for i := 0; i < 2000; i++ {

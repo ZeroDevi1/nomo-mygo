@@ -547,3 +547,14 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 未做：行内 HTML / SVG 渲染（需求不明确）；`^上标^` / `~下标~` 语法（单个 `~` 与 GFM 删除线冲突）；上下标基线（上游）。
 
 验证：`go vet`（macOS、`GOOS=windows`、`GOOS=linux`）、`go test ./desktop/...`、`pnpm install --frozen-lockfile`；新增测试 `TestCalloutHeader`、`TestCalloutFold`、`TestTextColor`、`TestImageEdit`、`TestImageResizeDrag`、`TestMoveImage`、`TestImageDragMove`、`TestUpdateFlow`、`TestInstalledNotes`、`TestHTMLCompletionItems`、`TestNestedDetailsMarkers`、`TestRefreshToc`、`TestSplitSourceKeepsFocus`、`TestPDFLayoutHTML`、`TestExportCallouts`、`TestWorkspaceMultiWindowAndGroups`、`TestAdoptTabsAcrossWindows` 及 `desktop/update_install_test.go`。实机（macOS，release，隔离 HOME）：中文菜单、提示块点击展开、工具栏文字颜色、公式块显示源码、PDF（A5、页码 “n / 5”、一级标题分页、每页页眉页脚、提示块卡片）。未实机：中键关闭、跨窗口与拖出标签（测试器不模拟系统拖放，只测了 `moveTab` / `adoptTabs`）、图片右键与拖动、更新下载安装、托盘图标；Windows 相关全部待 Windows 真机验证。
+
+### 9.28 移除 pnpm，改为纯 Go 工具链（2026-10-24）
+
+- **MyGo 命令行**：MyGo 的命令行本身是 Go 程序（npm 包 `mygo-cli` 只是包装器），改为 `go.mod` 的 `tool github.com/egoist/mygo/cmd/mygo`，经 `go tool mygo dev` / `build` 运行，版本随 Go 模块锁定。
+- **配置**：`mygo.config.ts` 换成等价的 `mygo.json`，版本号唯一来源从 `package.json` 移到 `mygo.json` 的 `version`（MSIX 脚本、Quick Look 构建同步改读）。macOS 签名身份改由 `scripts/build-macos.sh` 以 `-sign` 传入。示例文档与图片移到 `desktop/packaging/samples/`，直接作为 `resources` 打包为 `samples/`，不再需要构建前复制脚本。
+- **macOS 外观图标**：原先构建前由 `compile-macos-appicon.sh` 临时拼出 Icon Composer 文档再调用 actool；现把文档 `desktop/packaging/icons/nomo/macos/AppIcon.icon` 放进仓库并设为 `macos.icon`，由 `mygo build` 编译 `Assets.car`（需要 Xcode 26 及以上）。
+- **删除**：`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`.npmrc`、Prettier 配置；脚本 `prepare-desktop-resources.mjs`、`generate-native-icons.mjs`（`icons_gen.go` 改名 `lucide.go` 直接维护）、`generate-native-hyphenation.mjs`（`hyphen_en_us_gen.go` 改名 `hyphen_en_us.go`，数据固定为 hyphenation.en-us 0.2.1）、`compile-macos-appicon.sh`、`regenerate-macos-icons.sh`、Tauri 时期的 `build-linux.sh` 与工作流 `backfill-linux-release.yml`，以及未被引用的 Tauri 图标（Android / iOS、`icon.icns`、`icon.ico` 与多余尺寸）。
+- **图标生成**：`generate-icons.mjs`（经 `pnpm dlx` 调用 Tauri CLI 栅格化）改写为 `scripts/icons/main.go`（`go run ./scripts/icons`），用 MyGo 无头渲染逐尺寸从矢量栅格化。输出到临时目录与现有资源对比：文件集合与尺寸一致，深色 SVG 与托盘 SVG 逐字节一致，位图逐像素平均差不超过 2.9/255（小尺寸抗锯齿差异）；未用它覆盖仓库中的现有位图。
+- **CI**：`release.yml`、`msix.yml` 去掉 Node 与 pnpm 步骤，改用 `go tool mygo`；`msix.yml` 的触发路径改为 `mygo.json`。均未在 CI 上实际运行。
+
+验证：`go vet ./...`（另加 `GOOS=windows` / `GOOS=linux` 的 `./desktop/...`）、`go test ./...`；`SKIP_DMG=1 MACOS_PLATFORM=darwin/arm64 bash scripts/build-macos.sh`（版本 0.6.2、`Assets.car` 与 `CFBundleIconName=AppIcon`、`Resources/samples`、Quick Look 扩展签名校验通过）；`go tool mygo build -platform windows/amd64,linux/amd64` 产出 `Nomo.exe`、deb 与 tar.gz（本机无 NSIS，未产出 Windows 安装包）。未验证：MSIX 脚本与 Windows 安装包（需 Windows）。

@@ -1,5 +1,5 @@
 // Package icons 提供原生界面使用的图标：与原版界面相同的 Lucide 图标（ISC 许可，
-// 由 scripts/generate-native-icons.mjs 生成到 icons_gen.go），供外壳与编辑器共用。
+// 图标表见 lucide.go），供外壳与编辑器共用。
 package icons
 
 import (

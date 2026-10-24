@@ -61,16 +61,17 @@ brew install --cask nomo
 
 ## 开发
 
-界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`），不含 Web 前端代码。需要 Go 1.27；Node.js 22 与 pnpm 11.5.1 只用于 MyGo 命令行、图标生成与格式化。
+界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`），纯 Go 项目，不需要 Node.js。需要 Go 1.27；MyGo 命令行作为 `go.mod` 中的工具依赖，经 `go tool mygo` 运行，应用配置在 `mygo.json`。
 
 - macOS：Xcode Command Line Tools；构建 Quick Look 扩展需要完整 Xcode。
 
 ```bash
-pnpm install
-pnpm desktop:dev
+go tool mygo dev
 ```
 
-检查与测试：`pnpm check`（`go vet`）、`pnpm test`（`go test`）。
+- 检查与测试：`go vet ./...`、`go test ./...`
+- 打包：`go tool mygo build`；macOS 含 Quick Look 扩展与 DMG 用 `bash scripts/build-macos.sh`；Windows Store 包见 [desktop/packaging/msix](desktop/packaging/msix/README.md)
+- 图标：修改 `desktop/packaging/icons/nomo/source/nomo-app-light.svg` 后运行 `go run ./scripts/icons`
 
 ## 参与项目
 

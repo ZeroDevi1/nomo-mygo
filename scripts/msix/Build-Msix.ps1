@@ -173,12 +173,12 @@ if ($Mode -eq 'Store') {
     }
 }
 
-$packageJson = Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json
+$mygoConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'mygo.json') -Raw | ConvertFrom-Json
 if ($Mode -eq 'Store' -and $Configuration -ne 'Release') {
     throw 'Store MSIX 只允许使用 Release 配置。'
 }
-# 版本唯一来源是 package.json（mygo.config.ts 读取同一字段写入可执行文件版本信息）。
-$appVersion = [string]$packageJson.version
+# 版本唯一来源是 mygo.json 的 version（mygo build 用同一字段写入可执行文件版本信息）。
+$appVersion = [string]$mygoConfig.version
 if ($appVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
     throw "MSIX 只接受稳定三段 SemVer，当前为：$appVersion"
 }
@@ -194,12 +194,12 @@ $msixVersion = $msixSegments -join '.'
 Reset-TaskDirectory $stagingRoot
 Reset-TaskDirectory $outputRoot
 
-# MyGo 构建输出目录（mygo.config.ts 的 out）下的 windows-amd64：Nomo.exe、随包资源与 NSIS 安装包。
+# MyGo 构建输出目录（mygo.json 的 out）下的 windows-amd64：Nomo.exe、随包资源与 NSIS 安装包。
 $applicationTarget = Join-Path $repoRoot 'target\mygo\windows-amd64'
 if (-not $SkipApplicationBuild) {
     Push-Location $repoRoot
     try {
-        & pnpm.cmd exec mygo build -platform windows/amd64
+        & go tool mygo build -platform windows/amd64
         if ($LASTEXITCODE -ne 0) {
             throw "MyGo x64 Release 构建失败，退出码：$LASTEXITCODE"
         }

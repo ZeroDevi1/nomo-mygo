@@ -8,8 +8,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'scripts/msix/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+      - 'mygo.json'
       - '.github/workflows/msix.yml'
   push:
     branches:
@@ -19,8 +18,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'scripts/msix/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+      - 'mygo.json'
       - '.github/workflows/msix.yml'
 
 permissions:
@@ -35,24 +33,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        shell: pwsh
-        run: |
-          corepack enable
-          corepack prepare pnpm@11.5.1 --activate
-
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Build MSIX
         shell: pwsh

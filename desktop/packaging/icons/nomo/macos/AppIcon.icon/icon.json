@@ -1,0 +1,68 @@
+{
+  "fill": "none",
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-scale": "fill",
+          "opacity": 1,
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          },
+          "hidden-specializations": [
+            {
+              "appearance": "dark",
+              "value": true
+            }
+          ],
+          "image-name": "nomo-app-light.png",
+          "name": "Light"
+        },
+        {
+          "glass": false,
+          "image-scale": "fill",
+          "opacity": 1,
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          },
+          "hidden-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            }
+          ],
+          "image-name": "nomo-app-dark.png",
+          "name": "Dark"
+        }
+      ],
+      "lighting": "combined",
+      "name": "Nomo",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

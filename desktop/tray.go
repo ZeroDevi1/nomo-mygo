@@ -69,7 +69,7 @@ func applyDockIcon(dark bool) {
 	}
 }
 
-// bundledIcon 报告是否从 .app 运行且包内有图标资源目录 Assets.car（scripts/compile-macos-appicon.sh 编译的浅色、
+// bundledIcon 报告是否从 .app 运行且包内有图标资源目录 Assets.car（mygo build 由 macos/AppIcon.icon 编译的浅色、
 // 深色与着色变体）。
 func bundledIcon() bool {
 	exe, err := os.Executable()

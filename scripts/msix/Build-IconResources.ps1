@@ -32,7 +32,7 @@ foreach ($size in @(16, 20, 24, 30, 32, 36, 40, 44, 48, 60, 64, 72, 80, 96, 256)
     foreach ($suffix in @('', '_altform-unplated', '_altform-lightunplated')) {
         $asset = "Square44x44Logo.targetsize-$size$suffix.png"
         if (-not (Test-Path -LiteralPath (Join-Path $variantDirectory $asset) -PathType Leaf)) {
-            throw "缺少图标资源 $asset，请先运行 pnpm icons:generate。"
+            throw "缺少图标资源 $asset，请先运行 go run ./scripts/icons。"
         }
     }
 }
@@ -40,7 +40,7 @@ foreach ($name in @('StoreLogo', 'Square44x44Logo', 'Square71x71Logo', 'Square15
     foreach ($scale in @(125, 150, 200, 400)) {
         $asset = "$name.scale-$scale.png"
         if (-not (Test-Path -LiteralPath (Join-Path $variantDirectory $asset) -PathType Leaf)) {
-            throw "缺少图标资源 $asset，请先运行 pnpm icons:generate。"
+            throw "缺少图标资源 $asset，请先运行 go run ./scripts/icons。"
         }
     }
 }

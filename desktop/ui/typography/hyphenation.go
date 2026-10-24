@@ -8,7 +8,7 @@ import (
 )
 
 // 英文自动断词：Liang 算法移植自 Hypher 0.2.5（BSD，见 THIRD_PARTY_NOTICES.md）的 createTrie 与 hyphenate，
-// 模式数据为 hyphenation.en-us 0.2.1（生成到 hyphen_en_us_gen.go）。候选单词的筛选规则同原版 hyphenation.ts。
+// 模式数据为 hyphenation.en-us 0.2.1（见 hyphen_en_us.go）。候选单词的筛选规则同原版 hyphenation.ts。
 
 type trieNode struct {
 	next   map[rune]*trieNode

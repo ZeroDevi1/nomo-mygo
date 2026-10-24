@@ -24,10 +24,10 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$BUILD_DIR"
 
 cp "$EXTENSION_SRC_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
 
-# MyGo 以 package.json 版本同时写入主应用的 CFBundleShortVersionString 与 CFBundleVersion；
+# MyGo 以 mygo.json 的 version 同时写入主应用的 CFBundleShortVersionString 与 CFBundleVersion；
 # 扩展构建版本须与主应用一致，覆盖同一营销版本时 PlugInKit 才会刷新扩展。
 # 嵌入时 build-macos.sh 还会按最终 .app 的 Info.plist 再同步一次，防止 infoPlist 覆盖造成漂移。
-APP_VERSION="$(node -p "require('./package.json').version")"
+APP_VERSION="$(plutil -extract version raw -o - mygo.json)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$CONTENTS_DIR/Info.plist"
 
@@ -54,8 +54,8 @@ for SWIFT_TARGET_ARCH in "${SWIFT_TARGET_ARCHS[@]}"; do
   SLICE="$BUILD_DIR/NomoQuickLookPreview-$SWIFT_TARGET_ARCH"
   # Xcode 的 App Extension target 会自动把入口设为 _NSExtensionMain；
   # 直接调用 swiftc 时必须显式设置，否则生成的进程会启动后立即退出，导致 PlugInKit XPC Code=4097。
-  # 预览为原生 AppKit 渲染（MarkdownRenderer.swift），不依赖 WebKit；BuiltinThemes.swift 由
-  # scripts/generate-native-themes.mjs 生成。
+  # 预览为原生 AppKit 渲染（MarkdownRenderer.swift），不依赖 WebKit；BuiltinThemes.swift 与
+  # desktop/ui/themes/builtin.go 的内置主题保持一致（两边同步维护）。
   xcrun swiftc \
     "$EXTENSION_SRC_DIR/PreviewViewController.swift" \
     "$EXTENSION_SRC_DIR/MarkdownRenderer.swift" \

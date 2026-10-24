@@ -1,0 +1,34 @@
+{
+  "name": "Nomo",
+  "identifier": "com.nomo.desktop",
+  "version": "0.6.2",
+  "icon": "desktop/packaging/icons/nomo/source/nomo-app-light-1024.png",
+  "main": "./desktop",
+  "out": "target/mygo",
+  "resources": ["desktop/packaging/samples"],
+  "fileAssociations": [
+    { "ext": ["md", "markdown"], "name": "Markdown Document", "mimeType": "text/markdown", "role": "Editor" },
+    { "ext": ["txt"], "name": "Text Document", "mimeType": "text/plain", "role": "Editor" },
+    { "ext": ["json"], "name": "JSON Document", "mimeType": "application/json", "role": "Editor" }
+  ],
+  "macos": {
+    "minimumSystemVersion": "12.0",
+    "icon": "desktop/packaging/icons/nomo/macos/AppIcon.icon",
+    "infoPlist": {
+      "CFBundleDevelopmentRegion": "en",
+      "CFBundleLocalizations": ["en", "zh-Hans", "zh-Hant"],
+      "CFBundlePlugIns": ["Contents/PlugIns/NomoQuickLookPreview.appex"],
+      "UTExportedTypeDeclarations": [
+        {
+          "UTTypeIdentifier": "net.daringfireball.markdown",
+          "UTTypeDescription": "Markdown Document",
+          "UTTypeConformsTo": ["public.plain-text", "public.text"],
+          "UTTypeTagSpecification": {
+            "public.filename-extension": ["md", "markdown", "mdown", "mkd"],
+            "public.mime-type": ["text/markdown"]
+          }
+        }
+      ]
+    }
+  }
+}

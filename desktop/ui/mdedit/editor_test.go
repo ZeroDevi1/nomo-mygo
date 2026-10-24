@@ -24,7 +24,7 @@ func newTester(t testing.TB, src string, w, h int) (*Editor, *ui.Tester) {
 
 // largeDoc 重复 sample.md 直到至少 runes 个字符，模拟 10 万字文档。
 func largeDoc(t testing.TB, runes int) string {
-	sample := repoFile(t, "sample.md")
+	sample := repoFile(t, "desktop/packaging/samples/sample.md")
 	var b strings.Builder
 	for utf8.RuneCountInString(b.String()) < runes {
 		b.WriteString(sample)
@@ -266,7 +266,7 @@ func TestSnapshot(t *testing.T) {
 	if out == "" {
 		t.Skip("设 NOMO_SNAPSHOT=<png 路径> 运行")
 	}
-	src := repoFile(t, "sample.md")
+	src := repoFile(t, "desktop/packaging/samples/sample.md")
 	if f := os.Getenv("NOMO_SNAPSHOT_DOC"); f != "" {
 		b, err := os.ReadFile(f)
 		if err != nil {

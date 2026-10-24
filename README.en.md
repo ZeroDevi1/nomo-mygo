@@ -61,16 +61,17 @@ See [release notes](https://github.com/nomo-md/nomo/releases) for version change
 
 ## Development
 
-The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`), with no web front-end code. Requires Go 1.27; Node.js 22 and pnpm 11.5.1 are only used for the MyGo CLI, icon generation and formatting.
+The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`); it is a pure Go project and needs no Node.js. Requires Go 1.27; the MyGo CLI is a tool dependency in `go.mod`, run with `go tool mygo`, and the app is configured in `mygo.json`.
 
 - macOS: Xcode Command Line Tools; building the Quick Look extension requires the full Xcode.
 
 ```bash
-pnpm install
-pnpm desktop:dev
+go tool mygo dev
 ```
 
-Checks and tests: `pnpm check` (`go vet`) and `pnpm test` (`go test`).
+- Checks and tests: `go vet ./...` and `go test ./...`
+- Packaging: `go tool mygo build`; on macOS, `bash scripts/build-macos.sh` adds the Quick Look extension and the DMG; for the Windows Store package see [desktop/packaging/msix](desktop/packaging/msix/README.md)
+- Icons: edit `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, then run `go run ./scripts/icons`
 
 ## Get Involved
 

@@ -7,7 +7,7 @@ runtime AUMID is always calculated as `<current PFN>!Nomo`.
 Development package:
 
 ```powershell
-pnpm run build:win64:msix:dev
+pwsh -NoProfile -File scripts/msix/Build-Msix.ps1 -Mode Dev
 ```
 
 The output is written to `.artifacts/msix/output`. The package is signed with a locally generated
@@ -18,7 +18,7 @@ store or installs the package.
 To build the Store upload, run:
 
 ```powershell
-pnpm run build:win64:msix:store
+pwsh -NoProfile -File scripts/msix/Build-Msix.ps1 -Mode Store
 ```
 
 Store mode validates the Partner Center Name, DisplayName, Publisher, PublisherDisplayName, PFN and Product ID,
@@ -27,7 +27,7 @@ signs the certified package. PFX files, passwords, and generated artifacts must 
 `.artifacts` and are ignored by Git. The Package SID is derived by Windows and is not written into
 `AppxManifest.xml`.
 
-The build runs `mygo build -platform windows/amd64` (skip with `-SkipApplicationBuild`) and packages
+The build runs `go tool mygo build -platform windows/amd64` (skip with `-SkipApplicationBuild`) and packages
 `target/mygo/windows-amd64/Nomo.exe` as `nomo.exe`, together with the bundled resources next to it; the
 NSIS installer `Nomo Setup *.exe` stays out of the package. After unpacking the MSIX it verifies that the
 executable SHA-256 is unchanged, and records it in `msix-validation-report.json`.

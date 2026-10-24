@@ -1,6 +1,3 @@
-# Dependencies
-node_modules/
-
 # Build output
 dist/
 build/
@@ -23,10 +20,6 @@ desktop/packaging/windows-shell-extension/obj-tests/
 # Logs and caches
 *.log
 logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 .cache/
 .temp/
 .tmp/
@@ -39,10 +32,6 @@ pnpm-debug.log*
 !.vscode/settings.json
 .DS_Store
 Thumbs.db
-.pnpm-store
-
-# Paraglide 由 build 前 pnpm exec paraglide-js compile 生成
-src/paraglide/
 
 # Local video production assets
 /video/
