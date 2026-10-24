@@ -5,6 +5,7 @@ package imageasset
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/json/v2"
 	"errors"
@@ -92,7 +93,7 @@ func UploadPicgoCore(fileName string, data []byte, command, configPath string) (
 	if strings.TrimSpace(configPath) != "" {
 		arguments = append(arguments, "--config", strings.TrimSpace(configPath))
 	}
-	stdout, stderr, err := runPicgoCore(command, arguments...)
+	stdout, stderr, err := runPicgoCore(picgoUploadTimeout, command, arguments...)
 	if err != nil {
 		if message := strings.TrimSpace(stderr); message != "" {
 			return "", fmt.Errorf("PicGo-Core 上传失败：%s", message)
@@ -153,7 +154,7 @@ func TestConnection(provider, serverURL, command string) (string, error) {
 		if strings.TrimSpace(command) == "" {
 			return "", errors.New("PicGo-Core 命令不能为空")
 		}
-		_, stderr, err := runPicgoCore(strings.TrimSpace(command), "--version")
+		_, stderr, err := runPicgoCore(picgoVersionTimeout, strings.TrimSpace(command), "--version")
 		if err != nil {
 			if message := strings.TrimSpace(stderr); message != "" {
 				return "", fmt.Errorf("PicGo-Core 测试失败：%s", message)
@@ -452,16 +453,32 @@ func splitCommandLine(command string) []string {
 	return parts
 }
 
-func runPicgoCore(command string, arguments ...string) (string, string, error) {
+// PicGo-Core 命令的时限：上传 120 秒（同原版 UPLOAD_TIMEOUT），连接测试读取版本 15 秒。命令卡住（如等待网络或
+// 交互输入）时到时结束进程并报错，不让上传一直挂起。
+const (
+	picgoUploadTimeout  = 120 * time.Second
+	picgoVersionTimeout = 15 * time.Second
+)
+
+// runPicgoCore 运行 PicGo-Core 命令，超过 timeout 时结束进程并返回超时错误。
+func runPicgoCore(timeout time.Duration, command string, arguments ...string) (string, string, error) {
 	parts := splitCommandLine(command)
 	if len(parts) == 0 {
 		parts = []string{strings.TrimSpace(command)}
 	}
-	cmd := exec.Command(parts[0], append(parts[1:], arguments...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, parts[0], append(parts[1:], arguments...)...)
+	// 结束进程后最多再等 2 秒读取输出：picgo 常经 npm 的包装脚本启动，子进程可能仍持有输出管道。
+	cmd.WaitDelay = 2 * time.Second
 	hideConsoleWindow(cmd)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			// 不返回 stderr：调用方优先显示 stderr，超时说明会被已输出的半截日志盖住。
+			return stdout.String(), "", fmt.Errorf("PicGo-Core 超时（%d 秒）", int(timeout.Seconds()))
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return stdout.String(), stderr.String(), fmt.Errorf("退出码：%d", exitErr.ExitCode())
