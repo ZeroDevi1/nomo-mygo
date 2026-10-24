@@ -60,7 +60,7 @@
 | 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载、GIF 动画 |
 | 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `view.go`（`rowBox`）, `draw.go`, `input.go` | 修改列宽策略（原版 widths.ts）、超宽表格横向滚动、单元格裁剪 |
 | HTML 块预览、注释卡片、目录卡片 | `desktop/ui/mdedit/htmlpreview.go` | `blocks.go`, `document.go`（`KindToc`）, `imageview.go` | 修改可预览的 HTML 白名单与排版、注释/目录卡片样式、目录点击跳转 |
-| 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go` | `render.html`, `src/render/render-entry.ts`, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线、含文字 SVG 的栅格化 |
+| 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go` | `render.html`, `src/render/render-entry.ts`, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`）, `renderdump.go`（诊断转储） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线、含文字 SVG 的栅格化；`NOMO_RENDER_DUMP=<目录>` 开启每批截图与测量的转储 |
 | 双栏模式 | `desktop/ui/shell/split.go` | `tab.go`（双向同步）, `desktop/ui/mdedit/api.go`（`TopSourceOffset`、`ScrollToSource`） | 修改双栏布局、比例保存、活动一侧与滚动同步 |
 | 组合标签 | `desktop/ui/shell/compare.go` | `view.go`（标签栏、右键菜单）, `tab.go`（`partner`） | 修改组合/解散/交换、并排显示与活动文档 |
 | 多窗口、托盘、小窗、标签拖动排序 | `desktop/ui/shell/windows.go`, `tray.go`, `mini.go`, `view.go`（`tabDragTarget`） | `desktop/native.go`（`installNativeTray`） | 修改窗口注册与菜单分发、关闭到托盘、Markdown 小窗、标签栏内拖动排序 |

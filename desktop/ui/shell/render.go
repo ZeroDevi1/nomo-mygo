@@ -177,8 +177,7 @@ func (r *renderService) render(reqs []mdedit.RenderRequest) []mdedit.RenderResul
 	dpr, _ := batch["dpr"].(float64)
 	dpr = max(1, dpr)
 	list, _ := batch["items"].([]any)
-	type box struct{ x, y, w, h, depth float64 }
-	boxes := make([]box, len(reqs))
+	boxes := make([]renderBox, len(reqs))
 	var maxX, maxY float64
 	for k := range reqs {
 		it, _ := func() (map[string]any, bool) {
@@ -200,7 +199,7 @@ func (r *renderService) render(reqs []mdedit.RenderRequest) []mdedit.RenderResul
 		case num("w") <= 0 || num("h") <= 0:
 			out[k].Err = errors.New("渲染结果为空")
 		default:
-			boxes[k] = box{num("x"), num("y"), num("w"), num("h"), num("depth")}
+			boxes[k] = renderBox{num("x"), num("y"), num("w"), num("h"), num("depth")}
 			maxX, maxY = max(maxX, num("x")+num("w")), max(maxY, num("y")+num("h"))
 		}
 	}
@@ -209,8 +208,9 @@ func (r *renderService) render(reqs []mdedit.RenderRequest) []mdedit.RenderResul
 	}
 	// 截图取整个可见页面：先把窗口缩到整批的包围尺寸，避免编解码整块离屏视口（2 倍屏上可达 4800² 像素）。
 	r.win.SetContentSize(int(math.Ceil(maxX))+2, int(math.Ceil(maxY))+2)
-	// 等页面按新尺寸重绘（隐藏窗口里 rAF 被暂停，用定时器）。
-	if _, err := r.evalLocked(ctx, "await new Promise((r) => setTimeout(r, 50)); return true"); err != nil {
+	// 等页面按新尺寸重绘（隐藏窗口里 rAF 被暂停，用定时器）；顺带取回滚动与视口，只供诊断转储使用。
+	viewport, err := r.evalLocked(ctx, "await new Promise((r) => setTimeout(r, 50)); return [scrollX, scrollY, innerWidth, innerHeight]")
+	if err != nil {
 		return fail(err)
 	}
 	shot, err := r.captureLocked(ctx)
@@ -237,8 +237,12 @@ func (r *renderService) render(reqs []mdedit.RenderRequest) []mdedit.RenderResul
 		draw.Draw(img, img.Bounds(), full, crop.Min, draw.Src)
 		out[k] = mdedit.RenderResult{Img: img, W: float32(bx.w), H: float32(bx.h), Depth: float32(bx.depth)}
 	}
+	dumpRender(shot, full, dpr, viewport, reqs, boxes, out)
 	return out
 }
+
+// renderBox 是渲染页测量的一项位置与尺寸（CSS 像素，相对 #stage），depth 为行内公式基线以下的深度。
+type renderBox struct{ x, y, w, h, depth float64 }
 
 // evalLocked 执行脚本并等待结果，超时则销毁窗口（下次请求重建）并返回错误：页面卡住时不让串行队列一直等。
 // MyGo 的 Eval 等待结果时不响应 ctx，所以在单独的 goroutine 中调用。

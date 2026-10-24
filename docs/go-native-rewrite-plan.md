@@ -516,6 +516,9 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 
 验证：Go `vet`（macOS、`GOOS=windows`、`GOOS=linux`）与 `go test ./desktop/...`；新增测试 `TestWorkspaceRestore`、`TestWorkspaceDraftConflict`、`TestWorkspaceCloseDropsDiscarded`、`TestTabDragReorder`、`TestDropOnEmptyWorkspace`、`TestLinkEditor`、`TestSnapshotsRestore`、`TestTableCommands`、`TestCodeBlockCommands`、`TestTableCommandCaretContext`、`TestWindowsIntegrationSettings`；`pnpm check`、`vitest run src/app/i18n.test.ts`；`mygo build`。实机（macOS，release，隔离 HOME）：链接浮层编辑已有链接、表格右键插入列、保存后历史快照、崩溃后无参数启动恢复标签与未保存修改、正常退出后副本清理与工作区记录、全新配置打开示例文档。未实机：Windows 集成（无 Windows 真机）、拖入文件的覆盖提示（只在测试器中验证拖放）。后台辅助功能写入（AXSelectedText）只改输入框显示、不进入 MyGo 文本输入绑定，真实键盘输入正常。
 
-### 9.26 MyGo 0.6.3 升级（2026-10-24）
+### 9.26 MyGo 0.6.3 与离屏渲染诊断（2026-10-24）
 
 - **升级 MyGo 0.6.3**：Go 模块、`mygo-runtime`、`mygo-cli` 同步升级；0.6.3 只有修复（Windows 粘贴不再重复、隐藏标题栏最大化时的系统按钮、大段落布局缓存、Metal 字形图集采样等），新增的公开接口只有 WebView 内容拦截规则（`ContentRules`），对 9.25 的未做项没有帮助。pnpm 的 `minimumReleaseAgeExclude` 按 0.6.2 的先例换成 0.6.3 各包。
+- **公式偶发缺上标**：升级后的一次启动中，`E=mc^2` 的上标只剩一个点（公式位置正常），移开光标后不恢复，重启后正常。临时转储排查：12 次冷启动（含重新构建后的首次启动）截图逐像素一致且完整；示例文档多批渲染、反复切换主题与缩放时，截图前页面滚动始终为 0，窗口尺寸也未被屏幕限制。未能复现，原因未定（截图与编辑区绘制两侧都可能），未改渲染逻辑。
+- **诊断转储**（`desktop/ui/shell/renderdump.go`，默认关闭）：设置 `NOMO_RENDER_DUMP=<目录>` 启动后，每批渲染写出整页截图（`<批次>-page.png`）、各项裁剪位图（`<批次>-<序号>.png`）与 `<批次>.json`（时间、dpr、截图尺寸、截图前的滚动与视口、各项请求原文与测量框）；在后台 worker 中写，至多 200 批。再出现异常时，对比转储中的位图与界面即可区分是截图还是绘制的问题。
+- 验证：`TestRenderDump`；实机（release）开启时写出 3 个文件、内容与测量一致，未设置时不写文件。
