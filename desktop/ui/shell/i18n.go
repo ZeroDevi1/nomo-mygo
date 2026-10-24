@@ -9,13 +9,15 @@ import (
 	"nomo/desktop/ui/icons"
 
 	// MyGo 自身的文字（系统菜单项、对话框按钮、查找栏、编辑右键菜单等）的中文翻译：没有 MyGo i18n 目录的应用须自行
-	// 导入，否则这些文字只有英文（与 shell.applyAppLocale 声明的语言一致）。
+	// 导入，否则这些文字只有英文（与 shell.applyAppLocale 声明的语言一致）。MyGo 0.6.3 没有日文语言包，
+	// 日文界面下这部分文字为英文（macOS 的系统菜单项由 Info.plist 的 CFBundleLocalizations 交给 AppKit 本地化）。
 	_ "github.com/egoist/mygo/locales/zh-Hans"
 	_ "github.com/egoist/mygo/locales/zh-Hant"
 )
 
 // tr 返回界面文案。文案表在 messages.go（原由前端文案生成，前端移除后直接维护），
 // 键名与原版 t.xxx() 一致；繁体缺失时回退简体，日文与其余缺失回退英文，再缺失返回键名。
+// 日文（msgJaJP）取自原版的日文文案，原生版新增的文案另行翻译。
 // args 为占位符的名值对，替换 {name}。
 func (s *Shell) tr(key string, args ...string) string {
 	var v string
@@ -27,6 +29,8 @@ func (s *Shell) tr(key string, args ...string) string {
 		if v, ok = msgZhTW[key]; !ok {
 			v, ok = msgZhCN[key]
 		}
+	case i18n.JaJP:
+		v, ok = msgJaJP[key]
 	default:
 		v, ok = msgEnUS[key]
 	}

@@ -250,8 +250,8 @@ func (s *Shell) setPref(key string) {
 // 汉字字形选择跟随界面语言：声明 Nomo 文案覆盖的语言，再按设置 interfaceLanguage 指定或跟随系统（"system"）。
 // 不声明时 MyGo 视应用为纯英文，中文界面下的系统菜单项显示英文。
 func applyAppLocale(pref string) {
-	mygo.App.SetLanguages("en", "zh-Hans", "zh-Hant")
-	tag := map[string]string{"zh-CN": "zh-Hans", "zh-TW": "zh-Hant", "en-US": "en"}[pref]
+	mygo.App.SetLanguages("en", "zh-Hans", "zh-Hant", "ja")
+	tag := map[string]string{"zh-CN": "zh-Hans", "zh-TW": "zh-Hant", "en-US": "en", "ja-JP": "ja"}[pref]
 	mygo.App.SetLocale(tag)
 }
 

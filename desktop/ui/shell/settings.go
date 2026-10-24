@@ -143,7 +143,7 @@ func (sw *settingsWindow) page(c *ui.Context) {
 			sw.slider(c, "autoSaveDelay", "autoSaveDelayMs", &p.AutoSaveDelayMs, 500, 5000, 100, "%.0f ms", !p.AutoSaveEnabled)
 			sw.toggle(c, "createSnapshotBeforeSave", "createSnapshotBeforeSave", &p.CreateSnapshotBeforeSave)
 			sw.choice(c, "interfaceLanguage", "interfaceLanguage", &p.InterfaceLanguage,
-				[]string{"system", "zh-CN", "zh-TW", "en-US"}, []string{s.tr("themeSystem"), "简体中文", "繁體中文", "English"})
+				[]string{"system", "zh-CN", "zh-TW", "en-US", "ja-JP"}, []string{s.tr("themeSystem"), "简体中文", "繁體中文", "English", "日本語"})
 		})
 	case "editor":
 		sw.section(c, "typographySettings", func() {

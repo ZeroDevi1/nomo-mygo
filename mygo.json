@@ -16,7 +16,7 @@
     "icon": "desktop/packaging/icons/nomo/macos/AppIcon.icon",
     "infoPlist": {
       "CFBundleDevelopmentRegion": "en",
-      "CFBundleLocalizations": ["en", "zh-Hans", "zh-Hant"],
+      "CFBundleLocalizations": ["en", "zh-Hans", "zh-Hant", "ja"],
       "CFBundlePlugIns": ["Contents/PlugIns/NomoQuickLookPreview.appex"],
       "UTExportedTypeDeclarations": [
         {
