@@ -1,10 +1,12 @@
 package mdedit
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -207,7 +209,11 @@ func TestChunkedTreeMatchesWholeParse(t *testing.T) {
 	for seed := int64(1); seed <= 6; seed++ {
 		tr := newTree(ext)
 		tr.min, tr.size = 4<<10, 2<<10
+		if seed%2 == 0 {
+			tr.keep = 4 << 10 // 只保留少数段的解析结果：覆盖丢弃后重解析、编辑已丢弃的段与合并
+		}
 		tr.Set(sample)
+		tr.trim()
 		if seed == 1 && len(tr.chunks) < 8 {
 			t.Fatalf("应切成多段，得到 %d 段", len(tr.chunks))
 		}
@@ -229,6 +235,17 @@ func TestChunkedTreeMatchesWholeParse(t *testing.T) {
 			if tr.Len() != whole.Len() {
 				t.Fatalf("种子 %d 第 %d 次编辑（%d 段）：块数 %d，整篇 %d", seed, i, len(tr.chunks), tr.Len(), whole.Len())
 			}
+			var tops []int
+			for g, b := range tr.Tops() {
+				w := whole.Block(g)
+				if b.Kind != w.Kind || b.Start != w.Start || b.End != w.End {
+					t.Fatalf("种子 %d 第 %d 次编辑：顶层块 %d 摘要为 %v [%d,%d)，整篇 %v [%d,%d)", seed, i, g, b.Kind, b.Start, b.End, w.Kind, w.Start, w.End)
+				}
+				tops = append(tops, g)
+			}
+			if exp := slices.Collect(whole.Children(0)); !slices.Equal(tops, exp) {
+				t.Fatalf("种子 %d 第 %d 次编辑：顶层块序号 %v，整篇 %v", seed, i, tops, exp)
+			}
 			for g := 1; g < whole.Len(); g++ {
 				a, b := tr.Block(g), whole.Block(g)
 				if a.Kind != b.Kind || a.Start != b.Start || a.End != b.End || a.Parent != b.Parent || a.Next != b.Next || a.Open != b.Open {
@@ -246,7 +263,43 @@ func TestChunkedTreeMatchesWholeParse(t *testing.T) {
 				}
 			}
 		}
-		t.Logf("种子 %d：结束时 %d 段", seed, len(tr.chunks))
+		t.Logf("种子 %d：结束时 %d 段，重解析 %d 次", seed, len(tr.chunks), tr.reparses)
+	}
+}
+
+// TestChunkedTreeKeepsBudget 大文档打开后只保留预算内的段的解析结果；在其中键入并重取大纲时只重解析编辑所在
+// 及相邻的段，不因遍历全部标题而重解析整篇。
+func TestChunkedTreeKeepsBudget(t *testing.T) {
+	var b strings.Builder
+	for i := 0; b.Len() < 6<<20; i++ {
+		fmt.Fprintf(&b, "# 章节 %d\n\n段落 **粗体** 与 `代码`。\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n", i)
+	}
+	d := NewDocument(b.String())
+	tr := d.md
+	live, bytes := 0, 0
+	for k, c := range tr.chunks {
+		if c.md != nil {
+			live++
+			bytes += tr.end(k) - c.off
+		}
+	}
+	if len(tr.chunks) < 10 || live > keepChunks && bytes > tr.keep {
+		t.Fatalf("%d 段中保留 %d 段（%d 字节）", len(tr.chunks), live, bytes)
+	}
+	want := d.Headings()
+	mid := len(d.Source()) / 2
+	d.Sel = Selection{mid, mid}
+	before := tr.reparses
+	for i := 0; i < 20; i++ {
+		d.replace(mid+i, mid+i, "字")
+		d.Headings()
+	}
+	if n := tr.reparses - before; n > 3 {
+		t.Fatalf("键入 20 次并重取大纲重解析了 %d 段", n)
+	}
+	whole := NewDocument(d.Source()) // 新文档没有大纲缓存，逐个标题从解析结果收集
+	if got, exp := d.Headings(), whole.Headings(); len(got) != len(want) || !slices.Equal(got, exp) {
+		t.Fatalf("大纲与整篇重建不一致：%d 项，整篇 %d 项", len(got), len(exp))
 	}
 }
 

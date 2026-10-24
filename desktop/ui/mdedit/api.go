@@ -26,20 +26,36 @@ func (d *Document) Headings() []Heading {
 		return d.headings
 	}
 	out := []Heading{}
+	src := d.md.Source()
+	memo := make(map[string]headingEntry, len(d.headingMemo))
 	for _, b := range d.blocks {
 		if b.Kind != parser.Heading {
 			continue
 		}
-		pb := d.md.Block(b.Index)
-		ins := d.md.Inlines(b.Index)
-		pos := b.Start
-		if len(ins) > 0 {
-			pos = ins[0].Start
+		// 标题的级别、文本与行内起点只取决于块本身的原文（顶层块，容器在其起点全部关闭），可按原文复用。
+		e, ok := d.headingMemo[src[b.Start:b.End]]
+		if !ok {
+			pb := d.md.Block(b.Index)
+			ins := d.md.Inlines(b.Index)
+			e = headingEntry{key: strings.Clone(src[b.Start:b.End]), h: Heading{Level: pb.Level, Text: strings.TrimSpace(parser.PlainText(ins))}}
+			if len(ins) > 0 {
+				e.h.Pos = ins[0].Start - b.Start
+			}
 		}
-		out = append(out, Heading{Level: pb.Level, Text: strings.TrimSpace(parser.PlainText(ins)), Pos: pos})
+		memo[e.key] = e // 以独立副本为键，不让缓存引用整篇原文
+		h := e.h
+		h.Pos += b.Start
+		out = append(out, h)
 	}
+	d.headingMemo = memo
 	d.headings, d.headingsVer = out, d.version
 	return out
+}
+
+// headingEntry 是 Document.headingMemo 的条目：key 为标题块原文的独立副本，h.Pos 为相对块起点的偏移。
+type headingEntry struct {
+	key string
+	h   Heading
 }
 
 // Stats 是写作统计：Chars 为非空白字符数，Words 为英文单词与汉字数之和，Lines 为行数。

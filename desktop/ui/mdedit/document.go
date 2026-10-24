@@ -59,6 +59,10 @@ type Document struct {
 	fm          int
 	headings    []Heading
 	headingsVer uint64
+	// headingMemo 按标题块原文缓存级别、文本与行内起点相对块起点的偏移（见 headingEntry），使 Headings
+	// 在每个版本重收集时不必访问未变的标题块的解析结果（大文档的解析结果按段丢弃，访问会触发重解析）。
+	// 每次 Headings 只保留当前仍存在的标题，条目数不超过标题数。
+	headingMemo map[string]headingEntry
 	// u16cp 缓存最近换算过的大块的 UTF-16 检查点（见 checkpoints）。
 	u16cp *u16Checkpoints
 	// detailsIdx 缓存折叠框架（见 details.go），按版本失效。
@@ -85,6 +89,7 @@ func NewDocument(src string) *Document {
 	d := &Document{md: newTree(parser.Default | parser.ExtDollarMath)}
 	d.md.Set(src)
 	d.blocks = d.collect(d.blocks[:0])
+	d.md.trim() // Set 解析了全部段供 collect 遍历；之后只保留预算内的段（见 tree.keep）
 	d.fillU16(d.blocks, 0)
 	d.u16Total = u16Len(src)
 	return d
@@ -129,8 +134,7 @@ func (d *Document) collect(dst []Block) []Block {
 	// 未配对的标记按普通注释块处理。先找出配对的起止子块序号，再在主循环中合并。
 	tocEnd := map[int]int{}
 	open := -1
-	for c := range d.md.Children(0) {
-		b := d.md.Block(c)
+	for c, b := range d.md.Tops() {
 		if b.Kind != parser.HTMLBlock || b.Start < fm {
 			continue
 		}
@@ -146,8 +150,7 @@ func (d *Document) collect(dst []Block) []Block {
 	}
 	d.hasToc = len(tocEnd) > 0
 	inToc := -1 // 正在合并的目录区的结束子块序号
-	for c := range d.md.Children(0) {
-		b := d.md.Block(c)
+	for c, b := range d.md.Tops() {
 		if inToc >= 0 {
 			dst[len(dst)-1].End = max(dst[len(dst)-1].End, trailingEnd(src, b.End))
 			if c == inToc {

@@ -28,7 +28,7 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | 原文、块索引、选区与撤销 | `desktop/ui/mdedit/document.go` | `edit.go`, `history.go`, `text.go` | 修改增量块索引、UTF-16/字节换算、组字与撤销合并规则 |
-| 分段解析（大文档按键成本） | `desktop/ui/mdedit/chunks.go` | `document.go`（`recollect` 增量块收集） | 修改分段阈值、切分安全条件、编辑后的合并与重新切分 |
+| 分段解析（大文档按键成本与解析树内存） | `desktop/ui/mdedit/chunks.go` | `document.go`（`collect` 经 `Tops` 遍历顶层块、`recollect` 增量块收集）, `api.go`（`Headings` 按标题原文复用） | 修改分段阈值、切分安全条件、编辑后的合并与重新切分、解析结果保留预算（`chunkKeep`）与淘汰 |
 | 正文行高（行距排版） | `desktop/ui/mdedit/lines.go` | `view.go`（`ensureRow`）, `blocks.go`（`rowLead`）, `draw.go` | 修改行距规则、加行距后的命中测试、选区与逐行绘制 |
 | 折叠块（details） | `desktop/ui/mdedit/details.go`（识别与配对）、`detailsview.go`（视图与命令） | `blocks.go`（标记行）、`htmlpreview.go`（`previewDetails`）、`desktop/ui/shell/editormenu.go` | 修改折叠标记语法、配对与增量平移、卡片绘制、折叠隐藏与自动展开、插入/默认展开/取消折叠 |
 | 编辑区选项（代码块行号、Tab 缩进、行内代码、复制语法、默认插入） | `desktop/ui/mdedit/options.go` | `desktop/ui/shell/editoroptions.go`（设置到选项、图表模板、Ctrl 滚轮） | 修改原版 editor.updateOptions 对应的显示与插入行为 |
