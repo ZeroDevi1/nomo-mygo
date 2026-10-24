@@ -95,11 +95,25 @@ func (e *Editor) insertToc() {
 // tocList 生成目录列表：每级缩进两个空格，锚点规则同原版 slugifyHeading 与 createHeadingIdAllocator（重名追加 -2、-3…，
 // 无可用字符时为 heading-序号）。
 func tocList(hs []Heading) string {
-	used := map[string]bool{}
-	next := map[string]int{}
+	titles := make([]string, len(hs))
+	for i, h := range hs {
+		titles[i] = h.Text
+	}
+	ids := HeadingIDs(titles)
 	lines := make([]string, 0, len(hs))
 	for i, h := range hs {
-		base := slugifyHeading(h.Text)
+		lines = append(lines, strings.Repeat("  ", max(0, h.Level-1))+"- ["+escapeLinkText(h.Text)+"](#"+ids[i]+")")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// HeadingIDs 按文档顺序为各标题分配锚点（目录链接的 #id，Word 导出的书签据此对应）。
+func HeadingIDs(titles []string) []string {
+	used := map[string]bool{}
+	next := map[string]int{}
+	ids := make([]string, len(titles))
+	for i, title := range titles {
+		base := slugifyHeading(title)
 		if base == "" {
 			base = "heading-" + strconv.Itoa(i+1)
 		}
@@ -112,9 +126,9 @@ func tocList(hs []Heading) string {
 			n++
 		}
 		next[base], used[id] = n, true
-		lines = append(lines, strings.Repeat("  ", max(0, h.Level-1))+"- ["+escapeLinkText(h.Text)+"](#"+id+")")
+		ids[i] = id
 	}
-	return strings.Join(lines, "\n")
+	return ids
 }
 
 // slugifyHeading 同原版：小写，去掉字母、数字、空白与连字符以外的字符，首尾去空白后空白串换为一个连字符。

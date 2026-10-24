@@ -43,6 +43,7 @@ func (s *Shell) menuGroups() []menuGroup {
 			{id: "saveAs", label: "saveAs", mods: cmd | shift, key: ui.KeyS, run: func(s *Shell) { s.save(s.activeTab(), true, nil) }},
 			custom(command{id: "exportHtml", label: "exportHtml", sep: true, run: (*Shell).exportHTML}, "export-html"),
 			custom(command{id: "exportPdf", label: "exportPdf", run: (*Shell).exportPDF}, "export-pdf"),
+			{id: "exportWord", label: "exportWord", run: (*Shell).exportWord},
 			{id: "snapshots", label: "documentSnapshotsEllipsis", sep: true, run: (*Shell).openSnapshots},
 			{id: "close", label: "closeCurrentFile", mods: cmd, key: ui.KeyW, sep: true, run: func(s *Shell) {
 				if t := s.activeTab(); t != nil {

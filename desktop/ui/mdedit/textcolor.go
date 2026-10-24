@@ -134,3 +134,16 @@ func colorSpanBefore(src string, at int) (int, int, bool) {
 	}
 	return start, at, true
 }
+
+// InlineTag 解析单个行内 HTML 标签：返回小写标签名、是否结束 / 自闭合标签，以及开始标签指定的文字颜色
+// （span 的 style color、font 的 color）。不是标签时 ok 为 false。供 Word 导出按编辑区同样的规则转换行内 HTML。
+func InlineTag(tag string) (name string, closing, selfClosing bool, color ui.Color, hasColor, ok bool) {
+	name, closing, selfClosing, ok = htmlTag(tag)
+	if ok && !closing {
+		color, hasColor = tagColor(name, tag)
+	}
+	return
+}
+
+// HTMLAttr 返回 HTML 开始标签中属性 name 的值（实体已解码），没有时返回空串。
+func HTMLAttr(tag, name string) string { return htmlAttr(tag, name) }

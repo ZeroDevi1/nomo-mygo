@@ -2,6 +2,7 @@ package shell
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
 	"mime"
@@ -24,6 +25,7 @@ import (
 	"nomo/desktop/ui/icons"
 	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
+	"nomo/desktop/ui/word"
 )
 
 // 导出 HTML / PDF（对应原版 exportService）：正文由解析器按 cmark-gfm 规则渲染为 HTML，套用原版
@@ -432,9 +434,11 @@ func (s *Shell) exportHTML() {
 	if tab == nil {
 		return
 	}
-	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() error {
+	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() (string, error) {
 		doc, _ := s.exportDocument(tab, s.dark, false)
-		return func() error { return docfs.WriteFileAtomically(path, []byte(s.renderExportMarkup(doc, s.dark))) }
+		return func() (string, error) {
+			return "", docfs.WriteFileAtomically(path, []byte(s.renderExportMarkup(doc, s.dark)))
+		}
 	})
 }
 
@@ -445,16 +449,57 @@ func (s *Shell) exportPDF() {
 	if tab == nil || s.pdfExporter == nil {
 		return
 	}
-	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() error {
+	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() (string, error) {
 		layout := s.pdfLayout(strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName))))
 		doc, outline := s.exportDocument(tab, false, true)
-		return func() error { return s.pdfExporter(s.renderExportMarkup(doc, false), path, outline, layout) }
+		return func() (string, error) {
+			return "", s.pdfExporter(s.renderExportMarkup(doc, false), path, outline, layout)
+		}
+	})
+}
+
+// exportWord 导出 .docx（原版 wordExportService，见 desktop/ui/word）：公式与 Mermaid 图表经离屏渲染转为图片（浅色
+// 配色），相对图片按文档所在目录解析。写出成功后在状态栏附上降级说明（最多列出前三项）。
+func (s *Shell) exportWord() {
+	tab := s.activeTab()
+	if tab == nil {
+		return
+	}
+	s.exportTo(tab, "docx", "Word", "exportWordSuccess", func(path string) func() (string, error) {
+		dir := ""
+		if tab.Path != "" {
+			dir = filepath.Dir(tab.Path)
+		}
+		md := tab.Doc.Source()
+		title := strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName)))
+		opts := word.Options{Title: title, BaseDir: dir, Text: s.tr}
+		if s.win != nil {
+			opts.Render = s.rend.render
+		}
+		return func() (string, error) {
+			data, warnings, err := word.Build(md, opts)
+			if errors.Is(err, word.ErrBudget) {
+				return "", errors.New(s.tr("wordExportBudgetError"))
+			}
+			if err != nil {
+				return "", err
+			}
+			if err := docfs.WriteFileAtomically(path, data); err != nil {
+				return "", err
+			}
+			if len(warnings) == 0 {
+				return "", nil
+			}
+			applog.Info("Export", "Word 导出降级："+strings.Join(warnings, "；"))
+			shown := warnings[:min(3, len(warnings))]
+			return "  " + s.tr("wordExportWarnings", "count", strconv.Itoa(len(warnings))) + strings.Join(shown, "；"), nil
+		}
 	})
 }
 
 // exportTo 在后台弹出保存框；选定路径后在 UI 线程调用 render 生成文档（读取标签状态），
-// 再在后台执行其返回的写出函数，结果写入状态栏（success 为成功文案键）。
-func (s *Shell) exportTo(t *Tab, ext, filter, success string, render func(path string) func() error) {
+// 再在后台执行其返回的写出函数（返回附加在成功提示后的说明），结果写入状态栏（success 为成功文案键）。
+func (s *Shell) exportTo(t *Tab, ext, filter, success string, render func(path string) func() (string, error)) {
 	if t.Kind() != kindMarkdown {
 		return
 	}
@@ -475,14 +520,14 @@ func (s *Shell) exportTo(t *Tab, ext, filter, success string, render func(path s
 			}
 			write := render(path)
 			go func() {
-				err := write()
+				note, err := write()
 				s.postToSettings(func() {
 					if err != nil {
 						applog.Warn("Export", err.Error())
 						s.status = s.tr("exportFailed") + "：" + err.Error()
 						return
 					}
-					s.status = s.tr(success, "path", path)
+					s.status = s.tr(success, "path", path) + note
 				})
 			}()
 		})
