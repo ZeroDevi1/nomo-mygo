@@ -23,7 +23,7 @@ const (
 	updateDismissedKey    = "softwareUpdateDismissedVersion" // 与原版同键
 	lastLaunchedVersionKy = "nativeLastLaunchedVersion"
 	updateStartupDelay    = 5 * time.Second
-	releaseNotesURL       = "https://github.com/nomo-md/nomo/releases/latest"
+	releaseNotesURL       = mygoRepoURL + "/releases/latest"
 )
 
 // updateState 是检查、下载与提示的状态，只在 UI 线程访问。

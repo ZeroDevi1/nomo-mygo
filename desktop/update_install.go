@@ -204,7 +204,7 @@ func installUpdate() error {
 
 // releaseNotes 返回 version 的 Release 说明（Markdown），用于安装后的更新日志。
 func releaseNotes(version string) (string, error) {
-	release, _, err := fetchGithubRelease("https://api.github.com/repos/nomo-md/nomo/releases/tags/v" + strings.TrimPrefix(version, "v"))
+	release, _, err := fetchGithubRelease("https://api.github.com/repos/" + githubRepo + "/releases/tags/v" + strings.TrimPrefix(version, "v"))
 	if err != nil {
 		return "", err
 	}

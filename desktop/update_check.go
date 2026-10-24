@@ -20,8 +20,11 @@ import (
 // 软件更新检查：从 GitHub Release 读取最新版本，直连失败（可重试错误）时经 gh-proxy 重试。Windows 安装版可在应用内
 // 下载并安装（update_install.go），其他形态提示新版本并打开发布页；Microsoft Store 包由商店管理，开发构建不检查。
 
+// githubRepo 是检查更新的 Release 来源：MyGo 版自己的仓库（原版 nomo-md/nomo 发布的是 Tauri 版，不能用来升级本版本）。
+const githubRepo = "ZeroDevi1/nomo-mygo"
+
 const (
-	githubLatestReleaseAPI    = "https://api.github.com/repos/nomo-md/nomo/releases/latest"
+	githubLatestReleaseAPI    = "https://api.github.com/repos/" + githubRepo + "/releases/latest"
 	githubProxyPrefix         = "https://gh-proxy.com/"
 	updateConnectTimeout      = 5 * time.Second
 	updateSmallRequestTimeout = 8 * time.Second
@@ -131,15 +134,15 @@ func updateRequestURL(original string, proxy bool) (string, error) {
 	return "", &requestFailure{message: "该更新地址不属于允许通过 gh-proxy 访问的 Nomo GitHub 地址。"}
 }
 
-// githubProxyURL 只允许 Nomo 仓库（含迁移前地址）的 Release API 与下载地址经代理访问。
+// githubProxyURL 只允许本仓库的 Release API 与下载地址经代理访问。
 func githubProxyURL(original string) (string, bool) {
 	parsed, err := url.Parse(original)
 	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", false
 	}
-	allowed := parsed.Host == "api.github.com" && (parsed.Path == "/repos/nomo-md/nomo/releases/latest" || parsed.Path == "/repos/LIXianSenQwQ/nomo/releases/latest" ||
-		strings.HasPrefix(parsed.Path, "/repos/nomo-md/nomo/releases/tags/")) ||
-		parsed.Host == "github.com" && (strings.HasPrefix(parsed.Path, "/nomo-md/nomo/releases/download/") || strings.HasPrefix(parsed.Path, "/LIXianSenQwQ/nomo/releases/download/"))
+	allowed := parsed.Host == "api.github.com" && (parsed.Path == "/repos/"+githubRepo+"/releases/latest" ||
+		strings.HasPrefix(parsed.Path, "/repos/"+githubRepo+"/releases/tags/")) ||
+		parsed.Host == "github.com" && strings.HasPrefix(parsed.Path, "/"+githubRepo+"/releases/download/")
 	if !allowed {
 		return "", false
 	}
