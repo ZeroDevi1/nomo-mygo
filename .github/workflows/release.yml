@@ -160,12 +160,13 @@ jobs:
 
           gh release upload '${{ github.ref_name }}' checksums.md5 --clobber
 
-  # Cask 与下载站指向上游 nomo-md/nomo 的发布资产，只在上游仓库运行（分支仓库只发布安装包）。
-  update-homebrew-cask:
-    name: Update Homebrew cask
+  # 正式版发布后更新本仓库的 Homebrew cask（Casks/nomo-mygo.rb）与 Scoop 清单（bucket/nomo-mygo.json），
+  # 两者从默认分支读取，提交回默认分支。只在 MyGo 版仓库运行。
+  update-package-manifests:
+    name: Update Homebrew cask and Scoop manifest
     runs-on: ubuntu-latest
     needs: checksums
-    if: ${{ github.repository == 'nomo-md/nomo' && !contains(github.ref_name, '-') }}
+    if: ${{ github.repository == 'ZeroDevi1/nomo-mygo' && !contains(github.ref_name, '-') }}
     permissions:
       contents: write
 
@@ -175,7 +176,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Bump Casks/nomo.rb
+      - name: Bump cask and manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -184,21 +185,28 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          asset="Nomo_${version}_aarch64.dmg"
-          gh release download "$TAG" --pattern "$asset" --dir /tmp
-          sha256="$(sha256sum "/tmp/$asset" | awk '{print $1}')"
+          dmg="Nomo_${version}_aarch64.dmg"
+          zip="Nomo_${version}_x64.zip"
+          gh release download "$TAG" --pattern "$dmg" --pattern "$zip" --dir /tmp
+          dmg_sha="$(sha256sum "/tmp/$dmg" | awk '{print $1}')"
+          zip_sha="$(sha256sum "/tmp/$zip" | awk '{print $1}')"
           sed -i -E \
             -e "s/version \"[^\"]+\"/version \"${version}\"/" \
-            -e "s/sha256 \"[^\"]+\"/sha256 \"${sha256}\"/" \
-            Casks/nomo.rb
+            -e "s/sha256 \"[^\"]+\"/sha256 \"${dmg_sha}\"/" \
+            Casks/nomo-mygo.rb
+          jq --indent 4 --arg v "$version" --arg h "$zip_sha" \
+            --arg u "https://github.com/${GH_REPO}/releases/download/${TAG}/${zip}" \
+            '.version = $v | .architecture."64bit".url = $u | .architecture."64bit".hash = $h' \
+            bucket/nomo-mygo.json > /tmp/nomo-mygo.json
+          mv /tmp/nomo-mygo.json bucket/nomo-mygo.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Casks/nomo.rb
+          git add Casks/nomo-mygo.rb bucket/nomo-mygo.json
           if git diff --staged --quiet; then
-            echo 'Homebrew cask already up to date.'
+            echo 'Package manifests already up to date.'
             exit 0
           fi
-          git commit -m "chore(homebrew): bump nomo cask to ${version}"
+          git commit -m "chore(release): Homebrew cask 与 Scoop 清单更新到 ${version}"
           git push
 
   sync-pages:

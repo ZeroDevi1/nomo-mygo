@@ -1,0 +1,28 @@
+{
+    "version": "0.7.0",
+    "description": "Local-first Markdown editor, MyGo rewrite of Nomo",
+    "homepage": "https://github.com/ZeroDevi1/nomo-mygo",
+    "license": "AGPL-3.0-or-later",
+    "notes": "Settings are stored in %APPDATA%\\com.nomo.desktop. Update with 'scoop update nomo-mygo'.",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ZeroDevi1/nomo-mygo/releases/download/v0.7.0/Nomo_0.7.0_x64.zip",
+            "hash": "4932b47f7f7f31abb78f5a67ba9563f031a410c2312737a61dd5d57acd7a35a7"
+        }
+    },
+    "extract_dir": "Nomo",
+    "shortcuts": [
+        [
+            "Nomo.exe",
+            "Nomo"
+        ]
+    ],
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ZeroDevi1/nomo-mygo/releases/download/v$version/Nomo_$version_x64.zip"
+            }
+        }
+    }
+}
