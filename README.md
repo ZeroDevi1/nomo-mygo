@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="./src-tauri/icons/128x128.png" alt="Nomo 图标" width="60">
+  <img src="./desktop/packaging/icons/nomo/source/nomo-app-light-128.png" alt="Nomo 图标" width="60">
 </p>
 
 <h1 align="center">Nomo</h1>
 
 <p align="center">
-  <a href="https://github.com/nomo-md/nomo/releases/latest">
-    <img src="https://img.shields.io/github/v/release/nomo-md/nomo?label=release" alt="GitHub Release">
+  <a href="https://github.com/ZeroDevi1/nomo-mygo/releases/latest">
+    <img src="https://img.shields.io/github/v/release/ZeroDevi1/nomo-mygo?label=release" alt="GitHub Release">
   </a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="支持 macOS 与 Windows">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="支持 macOS 与 Windows">
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="AGPL-3.0-or-later">
   </a>
@@ -24,27 +24,28 @@
   <strong>一款本地优先的 Markdown 编辑器，让写作保持简单。</strong>
 </p>
 
+> [!NOTE]
+> 本仓库是 **Nomo 的 MyGo 重写版**，不是原版 Nomo。
+>
+> - **原版 Nomo**：[nomo-md/nomo](https://github.com/nomo-md/nomo)，作者 [LIXianSenQwQ](https://github.com/LIXianSenQwQ)，基于 Tauri + Svelte，界面由 WebView 渲染。原版的问题、发布与 Homebrew 安装请到原版仓库。
+> - **MyGo 重写版（本仓库）**：[ZeroDevi1/nomo-mygo](https://github.com/ZeroDevi1/nomo-mygo)，沿用原版的功能、设置格式与界面设计，用 Go 与 MyGo 原生 UI 重写，不再依赖 WebView 与 Node.js。
+> - **MyGo**：用 Go 编写桌面应用的框架，支持原生 UI 与 Web 前端。官网 [mygo.egoist.dev](https://mygo.egoist.dev)，仓库 [egoist/mygo](https://github.com/egoist/mygo)，作者 [EGOIST](https://github.com/egoist)。
+
 <p align="center">
   <img src="./assets/nomo-editor-zh.gif" alt="Nomo 中文写作演示" width="800">
 </p>
 
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/nomo-md/nomo/releases/latest) 下载最新版本。
+从 [GitHub Releases](https://github.com/ZeroDevi1/nomo-mygo/releases/latest) 下载最新版本。
 
 | 系统 | 要求 | 安装方式 |
 | :--- | :--- | :--- |
 | Windows | Windows 10 / 11，x64 | `.exe` 安装版 / `.zip` 免安装版 |
-| macOS | macOS 12.0+，Apple Silicon | `.dmg` / Homebrew |
+| macOS | macOS 12.0+，Apple Silicon | `.dmg` / `.app.tar.gz` |
+| Linux | x64 | `.deb` / `.tar.gz` |
 
-macOS 也可通过 Homebrew 安装：
-
-```bash
-brew tap nomo-md/nomo https://github.com/nomo-md/nomo
-brew install --cask nomo
-```
-
-升级：`brew upgrade --cask nomo`。
+Homebrew 中的 `nomo` 为原版（Tauri），不是本版本。
 
 首次打开可能出现 SmartScreen / Gatekeeper 提示，请从本项目 Releases 下载。
 
@@ -57,7 +58,7 @@ brew install --cask nomo
 - **舒适写作**：浅深色主题、[自定义配色主题与字体](docs/custom-themes.md)、可手动开启的精细排版，以及可置顶的 Markdown 小窗。
 - **导出与预览**：导出 HTML / PDF（可设纸张、边距、页码与页眉页脚，可选精细排版）/ Word（.docx，正文与表格可编辑，公式与图表转为图片）；macOS 支持 Quick Look 快速预览。
 
-版本变化请查看[更新记录](https://github.com/nomo-md/nomo/releases)。
+版本变化请查看[更新记录](https://github.com/ZeroDevi1/nomo-mygo/releases)。
 
 ## 开发
 
@@ -76,9 +77,9 @@ go tool mygo dev
 
 ## 参与项目
 
-欢迎提交 [Issue](https://github.com/nomo-md/nomo/issues) 或 [Pull Request](https://github.com/nomo-md/nomo/pulls)；反馈问题时请附系统版本、复现步骤与样例。
+欢迎提交 [Issue](https://github.com/ZeroDevi1/nomo-mygo/issues) 或 [Pull Request](https://github.com/ZeroDevi1/nomo-mygo/pulls)；反馈问题时请附系统版本、复现步骤与样例。
 
-喜欢 Nomo，欢迎 [Star 项目](https://github.com/nomo-md/nomo) 或关注作者 [LIXianSenQwQ](https://github.com/LIXianSenQwQ)。社区：[linux.do](https://linux.do/)。
+喜欢 Nomo，欢迎 Star [本项目](https://github.com/ZeroDevi1/nomo-mygo) 与[原版项目](https://github.com/nomo-md/nomo)，或关注原版作者 [LIXianSenQwQ](https://github.com/LIXianSenQwQ)。社区：[linux.do](https://linux.do/)。
 
 采用 [AGPL-3.0-or-later](./LICENSE) 许可证；商业授权请联系维护者，第三方组件遵循各自许可证。
 

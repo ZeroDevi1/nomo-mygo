@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="./src-tauri/icons/128x128.png" alt="Nomo icon" width="60">
+  <img src="./desktop/packaging/icons/nomo/source/nomo-app-light-128.png" alt="Nomo icon" width="60">
 </p>
 
 <h1 align="center">Nomo</h1>
 
 <p align="center">
-  <a href="https://github.com/nomo-md/nomo/releases/latest">
-    <img src="https://img.shields.io/github/v/release/nomo-md/nomo?label=release" alt="GitHub Release">
+  <a href="https://github.com/ZeroDevi1/nomo-mygo/releases/latest">
+    <img src="https://img.shields.io/github/v/release/ZeroDevi1/nomo-mygo?label=release" alt="GitHub Release">
   </a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="Available for macOS and Windows">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Available for macOS and Windows">
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="AGPL-3.0-or-later">
   </a>
@@ -24,27 +24,28 @@
   <strong>A local-first Markdown editor that keeps writing simple.</strong>
 </p>
 
+> [!NOTE]
+> This repository is **the MyGo rewrite of Nomo**, not the original Nomo.
+>
+> - **Original Nomo**: [nomo-md/nomo](https://github.com/nomo-md/nomo) by [LIXianSenQwQ](https://github.com/LIXianSenQwQ), built with Tauri + Svelte and rendered in a WebView. Report issues, find releases and install via Homebrew there.
+> - **MyGo rewrite (this repository)**: [ZeroDevi1/nomo-mygo](https://github.com/ZeroDevi1/nomo-mygo) keeps the original features, settings format and design, rewritten in Go with the MyGo native UI, with no WebView or Node.js.
+> - **MyGo**: a framework for desktop apps in Go, with native UI or a web frontend. Website [mygo.egoist.dev](https://mygo.egoist.dev), repository [egoist/mygo](https://github.com/egoist/mygo), by [EGOIST](https://github.com/egoist).
+
 <p align="center">
   <img src="./assets/nomo-editor-en.gif" alt="Nomo writing demo in English" width="800">
 </p>
 
 ## Download and Install
 
-Get the latest version from [GitHub Releases](https://github.com/nomo-md/nomo/releases/latest).
+Get the latest version from [GitHub Releases](https://github.com/ZeroDevi1/nomo-mygo/releases/latest).
 
 | Platform | Requirements | Installation |
 | :--- | :--- | :--- |
 | Windows | Windows 10 / 11, x64 | `.exe` installer / `.zip` portable |
-| macOS | macOS 12.0+, Apple Silicon | `.dmg` / Homebrew |
+| macOS | macOS 12.0+, Apple Silicon | `.dmg` / `.app.tar.gz` |
+| Linux | x64 | `.deb` / `.tar.gz` |
 
-On macOS, you can also install with Homebrew:
-
-```bash
-brew tap nomo-md/nomo https://github.com/nomo-md/nomo
-brew install --cask nomo
-```
-
-Upgrade with `brew upgrade --cask nomo`.
+The `nomo` Homebrew cask installs the original (Tauri) version, not this edition.
 
 SmartScreen or Gatekeeper may prompt on first launch; download from this project's Releases.
 
@@ -57,7 +58,7 @@ SmartScreen or Gatekeeper may prompt on first launch; download from this project
 - **Comfortable writing**: Light and dark themes, [custom color themes and fonts](docs/custom-themes.md) (guide in Chinese), optional fine typography and an always-on-top Markdown mini window.
 - **Export and preview**: Export HTML / PDF (paper size, margins, page numbers, header and footer, optional fine typography) / Word (.docx, with editable text and tables, formulas and diagrams as images), and Quick Look previews on macOS.
 
-See [release notes](https://github.com/nomo-md/nomo/releases) for version changes.
+See [release notes](https://github.com/ZeroDevi1/nomo-mygo/releases) for version changes.
 
 ## Development
 
@@ -76,9 +77,9 @@ go tool mygo dev
 
 ## Get Involved
 
-[Issues](https://github.com/nomo-md/nomo/issues) and [pull requests](https://github.com/nomo-md/nomo/pulls) are welcome; include your OS version, steps to reproduce and a sample when reporting a bug.
+[Issues](https://github.com/ZeroDevi1/nomo-mygo/issues) and [pull requests](https://github.com/ZeroDevi1/nomo-mygo/pulls) are welcome; include your OS version, steps to reproduce and a sample when reporting a bug.
 
-Enjoy Nomo? [Star the project](https://github.com/nomo-md/nomo) or follow [LIXianSenQwQ](https://github.com/LIXianSenQwQ). Community: [linux.do](https://linux.do/).
+Enjoy Nomo? Star [this project](https://github.com/ZeroDevi1/nomo-mygo) and [the original](https://github.com/nomo-md/nomo), or follow the original author [LIXianSenQwQ](https://github.com/LIXianSenQwQ). Community: [linux.do](https://linux.do/).
 
 Licensed under [AGPL-3.0-or-later](./LICENSE); contact the maintainers for separate commercial licensing. Third-party components retain their own licenses.
 
