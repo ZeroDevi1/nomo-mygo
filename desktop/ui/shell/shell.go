@@ -97,6 +97,8 @@ type Shell struct {
 	closeChoiceRemember bool
 	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
 	images *mdedit.Images
+	// rend 是公式与 Mermaid 的离屏渲染服务（见 render.go），窗口打开后接入图片缓存，窗口关闭时释放。
+	rend renderService
 
 	quick   quickState     // 快捷插入菜单，见 quickinsert.go
 	link    linkEditor     // 链接快速编辑浮层，见 linkedit.go
@@ -281,6 +283,7 @@ func (s *Shell) Open() *mygo.Window {
 		StateKey: stateKey, TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
 	})
 	s.post = s.win.Update
+	s.images.SetRenderer(s.rend.render)
 	s.win.OnClose(func(e *mygo.CloseEvent) {
 		if s.closingAll && len(s.closing) == 0 {
 			return
@@ -306,6 +309,7 @@ func (s *Shell) Open() *mygo.Window {
 		s.finishWorkspaceClose()
 		unregister(s)
 		s.images.Close()
+		s.rend.close()
 		if s.settings != nil {
 			s.settings.win.Close()
 		}

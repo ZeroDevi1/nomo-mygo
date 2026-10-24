@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -127,7 +128,7 @@ func (s *Shell) exportDocument(tab *Tab, dark, forPDF bool) (string, []PDFOutlin
 	if f := s.prefs.DocumentFontFamily; f != "" {
 		vars += "--md-editor-font-document: " + f + ";"
 	}
-	// 公式不再渲染（没有离屏渲染页），导出 TeX 原文，按等宽字体显示。
+	// 公式与图表在写出时由 renderExportMarkup 替换为渲染结果；渲染失败而保留的 TeX 原文按等宽字体显示。
 	css := themes.ExportCSS + "\n:root{" + vars + "}" +
 		"\n.markdown-body .math{font-family:var(--md-editor-font-mono,ui-monospace,monospace);white-space:pre-wrap}"
 	title := strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName)))
@@ -297,6 +298,75 @@ func highlightCodeHTML(out string, dark bool) string {
 	})
 }
 
+var (
+	exportMathRe    = regexp.MustCompile(`(?s)<span class="math (inline|display)">(.*?)</span>|<div class="math display">(.*?)</div>`)
+	exportMermaidRe = regexp.MustCompile(`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
+)
+
+// renderExportMarkup 把导出 HTML 中的公式与 Mermaid 源码替换为渲染结果（在后台调用，可能耗时数秒）。没有
+// 公式与图表、或离屏渲染不可用（测试中没有窗口）时原样返回；单项失败时保留源码并附错误说明（原版同样处理）。
+func (s *Shell) renderExportMarkup(doc string, dark bool) string {
+	if s.win == nil || !strings.Contains(doc, `class="math `) && !strings.Contains(doc, "language-mermaid") {
+		return doc
+	}
+	type hit struct {
+		a, z int
+		kind string
+		src  string
+	}
+	var hits []hit
+	for _, m := range exportMathRe.FindAllStringSubmatchIndex(doc, -1) {
+		h := hit{a: m[0], z: m[1]}
+		if m[2] >= 0 {
+			h.kind, h.src = map[string]string{"inline": mdedit.RenderMathInline, "display": mdedit.RenderMathDisplay}[doc[m[2]:m[3]]], doc[m[4]:m[5]]
+		} else {
+			h.kind, h.src = mdedit.RenderMathDisplay, doc[m[6]:m[7]]
+		}
+		hits = append(hits, h)
+	}
+	for _, m := range exportMermaidRe.FindAllStringSubmatchIndex(doc, -1) {
+		hits = append(hits, hit{a: m[0], z: m[1], kind: mdedit.RenderMermaid, src: doc[m[2]:m[3]]})
+	}
+	if len(hits) == 0 {
+		return doc
+	}
+	slices.SortFunc(hits, func(x, y hit) int { return x.a - y.a })
+	reqs := make([]mdedit.RenderRequest, len(hits))
+	for k, h := range hits {
+		reqs[k] = mdedit.RenderRequest{Kind: h.kind, Src: html.UnescapeString(h.src)}
+	}
+	items, css, err := s.rend.markup(reqs, dark)
+	if err != nil {
+		applog.Warn("Export", "导出时渲染公式与图表失败，保留源码："+err.Error())
+		return doc
+	}
+	var b strings.Builder
+	at := 0
+	for k, h := range hits {
+		b.WriteString(doc[at:h.a])
+		it := items[k]
+		tag, class := "div", "math-block"
+		if h.kind == mdedit.RenderMathInline {
+			tag, class = "span", "math-inline"
+		}
+		if it.err != "" {
+			b.WriteString(doc[h.a:h.z] + `<span class="nomo-render-error">` + html.EscapeString(it.err) + `</span>`)
+		} else if h.kind == mdedit.RenderMermaid {
+			// 与原版导出结构一致：.mermaid-block > .mermaid-block-rendered（export-document.css 居中、限宽）。
+			b.WriteString(`<div class="mermaid-block"><div class="mermaid-block-rendered">` + it.html + `</div></div>`)
+		} else {
+			b.WriteString("<" + tag + ` class="` + class + `">` + it.html + "</" + tag + ">")
+		}
+		at = h.z
+	}
+	b.WriteString(doc[at:])
+	out := b.String()
+	if css != "" {
+		out = strings.Replace(out, "</style>", "\n"+strings.ReplaceAll(css, "</style", `<\/style`)+"</style>", 1)
+	}
+	return out
+}
+
 func stripFrontMatter(src string) string {
 	if !strings.HasPrefix(src, "---\n") && !strings.HasPrefix(src, "---\r\n") {
 		return src
@@ -364,7 +434,7 @@ func (s *Shell) exportHTML() {
 	}
 	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() error {
 		doc, _ := s.exportDocument(tab, s.dark, false)
-		return func() error { return docfs.WriteFileAtomically(path, []byte(doc)) }
+		return func() error { return docfs.WriteFileAtomically(path, []byte(s.renderExportMarkup(doc, s.dark))) }
 	})
 }
 
@@ -378,7 +448,7 @@ func (s *Shell) exportPDF() {
 	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() error {
 		layout := s.pdfLayout(strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName))))
 		doc, outline := s.exportDocument(tab, false, true)
-		return func() error { return s.pdfExporter(doc, path, outline, layout) }
+		return func() error { return s.pdfExporter(s.renderExportMarkup(doc, false), path, outline, layout) }
 	})
 }
 
