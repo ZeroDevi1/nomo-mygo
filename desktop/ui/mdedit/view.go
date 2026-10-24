@@ -173,6 +173,8 @@ type Editor struct {
 	// 估算高度被实测值替换时视口不跳动。
 	anchor    int
 	anchorOff float32
+	// pin 为大纲跳转的目标块序号 + 1（0 为无）：下一次排版后把该块顶部校正到阅读参考线（见 prepare）。
+	pin int
 
 	viewW, viewH float32
 	contentW     float32
@@ -988,6 +990,34 @@ func (e *Editor) prepare(w, h float32) {
 		e.revealCaret()
 	}
 	e.normalize()
+	// 大纲跳转（pin）：锚点规整时按估算高度换到上方的块，实际排版后目标块可能偏离参考线；按偏差修正后重排，
+	// 至多三轮（通常一轮收敛）。
+	for pass := 0; ; pass++ {
+		e.layoutViewport(h)
+		if e.pin == 0 || pass == 3 {
+			break
+		}
+		top, found := float32(0), false
+		for _, v := range e.vblocks {
+			if v.i == e.pin-1 {
+				top, found = v.top, true
+				break
+			}
+		}
+		diff := top - e.pinTop(e.pin-1)
+		if !found || diff < 0.5 && diff > -0.5 {
+			break
+		}
+		e.anchorOff += diff
+		e.normalize()
+	}
+	e.pin = 0
+	e.caret, e.caretOK = e.caretRect(e.Doc.Sel.Head)
+	e.evict()
+}
+
+// layoutViewport 从阅读锚点起布局视口内的块，重建可见行与可见块列表。
+func (e *Editor) layoutViewport(h float32) {
 	e.vsegs, e.vblocks = e.vsegs[:0], e.vblocks[:0]
 	y := -e.anchorOff
 	for i := e.anchor; i < len(e.entries) && y < h; i++ {
@@ -1003,8 +1033,6 @@ func (e *Editor) prepare(w, h float32) {
 		}
 		y += e.height(i)
 	}
-	e.caret, e.caretOK = e.caretRect(e.Doc.Sel.Head)
-	e.evict()
 }
 
 // layoutVisible 布局块 i 中落在视口内的行。行高变化会移动后续行，重复直到稳定

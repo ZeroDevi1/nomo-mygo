@@ -684,8 +684,15 @@ func (s *Shell) outline(c *ui.Context, tab *Tab) {
 			// 虚拟列表：只为可见的标题建元素，万级标题的文档每帧成本与标题数无关。
 			hs := tab.Outline()
 			rows := s.outlineRows(tab, hs)
-			head := tab.Doc.Sel.Head
-			current := sort.Search(len(hs), func(i int) bool { return hs[i].Pos > head }) - 1
+			// 当前章节：语义模式按阅读参考线（视口上部 20%，与大纲跳转的落点一致，滚动阅读时随之更新），
+			// 源码模式按光标。
+			at := tab.Doc.Sel.Head
+			if s.mode() != modeSource {
+				if off, ok := tab.Ed.ReadingSourceOffset(); ok {
+					at = off
+				}
+			}
+			current := sort.Search(len(hs), func(i int) bool { return hs[i].Pos > at }) - 1
 			if len(hs) == 0 {
 				ui.Text(c, s.tr("documentHasNoHeadings")).FontSize(12).TextColor(s.ch.muted).Wrap().Padding(4, 14)
 				return

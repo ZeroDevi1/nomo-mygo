@@ -186,7 +186,7 @@ func (e *Editor) Select(a, z int) {
 	e.reveal, e.dirty = true, true
 }
 
-// JumpTo 把光标放到 pos，并把所在块滚到视口上部（大纲跳转，与原版一致），
+// JumpTo 把光标放到 pos，并把所在块的顶部滚到阅读参考线（大纲跳转，与原版一致：跳转后该标题即为大纲的当前章节），
 // 而不是 Select 那样只滚到刚好可见。
 func (e *Editor) JumpTo(pos int) {
 	e.Doc.SetSelection(Selection{Anchor: pos, Head: pos})
@@ -195,9 +195,37 @@ func (e *Editor) JumpTo(pos int) {
 		i = max(0, after)
 	}
 	if i < len(e.entries) {
-		e.anchor, e.anchorOff = i, -24
+		e.anchor, e.anchorOff, e.pin = i, -e.pinTop(i), i+1
 	}
 	e.reveal, e.dirty = false, true
+}
+
+// readingLine 返回阅读参考线到视口顶部的距离（DIP）：视口高度的 20%，限制在 64–180，同原版 getOutlineViewportOffset。
+// 大纲跳转把标题放在这条线上，大纲的当前章节按这条线判定，两者一致。
+func (e *Editor) readingLine() float32 { return min(max(e.viewH*0.2, 64), 180) }
+
+// pinTop 返回大纲跳转时块 i 顶部应在的视口纵坐标：块的首行（标题文字，不含其上方的段前间距）落在阅读参考线上。
+func (e *Editor) pinTop(i int) float32 {
+	if en := e.ensure(i); len(en.rows) > 0 {
+		return e.readingLine() - en.rows[0].y
+	}
+	return e.readingLine()
+}
+
+// ReadingSourceOffset 返回阅读参考线处那一行的原文结尾（大纲当前章节判定用：位置不晚于它的最后一个标题为当前
+// 章节；取行尾使标题行本身算作该标题的章节，标题位置在“## ”之后）。参考线以上没有行（文档顶部留白）时取视口内
+// 第一行；视图尚未排版时 ok 为 false。
+func (e *Editor) ReadingSourceOffset() (int, bool) {
+	e.sync()
+	line := e.readingLine()
+	off, ok := 0, false
+	for _, v := range e.vsegs {
+		if ok && v.y > line+1 {
+			break
+		}
+		off, ok = e.Doc.blocks[v.i].Start+e.entries[v.i].rows[v.k].b, true
+	}
+	return off, ok
 }
 
 // SetHighlights 设置查找结果高亮（字节区间），current 为当前项下标，-1 表示无。
