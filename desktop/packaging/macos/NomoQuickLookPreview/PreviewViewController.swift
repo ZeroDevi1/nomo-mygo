@@ -49,6 +49,10 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         tv.autoresizingMask = [.width]
         tv.textContainerInset = NSSize(width: 32, height: 28)
         scroll.documentView = tv
+        // 设为 documentView 时 maxSize 会被重置为滚动视图当时的尺寸，文本视图高度被锁在面板初始高度、
+        // 后文无法滚动显示；须在其后放开上限。
+        tv.minSize = .zero
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
         textView = tv
         scrollView = scroll
