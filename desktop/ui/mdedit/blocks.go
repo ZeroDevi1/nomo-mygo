@@ -294,10 +294,11 @@ func (bb *blockBuilder) block(i int, c container) {
 		bb.closePad(8 + paraAfter)
 	case parser.CodeBlock, parser.HTMLBlock, parser.MathBlock:
 		role := map[parser.Kind]rowRole{parser.CodeBlock: roleCode, parser.HTMLBlock: roleHTML, parser.MathBlock: roleMath}[b.Kind]
+		end := blockSourceEnd(bb.src, b.Kind, b.Start, b.End) // 公式块连同闭合行
 		f := len(bb.rows)
 		// 公式块与 Mermaid 代码块整块一行：收起时显示渲染结果（居中），光标严格位于块内时显示原文。
 		if kind := renderBlockKind(b); kind != previewNone && bb.render {
-			z := b.Start + len(strings.TrimRight(bb.src[b.Start:b.End], "\r\n"))
+			z := b.Start + len(strings.TrimRight(bb.src[b.Start:end], "\r\n"))
 			bb.pending += blockMargin - paraAfter
 			bb.add(row{kind: rowLine, role: role, htmlKind: kind, align: ui.Center, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
 			bb.closePad(blockMargin)
@@ -329,7 +330,7 @@ func (bb *blockBuilder) block(i int, c container) {
 			bb.add(row{kind: rowLine, role: roleHTML, htmlKind: kind, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
 			bb.closePad(paraSpacing(c))
 		} else {
-			bb.lines(b.Start, b.End, role, c, 0)
+			bb.lines(b.Start, end, role, c, 0)
 			bb.closePad(paraSpacing(c))
 		}
 	case parser.Quote:

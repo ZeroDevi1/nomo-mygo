@@ -44,7 +44,7 @@ func TestIncrementalIndexMatchesFullParse(t *testing.T) {
 	src := repoFile(t, "desktop/packaging/samples/sample.md")
 	d := NewDocument(src)
 	rng := rand.New(rand.NewSource(1))
-	inserts := []string{"a", "中", "😀", "\n", "\n\n", "**", "# ", "- ", "```\n", "`", "[x](y)"}
+	inserts := []string{"a", "中", "😀", "\n", "\n\n", "**", "# ", "- ", "```\n", "`", "[x](y)", "$$\n", "$$", "\n$$\n"}
 	for i := 0; i < 400; i++ {
 		s := d.Source()
 		from := runeStartBefore(s, rng.Intn(len(s)+1))

@@ -19,10 +19,13 @@ func (d *Document) codeFence(i int) (a, z, fenceEnd int, ok bool) {
 	}
 	fenceEnd = b.Start + nl
 	a, z = fenceEnd+1, b.End
+	// 闭合的块尾含闭围栏行（公式块的闭合行由 blockSourceEnd 补入），内容止于其前一行；未闭合时内容到块尾。
+	pb := d.md.Block(b.Index)
+	closed := !pb.Open
 	if b.Kind == parser.MathBlock {
-		return a, z, fenceEnd, true // 公式块的块尾不含闭合的 $$（见 blockEnd）
+		closed = blockSourceEnd(src, pb.Kind, pb.Start, pb.End) != pb.End
 	}
-	if !d.md.Block(b.Index).Open {
+	if closed {
 		if k := strings.LastIndexByte(src[a:b.End], '\n'); k >= 0 {
 			z = a + k
 		} else {
@@ -30,22 +33,6 @@ func (d *Document) codeFence(i int) (a, z, fenceEnd int, ok bool) {
 		}
 	}
 	return a, z, fenceEnd, a <= z
-}
-
-// blockEnd 返回顶层块 i 在原文中的实际结尾：解析器给出的公式块范围止于内容末行，其后的闭合 $$ 行一并算入。
-func (d *Document) blockEnd(i int) int {
-	b := d.blocks[i]
-	src := d.Source()
-	if b.Kind == parser.MathBlock && strings.HasPrefix(src[b.End:], "\n") {
-		line := src[b.End+1:]
-		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
-			line = line[:nl]
-		}
-		if strings.TrimSpace(line) == "$$" {
-			return b.End + 1 + len(line)
-		}
-	}
-	return b.End
 }
 
 // BlockContent 返回 pos 所在代码块、公式块或图表的内容原文（不含围栏）；不在这些块中时 ok 为 false。
@@ -105,7 +92,7 @@ func (e *Editor) DeleteBlock(pos int) bool {
 	}
 	b := e.Doc.blocks[i]
 	src := e.Doc.Source()
-	a, z := b.Start, e.Doc.blockEnd(i)
+	a, z := b.Start, b.End
 	switch {
 	case strings.TrimSpace(src[z:]) == "":
 		// 文末的块：连同前面的空行删到文末，保留上一块后的一个换行。

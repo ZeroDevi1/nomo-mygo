@@ -169,7 +169,7 @@ func (d *Document) collect(dst []Block) []Block {
 			}
 			continue
 		}
-		dst = append(dst, Block{Index: c, Kind: b.Kind, Start: b.Start, End: trailingEnd(d.md.Source(), b.End)})
+		dst = append(dst, Block{Index: c, Kind: b.Kind, Start: b.Start, End: trailingEnd(src, blockSourceEnd(src, b.Kind, b.Start, b.End))})
 	}
 	// 块区间不得重叠：原文含 CR 换行（外壳打开时会统一为 LF，这里只是防御）时，延伸到行尾可能越过下一块的起点。
 	for i := 1; i < len(dst); i++ {
@@ -181,6 +181,37 @@ func (d *Document) collect(dst []Block) []Block {
 // trailingEnd 把块末尾延伸到所在行的行尾（不含换行）。解析器的块区间在几处止于
 // 行中：空列表项“3. ”只含“3”，ATX 标题不含闭合的“#”，表格末行不含末尾的“|”。
 // 块区间应覆盖其最后一行，否则光标会落在块间隙里、被隐藏的标记无法编辑。
+// blockSourceEnd 返回解析块 [start, end) 在原文中的实际结尾。MyGo 解析器收尾公式块时用最后一段内容的结尾覆盖块尾，
+// 闭合定界符（$$ 或 \]）不在范围内：与内容同行时补到行尾，独占一行（可带引用前缀与缩进）时连同该行一并算入。
+// 开头行已自带闭合或公式块未闭合时原样返回；其他块原样返回。
+func blockSourceEnd(src string, kind parser.Kind, start, end int) int {
+	if kind != parser.MathBlock || end > len(src) {
+		return end
+	}
+	closer := "$$"
+	if strings.HasPrefix(src[start:], `\[`) {
+		closer = `\]`
+	}
+	lineEnd := len(src)
+	if k := strings.IndexByte(src[end:], '\n'); k >= 0 {
+		lineEnd = end + k
+	}
+	if strings.TrimSpace(src[end:lineEnd]) == closer {
+		return lineEnd
+	}
+	if first, _, _ := strings.Cut(src[start:end], "\n"); strings.Contains(first[len(closer):], closer) || lineEnd == len(src) {
+		return end
+	}
+	next := src[lineEnd+1:]
+	if k := strings.IndexByte(next, '\n'); k >= 0 {
+		next = next[:k]
+	}
+	if strings.TrimSpace(strings.TrimLeft(next, " \t>")) == closer {
+		return lineEnd + 1 + len(next)
+	}
+	return end
+}
+
 func trailingEnd(src string, end int) int {
 	if k := strings.IndexByte(src[end:], '\n'); k >= 0 {
 		return end + k
@@ -342,7 +373,7 @@ func (d *Document) recollect(oldSrc string, from, to, delta, u16Delta, shift int
 		if b.Kind == parser.HTMLBlock && isTocMarker(src[b.Start:b.End]) {
 			return Change{}, false
 		}
-		mid = append(mid, Block{Index: c, Kind: b.Kind, Start: b.Start, End: trailingEnd(src, b.End)})
+		mid = append(mid, Block{Index: c, Kind: b.Kind, Start: b.Start, End: trailingEnd(src, blockSourceEnd(src, b.Kind, b.Start, b.End))})
 	}
 	if c != end {
 		return Change{}, false

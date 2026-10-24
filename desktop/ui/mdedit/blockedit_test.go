@@ -1,6 +1,7 @@
 package mdedit
 
 import (
+	"hash/maphash"
 	"strings"
 	"testing"
 )
@@ -79,5 +80,39 @@ func TestTableCommandCaretContext(t *testing.T) {
 	ed.InsertText("X")
 	if !strings.Contains(ed.Doc.Source(), "| 苹果 | X | 3 |") {
 		t.Fatalf("输入后 %q", ed.Doc.Source())
+	}
+}
+
+// TestMathBlockClosingLine：MyGo 解析器的公式块范围不含闭合定界符行，显示与块范围须补回（无渲染器时按原文显示）。
+func TestMathBlockClosingLine(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{"$$\n\\lim_{n}=e\n$$\n\npara\n", []string{"$$", `\lim_{n}=e`, "$$"}},
+		{"> $$\n> a\n> $$\n", []string{"$$", "a", "$$"}},
+		{"\\[\na\n\\]\n", []string{`\[`, "a", `\]`}},
+		{"$$x$$\n", []string{"$$x$$"}},
+		{"$$\na\n", []string{"$$", "a"}}, // 未闭合
+	}
+	for _, c := range cases {
+		d := NewDocument(c.src)
+		top := d.Blocks()[0]
+		rows, _ := buildRows(d, 0, top, maphash.MakeSeed(), false)
+		var got []string
+		for _, r := range rows {
+			got = append(got, c.src[top.Start+int(r.a):top.Start+int(r.b)])
+		}
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("%q: rows %q, want %q", c.src, got, c.want)
+		}
+	}
+	// 块范围含闭合行，块内容命令（复制公式）不含围栏。
+	e := NewEditor(NewDocument("$$\na\n$$\n\nb\n"))
+	if a, z, _, ok := e.Doc.codeFence(0); !ok || e.Doc.Source()[a:z] != "a" {
+		t.Errorf("codeFence = %q", e.Doc.Source()[a:z])
+	}
+	if b := e.Doc.Blocks()[0]; e.Doc.Source()[b.Start:b.End] != "$$\na\n$$" {
+		t.Errorf("block range %q", e.Doc.Source()[b.Start:b.End])
 	}
 }
