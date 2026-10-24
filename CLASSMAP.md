@@ -43,7 +43,8 @@
 | 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载、GIF 动画 |
 | 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `view.go`（`rowBox`）, `draw.go`, `input.go` | 修改列宽策略（原版 widths.ts）、超宽表格横向滚动、单元格裁剪 |
 | HTML 块预览、注释卡片、目录卡片 | `desktop/ui/mdedit/htmlpreview.go` | `blocks.go`, `document.go`（`KindToc`）, `imageview.go` | 修改可预览的 HTML 白名单与排版、注释/目录卡片样式、目录点击跳转 |
-| 公式与 Mermaid（显示源码） | `desktop/ui/mdedit/blocks.go`（`buildRows` 的 `render`） | `view.go`（`Editor.canRender`）, `images.go`（`RenderFunc`）, `projection.go`（`leafOpts.noRender`） | 外壳未注入渲染器时公式块、Mermaid 与行内公式按源码显示；如重新接入渲染器从这里开始 |
+| 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go`（离屏 WebView 渲染服务） | `desktop/ui/render`（渲染页 render.html / render.js 与随附的 KaTeX 0.17.0、Mermaid 11.15.0）, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`）, `export.go`（`renderExportMarkup`） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线；升级 KaTeX / Mermaid 时替换 assets 并更新 THIRD_PARTY_NOTICES.md |
+| Word（.docx）导出 | `desktop/ui/word`（`Build`：docx.go、media.go、parts.go） | `desktop/ui/shell/export.go`（`exportWord`）, `mdedit.HeadingIDs`（目录锚点） | 修改 Word 版式与样式、块与行内的转换、图片与公式嵌入、资源预算与降级说明 |
 | 图片编辑（拖边缩放、拖动移位、右键菜单、预览） | `desktop/ui/mdedit/imageedit.go` | `input.go`（拖动与双击）, `desktop/ui/shell/imagemenu.go`（菜单与全屏预览） | 修改宽度/对齐写回原文的规则、拖动命中与绘制、图片菜单项 |
 | 文字颜色 | `desktop/ui/mdedit/textcolor.go` | `projection.go`（`style` 高位颜色索引）, `desktop/ui/shell/toolbar.go`（`colorPicker`） | 修改颜色解析、`<span style="color">` 写回、调色板 |
 | 提示块标题与折叠 | `desktop/ui/mdedit/calloutfold.go` | `projection.go`（`parseCalloutHeader`）, `blocks.go`, `draw.go`（`drawFrame`） | 修改提示块别名、自定义标题、`+`/`-` 折叠语法与点击展开 |
@@ -88,7 +89,8 @@
 | 图片粘贴、拖放与插入 | `desktop/ui/shell/images.go` | `desktop/internal/imageasset`, `mdedit` `PasteData` | 修改图片导入策略、PicGo 上传、插入的 Markdown / HTML |
 | Markdown 格式检查（状态栏与问题列表） | `desktop/ui/shell/lint.go` | `desktop/ui/mdlint` | 修改检查调度、防抖、问题弹层与跳转 |
 | 导出 HTML / PDF | `desktop/ui/shell/export.go` | `desktop/ui/themes/export.go`, `desktop/native.go`（`exportNativePDF`）, `desktop/export.go` | 修改导出文档结构、图片内联、提示块卡片、分页标记、PDF 书签标记与版式（`PDFLayout`） |
-| 界面文案 | `desktop/ui/shell/messages.go`（直接维护） | `i18n.go`（语言选择、MyGo 内置文案语言包） | 新增或修改界面文案（简体、繁体、英文同步） |
+| 导出精细排版（HTML / PDF） | `desktop/ui/kpexport`（`Script`、assets/kp.js） | `desktop/ui/typography/wasm`（编译为 WebAssembly 的排版入口）, `scripts/kpwasm`（构建时生成 gen/，mygo.json 的 buildCommand）, `desktop/export.go`（`__NOMO_PREPARE_PRINT__`） | 修改导出页面的段落选择、测量、断行应用或打印前重排 |
+| 界面文案 | `desktop/ui/shell/messages.go`（直接维护，简体 / 繁体 / 英文 / 日文） | `i18n.go`（语言选择、MyGo 内置文案语言包）, `i18n_test.go`（日文与英文键一一对应） | 新增或修改界面文案（四种语言同步） |
 | 界面图标（Lucide） | `desktop/ui/icons/lucide.go`（直接维护） | `icons.go` | 增删界面所用图标 |
 | MyGo 应用配置（名称、版本、图标、随包资源、文件关联、Info.plist） | `mygo.json` | `desktop/packaging/samples`（示例文档）, `go.mod` 的 `tool`（`go tool mygo`） | 修改版本号、打包资源或平台配置；版本号唯一来源 |
 | 应用与界面图标 | `desktop/ui/icons/icons.go` | `desktop/appicon.go`, `desktop/native.go` | 修改文件类型图标、提示块图标、应用图标（窗口 / Dock / 关于页） |

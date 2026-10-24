@@ -51,11 +51,11 @@ brew install --cask nomo
 ## 核心功能
 
 - **Markdown 编辑**：即时预览、源码与双栏模式，输入 `/` 快速插入内容。
-- **丰富内容**：支持表格、代码高亮、提示块与文字颜色；数学公式与 Mermaid 图表以源码显示。
+- **丰富内容**：支持表格、代码高亮、数学公式、Mermaid 图表、提示块与文字颜色。
 - **文件管理**：文件树键入定位、多标签，以及 TXT / JSON 大文件分段编辑。
 - **保存与恢复**：可启用自动保存和 Markdown 本地快照，恢复工作区与阅读位置。
 - **舒适写作**：浅深色主题、[自定义配色主题与字体](docs/custom-themes.md)、可手动开启的精细排版，以及可置顶的 Markdown 小窗。
-- **导出与预览**：导出 HTML / PDF（可设纸张、边距、页码与页眉页脚）；macOS 支持 Quick Look 快速预览。
+- **导出与预览**：导出 HTML / PDF（可设纸张、边距、页码与页眉页脚，可选精细排版）/ Word（.docx，正文与表格可编辑，公式与图表转为图片）；macOS 支持 Quick Look 快速预览。
 
 版本变化请查看[更新记录](https://github.com/nomo-md/nomo/releases)。
 
@@ -72,6 +72,7 @@ go tool mygo dev
 - 检查与测试：`go vet ./...`、`go test ./...`
 - 打包：`go tool mygo build`；macOS 含 Quick Look 扩展与 DMG 用 `bash scripts/build-macos.sh`；Windows Store 包见 [desktop/packaging/msix](desktop/packaging/msix/README.md)
 - 图标：修改 `desktop/packaging/icons/nomo/source/nomo-app-light.svg` 后运行 `go run ./scripts/icons`
+- 导出精细排版的 WebAssembly 由 `go tool mygo build` 自动生成（`go run ./scripts/kpwasm`），不纳入版本库
 
 ## 参与项目
 

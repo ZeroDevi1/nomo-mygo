@@ -23,6 +23,7 @@ import (
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/docfs"
 	"nomo/desktop/ui/icons"
+	"nomo/desktop/ui/kpexport"
 	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
 	"nomo/desktop/ui/word"
@@ -436,8 +437,9 @@ func (s *Shell) exportHTML() {
 	}
 	s.exportTo(tab, "html", "HTML", "exportHtmlSuccess", func(path string) func() (string, error) {
 		doc, _ := s.exportDocument(tab, s.dark, false)
+		kp := s.prefs.TypographyEnabled
 		return func() (string, error) {
-			return "", docfs.WriteFileAtomically(path, []byte(s.renderExportMarkup(doc, s.dark)))
+			return "", docfs.WriteFileAtomically(path, []byte(withTypography(s.renderExportMarkup(doc, s.dark), kp)))
 		}
 	})
 }
@@ -452,10 +454,29 @@ func (s *Shell) exportPDF() {
 	s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() (string, error) {
 		layout := s.pdfLayout(strings.TrimSuffix(tab.Name(s.untitledName), filepath.Ext(tab.Name(s.untitledName))))
 		doc, outline := s.exportDocument(tab, false, true)
+		kp := s.prefs.TypographyEnabled
 		return func() (string, error) {
-			return "", s.pdfExporter(s.renderExportMarkup(doc, false), path, outline, layout)
+			return "", s.pdfExporter(withTypography(s.renderExportMarkup(doc, false), kp), path, outline, layout)
 		}
 	})
+}
+
+// withTypography 在开启精细排版时把排版脚本内联到导出文档（与原版 exportService 的 buildExportHtml 相同）：HTML 打开时
+// 按窗口宽度精排，PDF 打印前由主程序调用 __NOMO_PREPARE_PRINT__ 按版心重排（desktop/export.go）。在后台写出任务中
+// 调用；排版脚本不可用（构建时未生成 WebAssembly）时导出不含精细排版并记日志，不阻止导出。
+func withTypography(doc string, enabled bool) string {
+	if !enabled {
+		return doc
+	}
+	script, err := kpexport.Script()
+	if err != nil {
+		applog.Warn("Export", "导出不含精细排版："+err.Error())
+		return doc
+	}
+	if i := strings.LastIndex(doc, "</body>"); i >= 0 {
+		return doc[:i] + script + doc[i:]
+	}
+	return doc + script
 }
 
 // exportWord 导出 .docx（原版 wordExportService，见 desktop/ui/word）：公式与 Mermaid 图表经离屏渲染转为图片（浅色

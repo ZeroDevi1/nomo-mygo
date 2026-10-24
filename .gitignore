@@ -35,3 +35,7 @@ Thumbs.db
 
 # Local video production assets
 /video/
+
+# 导出精细排版的 WebAssembly 构建产物（scripts/kpwasm 生成）
+/desktop/ui/kpexport/gen/*
+!/desktop/ui/kpexport/gen/.gitkeep

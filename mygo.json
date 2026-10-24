@@ -5,6 +5,7 @@
   "icon": "desktop/packaging/icons/nomo/source/nomo-app-light-1024.png",
   "main": "./desktop",
   "out": "target/mygo",
+  "buildCommand": "go run ./scripts/kpwasm",
   "resources": ["desktop/packaging/samples"],
   "fileAssociations": [
     { "ext": ["md", "markdown"], "name": "Markdown Document", "mimeType": "text/markdown", "role": "Editor" },

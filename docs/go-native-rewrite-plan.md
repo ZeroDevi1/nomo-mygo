@@ -570,3 +570,13 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 - `golang.org/x/net` 从间接依赖变为直接依赖（导出清理使用其 html 分词器），未引入新模块。
 
 验证：`go vet ./...`（另加 Windows / Linux 的 `./desktop/...`）、`go test ./...`；新增 `TestMathBlockClosingLine`、`TestScriptSyntax`、`TestExpandScripts`、`TestToggleScript`、`TestInlineSVG`、`TestSanitizeExportHTML`，随机编辑索引测试加入 `$$` 插入；`TestToolbarInserts` 的上标预期从 `<sup>` 改为 `^段落^`（行为按待办项变更）。离屏截图（`NOMO_SNAPSHOT_DOC`）核对上下标、删除线、公式块闭合行、行内与块级 SVG 和新增行内标签。未在真机窗口中验证（本机已运行的 Nomo 与测试构建共用 bundle id，无法单独截取测试窗口）；导出 PDF 中的上下标与 SVG 未实际导出检查。
+
+### 9.30 补齐原版差异：日文界面、公式与图表渲染、Word 导出、导出精细排版；修复 Quick Look 显示不全（2026-10-24）
+
+- **Quick Look 只显示开头一屏**：文本视图设为滚动视图的 documentView 时 maxSize 被重置为面板当时的尺寸，高度锁死、后文无法滚动。放开 maxSize 后，用同样的视图配置离屏测量：158 行 / 2 万字节的文档，文本视图高度 7610 覆盖全文所需的 7554（修复前停在 700）。
+- **日文界面**：`msgJaJP` 取自原版日文文案（i18n.ja.ts 与 Inlang ja-JP.json，覆盖 877 / 991 键），原生版新增的 114 条另行翻译；设置可选“日本語”，Info.plist 声明 ja。MyGo 0.6.3 没有日文语言包，MyGo 自身的少量文字（如查找栏）为英文。`TestJapaneseMessages` 校验键与占位符和英文一致。
+- **公式与 Mermaid 渲染**：恢复离屏渲染服务（`shell/render.go`），渲染页改为手写的 `desktop/ui/render`（render.html + render.js，约 200 行，接口与原版 render-entry.ts 相同），随附原样的 KaTeX 0.17.0 与 Mermaid 11.15.0 发布文件（从 npm 下载，sha512 与原版锁文件一致），经 `mygo.SetFrontend` 以 mygo://localhost/ 提供，不需要前端构建。编辑区与导出 HTML / PDF 恢复渲染；Mermaid 第一次遇到图表时才加载。应用包 +3.7 MB；渲染窗口仍按需创建、空闲 30 秒后销毁。
+- **Word 导出**：原生 Go 生成 .docx（`desktop/ui/word`），版式同原版（A4、20 mm、11 pt、1.5 倍行距、宋体 / Calibri / Consolas）：标题（书签 + 目录内部链接，锚点规则与编辑区目录共用 `mdedit.HeadingIDs`）、行内格式（含上下标、颜色、高亮）、有序 / 无序 / 任务列表、表格（表头重复、列对齐）、代码、引用与提示块、脚注、分割线、图片（PNG / JPEG 原样，GIF 首帧，WebP / BMP / TIFF / SVG 转 PNG，远程 8 秒超时）、公式与图表（离屏渲染为 PNG，行内公式按基线下沉）。不支持的 HTML 保留源码，降级说明附在状态栏；媒体 128 MiB / 单图 1600 万像素超限时导出失败。
+- **导出精细排版**：排版包编译为 WebAssembly（gzip 后 1.3 MB，构建时由 `scripts/kpwasm` 生成到 `desktop/ui/kpexport/gen`，不纳入版本库；mygo.json 的 buildCommand 调用），连同 Go 的 wasm_exec.js 与 `kp.js` 内联到导出文档：页面测量字素宽度，按 WebAssembly 返回的断行插入换行、字距、行首压缩与连字符；窗口变化时重排，PDF 打印前按版心重排。单元构造规则与编辑区（mdedit/kp.go）一致。开启时导出文件约增加 1.7 MB；未生成 WebAssembly 时导出不含精排并记日志。浏览器实测：纯中文段落非末行右缘均为 520.1（行宽 520），末行不拉伸；中英混排的示例段落两端对齐无解，按算法回退左对齐（与编辑区相同）。
+
+验证：`go vet`（macOS、Windows、Linux、js/wasm）、`go test ./...`；新增 `TestJapaneseMessages`、`TestExportRenderMarkers`、`TestBuildDocx`、`TestBuildDocxFallbacks`、`TestBuildDocxBudget`、`TestLayoutJustifies`、`TestScript`。实机（macOS，/Applications 安装的构建）：编辑区行内公式、公式块与 Mermaid 流程图渲染正确。未实机验证：导出 Word / HTML / PDF 的实际文件（保存面板在后台无法选择文件夹，未取得全屏控制）、日文界面截图、Word / WPS 打开 .docx 的排版。
