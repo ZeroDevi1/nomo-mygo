@@ -1,7 +1,7 @@
 {
   "name": "Nomo",
   "identifier": "com.nomo.desktop",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "icon": "desktop/packaging/icons/nomo/source/nomo-app-light-1024.png",
   "main": "./desktop",
   "out": "target/mygo",

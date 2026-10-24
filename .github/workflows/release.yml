@@ -70,6 +70,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # mygo build 用 actool 编译 Icon Composer 图标（mygo.json 的 macos.icon），需要 Xcode 26 及以上。
+      - name: Select latest Xcode
+        if: startsWith(matrix.platform, 'darwin/')
+        run: |
+          xcode="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
+          if [[ -n "$xcode" ]]; then sudo xcode-select -s "$xcode"; fi
+          xcodebuild -version
+
       - name: Install NSIS
         if: matrix.platform == 'windows/amd64'
         run: sudo apt-get update && sudo apt-get install -y nsis
@@ -152,11 +160,12 @@ jobs:
 
           gh release upload '${{ github.ref_name }}' checksums.md5 --clobber
 
+  # Cask 与下载站指向上游 nomo-md/nomo 的发布资产，只在上游仓库运行（分支仓库只发布安装包）。
   update-homebrew-cask:
     name: Update Homebrew cask
     runs-on: ubuntu-latest
     needs: checksums
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ github.repository == 'nomo-md/nomo' && !contains(github.ref_name, '-') }}
     permissions:
       contents: write
 
@@ -199,6 +208,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        github.repository == 'nomo-md/nomo' &&
         needs.build.result == 'success' &&
         (contains(github.ref_name, '-') || needs.checksums.result == 'success')
       }}
