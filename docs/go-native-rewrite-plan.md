@@ -516,3 +516,6 @@ KP 排版全量、公式、Mermaid、callout、脚注、HTML 块与锚点、注�
 
 验证：Go `vet`（macOS、`GOOS=windows`、`GOOS=linux`）与 `go test ./desktop/...`；新增测试 `TestWorkspaceRestore`、`TestWorkspaceDraftConflict`、`TestWorkspaceCloseDropsDiscarded`、`TestTabDragReorder`、`TestDropOnEmptyWorkspace`、`TestLinkEditor`、`TestSnapshotsRestore`、`TestTableCommands`、`TestCodeBlockCommands`、`TestTableCommandCaretContext`、`TestWindowsIntegrationSettings`；`pnpm check`、`vitest run src/app/i18n.test.ts`；`mygo build`。实机（macOS，release，隔离 HOME）：链接浮层编辑已有链接、表格右键插入列、保存后历史快照、崩溃后无参数启动恢复标签与未保存修改、正常退出后副本清理与工作区记录、全新配置打开示例文档。未实机：Windows 集成（无 Windows 真机）、拖入文件的覆盖提示（只在测试器中验证拖放）。后台辅助功能写入（AXSelectedText）只改输入框显示、不进入 MyGo 文本输入绑定，真实键盘输入正常。
 
+### 9.26 MyGo 0.6.3 升级（2026-10-24）
+
+- **升级 MyGo 0.6.3**：Go 模块、`mygo-runtime`、`mygo-cli` 同步升级；0.6.3 只有修复（Windows 粘贴不再重复、隐藏标题栏最大化时的系统按钮、大段落布局缓存、Metal 字形图集采样等），新增的公开接口只有 WebView 内容拦截规则（`ContentRules`），对 9.25 的未做项没有帮助。pnpm 的 `minimumReleaseAgeExclude` 按 0.6.2 的先例换成 0.6.3 各包。
