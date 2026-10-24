@@ -45,9 +45,32 @@ Get the latest version from [GitHub Releases](https://github.com/ZeroDevi1/nomo-
 | macOS | macOS 12.0+, Apple Silicon | `.dmg` / `.app.tar.gz` |
 | Linux | x64 | `.deb` / `.tar.gz` |
 
-The `nomo` Homebrew cask installs the original (Tauri) version, not this edition.
-
 SmartScreen or Gatekeeper may prompt on first launch; download from this project's Releases.
+
+### Homebrew (macOS)
+
+This repository ships its own cask and works as a third-party tap:
+
+```bash
+brew tap zerodevi1/nomo-mygo https://github.com/ZeroDevi1/nomo-mygo
+brew install --cask zerodevi1/nomo-mygo/nomo-mygo
+```
+
+Upgrade with `brew upgrade --cask nomo-mygo`; uninstall with `brew uninstall --cask nomo-mygo` (add `--zap` to also remove settings and drafts).
+
+- The `nomo` cask is the original (Tauri) version and installs the same `Nomo.app`; run `brew uninstall --cask nomo` first.
+- This edition is not notarized yet. If macOS says the developer cannot be verified or the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Nomo.app` and open it again.
+
+### Scoop (Windows)
+
+This repository is also a Scoop bucket:
+
+```powershell
+scoop bucket add nomo-mygo https://github.com/ZeroDevi1/nomo-mygo
+scoop install nomo-mygo/nomo-mygo
+```
+
+Upgrade with `scoop update nomo-mygo`; uninstall with `scoop uninstall nomo-mygo`. Scoop installs the portable build: the app only notifies you of new versions and does not install them itself. Settings live in `%APPDATA%\com.nomo.desktop` and are kept on uninstall.
 
 ## Features
 

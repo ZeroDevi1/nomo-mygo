@@ -45,9 +45,32 @@
 | macOS | macOS 12.0+，Apple Silicon | `.dmg` / `.app.tar.gz` |
 | Linux | x64 | `.deb` / `.tar.gz` |
 
-Homebrew 中的 `nomo` 为原版（Tauri），不是本版本。
-
 首次打开可能出现 SmartScreen / Gatekeeper 提示，请从本项目 Releases 下载。
+
+### Homebrew（macOS）
+
+本仓库自带 cask，作为第三方 tap 添加：
+
+```bash
+brew tap zerodevi1/nomo-mygo https://github.com/ZeroDevi1/nomo-mygo
+brew install --cask zerodevi1/nomo-mygo/nomo-mygo
+```
+
+升级用 `brew upgrade --cask nomo-mygo`，卸载用 `brew uninstall --cask nomo-mygo`（加 `--zap` 同时删除配置与草稿）。
+
+- 官方仓库中的 `nomo` cask 是原版（Tauri），与本版本安装同一个 `Nomo.app`，需先 `brew uninstall --cask nomo` 再安装。
+- 本版本暂未经过 Apple 公证，若提示“无法验证开发者”或“已损坏”，执行 `xattr -dr com.apple.quarantine /Applications/Nomo.app` 后再打开。
+
+### Scoop（Windows）
+
+本仓库同时是 Scoop bucket：
+
+```powershell
+scoop bucket add nomo-mygo https://github.com/ZeroDevi1/nomo-mygo
+scoop install nomo-mygo/nomo-mygo
+```
+
+升级用 `scoop update nomo-mygo`，卸载用 `scoop uninstall nomo-mygo`。Scoop 安装的是免安装版：应用内检查到新版本时只提示，不会自行安装；配置保存在 `%APPDATA%\com.nomo.desktop`，卸载不会删除。
 
 ## 核心功能
 
