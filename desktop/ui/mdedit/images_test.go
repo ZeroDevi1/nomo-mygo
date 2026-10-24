@@ -359,8 +359,13 @@ func TestImageHeavyScroll(t *testing.T) {
 	}
 }
 
+// TestAnimatedGIFFrames 读取测试集（NOMO_CORPUS，见 corpus_test.go）中的 assets/formats/animated.gif，未设置或缺文件时跳过。
 func TestAnimatedGIFFrames(t *testing.T) {
-	data, err := os.ReadFile("/Users/zhangweihao/Downloads/Nomo性能测试集_2026-10-22/assets/formats/animated.gif")
+	root := os.Getenv("NOMO_CORPUS")
+	if root == "" {
+		t.Skip("未设置 NOMO_CORPUS")
+	}
+	data, err := os.ReadFile(filepath.Join(root, "assets", "formats", "animated.gif"))
 	if err != nil {
 		t.Skip("缺少测试集 GIF")
 	}
