@@ -4,6 +4,9 @@
 package shell
 
 var msgZhCN = map[string]string{
+	"mygoRepository":                        "MyGo 版仓库",
+	"originalRepository":                    "原版 Nomo 仓库",
+	"mygoEditionDescription":                "此版本基于原版 Nomo（Tauri）用 Go 与 MyGo 原生界面重写。",
 	"addColumnAfter":                        "在右侧插入列",
 	"addColumnBefore":                       "在左侧插入列",
 	"addRowAfter":                           "在下方插入行",
@@ -730,7 +733,7 @@ var msgZhCN = map[string]string{
 	"renameFailed":                          "重命名失败: {error}",
 	"renameOpenDocumentBlocked":             "请先关闭受影响的标签页再重命名；已打开的分段会话或文档类型不能安全地跨路径重绑。",
 	"renderMode":                            "渲染模式",
-	"renderModeDescription":                 "选择 WebView2 使用硬件 GPU 加速或纯软件渲染。修改后需重启应用生效。",
+	"renderModeDescription":                 "选择界面使用硬件 GPU 加速或纯软件渲染。修改后需重启应用生效。",
 	"renderModeHardware":                    "硬件",
 	"renderModeSoftware":                    "软件",
 	"renderingMode":                         "渲染",
@@ -1002,6 +1005,9 @@ var msgZhCN = map[string]string{
 }
 
 var msgZhTW = map[string]string{
+	"mygoRepository":                        "MyGo 版儲存庫",
+	"originalRepository":                    "原版 Nomo 儲存庫",
+	"mygoEditionDescription":                "此版本基於原版 Nomo（Tauri）以 Go 與 MyGo 原生介面重寫。",
 	"addColumnAfter":                        "在右側插入欄",
 	"addColumnBefore":                       "在左側插入欄",
 	"addRowAfter":                           "在下方插入列",
@@ -1728,7 +1734,7 @@ var msgZhTW = map[string]string{
 	"renameFailed":                          "重新命名失敗: {error}",
 	"renameOpenDocumentBlocked":             "請先關閉受影響的分頁再重新命名；已開啟的分段工作階段或文件類型無法安全地跨路徑重新綁定。",
 	"renderMode":                            "渲染模式",
-	"renderModeDescription":                 "選擇 WebView2 使用硬體 GPU 加速或純軟體渲染。修改後需重新啟動應用程式生效。",
+	"renderModeDescription":                 "選擇介面使用硬體 GPU 加速或純軟體渲染。修改後需重新啟動應用程式生效。",
 	"renderModeHardware":                    "硬體",
 	"renderModeSoftware":                    "軟體",
 	"renderingMode":                         "渲染",
@@ -1996,6 +2002,9 @@ var msgZhTW = map[string]string{
 }
 
 var msgEnUS = map[string]string{
+	"mygoRepository":                        "MyGo edition repository",
+	"originalRepository":                    "Original Nomo repository",
+	"mygoEditionDescription":                "This edition is a rewrite of the original Nomo (Tauri) in Go with the MyGo native UI.",
 	"addColumnAfter":                        "Insert column right",
 	"addColumnBefore":                       "Insert column left",
 	"addRowAfter":                           "Insert row below",
@@ -2722,7 +2731,7 @@ var msgEnUS = map[string]string{
 	"renameFailed":                          "Rename failed: {error}",
 	"renameOpenDocumentBlocked":             "Close the affected tabs before renaming. Open segmented sessions and document kinds cannot be safely rebound across paths.",
 	"renderMode":                            "Render mode",
-	"renderModeDescription":                 "Choose whether WebView2 uses hardware GPU acceleration or software rendering. Restart the app to apply changes.",
+	"renderModeDescription":                 "Choose whether the interface uses hardware GPU acceleration or software rendering. Restart the app to apply changes.",
 	"renderModeHardware":                    "Hardware",
 	"renderModeSoftware":                    "Software",
 	"renderingMode":                         "Rendering",
@@ -2990,6 +2999,9 @@ var msgEnUS = map[string]string{
 }
 
 var msgJaJP = map[string]string{
+	"mygoRepository":                        "MyGo 版リポジトリ",
+	"originalRepository":                    "オリジナル版 Nomo リポジトリ",
+	"mygoEditionDescription":                "このエディションはオリジナル版 Nomo（Tauri）を Go と MyGo のネイティブ UI で書き直したものです。",
 	"addColumnAfter":                        "右に列を挿入",
 	"addColumnBefore":                       "左に列を挿入",
 	"addRowAfter":                           "下に行を挿入",
@@ -3716,7 +3728,7 @@ var msgJaJP = map[string]string{
 	"renameFailed":                          "名前の変更に失敗しました: {error}",
 	"renameOpenDocumentBlocked":             "名前を変更する前に、影響を受けるタブを閉じてください。開いている分割セッションや文書種類は別のパスへ安全に再関連付けできません。",
 	"renderMode":                            "レンダリングモード",
-	"renderModeDescription":                 "WebView2 がハードウェア GPU アクセラレーションを使用するか、ソフトウェア レンダリングを使用するかを選択します。変更を適用するにはアプリを再起動してください。",
+	"renderModeDescription":                 "画面の描画にハードウェア GPU アクセラレーションを使用するか、ソフトウェア レンダリングを使用するかを選択します。変更を適用するにはアプリを再起動してください。",
 	"renderModeHardware":                    "ハードウェア",
 	"renderModeSoftware":                    "ソフトウェア",
 	"renderingMode":                         "レンダリング",

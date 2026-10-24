@@ -268,13 +268,18 @@ func (sw *settingsWindow) page(c *ui.Context) {
 			ui.Text(c, "Nomo").FontSize(20).Bold()
 			ui.Text(c, fmt.Sprintf("%s %s · %s/%s", s.tr("version"), s.version, runtime.GOOS, runtime.GOARCH)).TextColor(c.Theme().TextMuted)
 			ui.Text(c, s.tr("positioningDescription")).Wrap().TextColor(c.Theme().TextMuted)
+			ui.Text(c, s.tr("mygoEditionDescription")).Wrap().TextColor(c.Theme().TextMuted)
 		})
+		// 本版本（MyGo 重写）的仓库与问题反馈，以及原版 Nomo（Tauri）的仓库。
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, s.tr("githubRepository")).Clicked() {
-				c.Services().OpenURL("https://github.com/nomo-md/nomo")
+			if ui.Button(c, s.tr("mygoRepository")).Clicked() {
+				c.Services().OpenURL(mygoRepoURL)
+			}
+			if ui.Button(c, s.tr("originalRepository")).Clicked() {
+				c.Services().OpenURL(originalRepoURL)
 			}
 			if ui.Button(c, s.tr("reportIssue")).Clicked() {
-				c.Services().OpenURL("https://github.com/nomo-md/nomo/issues")
+				c.Services().OpenURL(mygoRepoURL + "/issues")
 			}
 		})
 		if s.checkUpdate != nil {
@@ -282,6 +287,12 @@ func (sw *settingsWindow) page(c *ui.Context) {
 		}
 	}
 }
+
+// 关于页的仓库地址：本版本（Go + MyGo 重写）与原版 Nomo（Tauri）。
+const (
+	mygoRepoURL     = "https://github.com/ZeroDevi1/nomo-mygo"
+	originalRepoURL = "https://github.com/nomo-md/nomo"
+)
 
 // section 是一组设置：分组标题 + macOS 风格的两列表单（标签右对齐）。
 func (sw *settingsWindow) section(c *ui.Context, title string, fn func()) {
@@ -471,8 +482,8 @@ func (sw *settingsWindow) connectionTest(c *ui.Context) {
 	sw.describe(f, "connectionTest")
 }
 
-// shortcuts 是可自定义快捷键列表（格式同原版，如 Ctrl+Shift+K，Ctrl 在 macOS 上为 Command）；
-// 提交后重建菜单使新快捷键生效。
+// shortcuts 是可自定义快捷键列表；提交后重建菜单使新快捷键生效。存储格式同原版（如 Ctrl+Shift+K，Ctrl 在 macOS 上
+// 即 Command），设置页按平台显示与输入：macOS 上显示为 Cmd+Shift+K、Option，也接受 ⌘⌥⇧ 符号（见 shortcutDisplay）。
 func (sw *settingsWindow) shortcuts(c *ui.Context) {
 	s := sw.s
 	rows := []struct{ id, label string }{
@@ -484,21 +495,62 @@ func (sw *settingsWindow) shortcuts(c *ui.Context) {
 		{"apply-text-color", "applyTextColor"},
 	}
 	for _, r := range rows {
-		v := s.prefs.ShortcutPreferences[r.id]
+		v := shortcutDisplay(s.prefs.ShortcutPreferences[r.id], runtime.GOOS)
 		before := v
-		sw.text(c, r.label, "shortcutPreferences", &v, defaultShortcuts[r.id], "", false, func(t string) (string, bool) {
+		sw.text(c, r.label, "shortcutPreferences", &v, shortcutDisplay(defaultShortcuts[r.id], runtime.GOOS), "", false, func(t string) (string, bool) {
 			// 留空恢复默认；格式不合法时不提交。
 			if t = strings.TrimSpace(t); t == "" {
-				return defaultShortcuts[r.id], true
+				return shortcutDisplay(defaultShortcuts[r.id], runtime.GOOS), true
 			}
-			return normalizeShortcuts(map[string]string{r.id: t})[r.id], shortcutPattern.MatchString(t)
+			t = shortcutStored(t)
+			return shortcutDisplay(normalizeShortcuts(map[string]string{r.id: t})[r.id], runtime.GOOS), shortcutPattern.MatchString(t)
 		})
 		if v != before {
-			s.prefs.ShortcutPreferences[r.id] = v
+			s.prefs.ShortcutPreferences[r.id] = shortcutStored(v)
 			s.setPref("shortcutPreferences")
 			s.installMenu()
 		}
 	}
+}
+
+// shortcutDisplay 把存储的快捷键转为 goos 平台上设置页显示的文字：macOS 上 Ctrl 显示为 Cmd、Alt 显示为 Option
+// （存储格式同原版，Ctrl 在 macOS 上即 Command）；其他平台原样显示。
+func shortcutDisplay(v, goos string) string {
+	if goos != "darwin" {
+		return v
+	}
+	parts := strings.Split(v, "+")
+	for i, p := range parts {
+		switch strings.ToLower(strings.TrimSpace(p)) {
+		case "ctrl":
+			parts[i] = "Cmd"
+		case "alt":
+			parts[i] = "Option"
+		}
+	}
+	return strings.Join(parts, "+")
+}
+
+// shortcutStored 把设置页输入的快捷键转回存储格式：Cmd / Command / ⌘ / Meta / CmdOrCtrl 记为 Ctrl，Option / ⌥ 记为 Alt，
+// ⇧ 记为 Shift；符号可连写（如 ⌘⇧K）。
+func shortcutStored(v string) string {
+	v = strings.NewReplacer("⌘", "+Cmd+", "⌥", "+Option+", "⇧", "+Shift+", "⌃", "+Ctrl+").Replace(v)
+	var parts []string
+	for _, p := range strings.Split(v, "+") {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		switch strings.ToLower(p) {
+		case "cmd", "command", "meta", "cmdorctrl", "ctrl", "control":
+			p = "Ctrl"
+		case "option", "opt", "alt":
+			p = "Alt"
+		case "shift":
+			p = "Shift"
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, "+")
 }
 
 // updateRow 是“关于”页的检查更新：后台检查；Windows 安装版可下载并重启安装，其他形态打开发布页。状态与启动检查
