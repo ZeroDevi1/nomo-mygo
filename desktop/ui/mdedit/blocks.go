@@ -200,10 +200,13 @@ func buildRows(d *Document, ti int, top Block, seed maphash.Seed, render bool) (
 		bb.add(row{kind: rowLine, role: roleHTML, htmlKind: previewToc, a: 0, b: z - top.Start, tone: -1})
 		bb.closePad(blockMargin)
 	} else if top.Kind == KindFrontMatter {
+		// 整个 front matter 一行：收起时为“文档元数据”卡片（原版 FrontMatterCard，见 htmlpreview.go 的 frontMatter），
+		// 光标严格位于其中时显示原文，外框同代码块（drawFrame 只在展开时画）。
+		z := len(strings.TrimRight(bb.src[top.Start:top.End], "\r\n"))
 		f := len(bb.rows)
 		bb.pending += codePadY
-		bb.lines(top.Start, top.End, roleFront, container{tone: -1}, codePadX)
-		bb.frames = append(bb.frames, frame{kind: frameFront, first: f, last: len(bb.rows) - 1})
+		bb.add(row{kind: rowLine, role: roleFront, htmlKind: previewFrontMatter, a: 0, b: z, indent: codePadX, tone: -1})
+		bb.frames = append(bb.frames, frame{kind: frameFront, first: f, last: f})
 		bb.closePad(codePadY + blockMargin)
 	} else {
 		bb.block(top.Index, container{tone: -1})

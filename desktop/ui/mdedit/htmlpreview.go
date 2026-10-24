@@ -126,6 +126,7 @@ func parseHTMLPreview(src string) (*hnode, bool) {
 type htmlBlockPreview struct {
 	src     string
 	comment bool
+	front   bool // 文档元数据卡片（front matter）
 	// toc 为 true 表示目录卡片：条目来自当前文档标题（items），标题文字在绘制时只为可见条目排版并缓存在
 	// titles（换宽度或条目变化时清空，至多 tocTitleCache 项），2000 个标题的目录不必一次排完。
 	toc    bool
@@ -158,6 +159,7 @@ const (
 	hpFill
 	hpStroke
 	hpImage
+	hpIcon // 图标（op.icon，按 op.color 着色）
 )
 
 type hpOp struct {
@@ -167,6 +169,7 @@ type hpOp struct {
 	radius float32
 	text   *ui.TextLayout
 	img    imgObj
+	icon   *ui.SVG
 }
 
 // hpStyle 是行内样式的累积。
@@ -204,6 +207,8 @@ func (e *Editor) htmlLayout(b *htmlBlockPreview, w float32) *hpLayout {
 		h = ctx.tocCard(b, w)
 	case b.comment:
 		h = ctx.comment(b.src, w)
+	case b.front:
+		h = ctx.frontMatter(b.src, w)
 	default:
 		if b.root == nil {
 			b.root, _ = parseHTMLPreview(b.src)
@@ -765,6 +770,8 @@ func (e *Editor) drawHTML(p *ui.Painter, b *htmlBlockPreview, rc ui.Rect) {
 			p.TextLayout(op.text, r.X, r.Y, op.color)
 		case hpImage:
 			e.drawImageAt(p, op.img, r)
+		case hpIcon:
+			p.Icon(op.icon, r, op.color)
 		}
 	}
 	if b.toc {
@@ -821,6 +828,7 @@ const (
 	// previewDetailsMark 是不构成折叠框架的折叠块标记（列表、引用中的折叠块，或未配对的标记）：开始标记显示为
 	// “▾ 标题”行，结束标记显示为细分隔线；不支持折叠，光标进入时显示原文。
 	previewDetailsMark
+	previewFrontMatter // 文档开头的 YAML front matter：元数据卡片
 )
 
 // projectHTMLPreview 生成 HTML 块、公式块与 Mermaid 块收起时的投影：整块为一个对象。
@@ -841,7 +849,8 @@ func projectHTMLPreview(text string, kind uint8) *projection {
 		pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: detailsMarkHTML(text)}}, 0)
 		return pb.finish()
 	}
-	pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: text, comment: kind == previewComment, toc: kind == previewToc, details: kind == previewDetails}}, 0)
+	pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: text, comment: kind == previewComment, toc: kind == previewToc,
+		details: kind == previewDetails, front: kind == previewFrontMatter}}, 0)
 	return pb.finish()
 }
 

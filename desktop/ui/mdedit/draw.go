@@ -205,6 +205,9 @@ func (e *Editor) drawFrame(p *ui.Painter, i int, en *entry, f frame, x0, top flo
 			}
 		}
 	case frameCode, frameFront:
+		if f.kind == frameFront && first.proj != nil && len(first.proj.objs) > 0 {
+			break // front matter 收起为元数据卡片时卡片自带外框
+		}
 		box := ui.Rect{X: x, Y: y0 - codePadY, W: w, H: y1 - y0 + 2*codePadY}
 		p.Fill(box, e.pal.codeBg, 8)
 		p.Stroke(box, e.pal.codeBorder, 8, 1)
