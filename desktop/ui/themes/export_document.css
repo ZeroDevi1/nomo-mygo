@@ -1,7 +1,6 @@
 /* 导出 HTML / PDF 的正文样式（嵌入 themes.ExportCSS）。原由前端样式生成，前端移除后直接维护本文件；原先的 @import 已内联（单文件导出无法加载外部样式）。 */
 /* —— 正文样式（原 src/app/styles/document-content.css）—— */
-/* 编辑器与独立导出共用的正文展示样式；交互与窗口布局留在 editor-document.css。 */
-.prosemirror-host .task-checkbox-widget,
+/* 导出文档的正文展示样式，作用于 .nomo-export 容器。 */
 .nomo-export .task-checkbox-widget {
   position: relative;
   display: inline-flex;
@@ -16,7 +15,6 @@
   transform: translateY(-0.105em);
   vertical-align: middle;
 }
-.prosemirror-host .task-checkbox-widget input,
 .nomo-export .task-checkbox-widget input {
   position: absolute;
   inset: 0;
@@ -27,7 +25,6 @@
   opacity: 0;
   cursor: pointer;
 }
-.prosemirror-host .task-checkbox-widget::before,
 .nomo-export .task-checkbox-widget::before {
   content: '';
   display: block;
@@ -44,7 +41,6 @@
     background-color 180ms ease,
     border-color 180ms ease;
 }
-.prosemirror-host .task-checkbox-widget:has(input:checked)::before,
 .nomo-export .task-checkbox-widget:has(input:checked)::before {
   background-color: var(--md-editor-accent-fill);
   border-color: var(--md-editor-accent-fill);
@@ -190,7 +186,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.prosemirror-host .ProseMirror,
 .nomo-export {
   width: 100%;
   min-width: 0;
@@ -203,26 +198,20 @@
   line-height: var(--md-editor-line-height);
   white-space: pre-wrap;
 }
-.prosemirror-host .ProseMirror h1,
 .nomo-export h1,
-.prosemirror-host .ProseMirror h2,
 .nomo-export h2,
-.prosemirror-host .ProseMirror h3,
 .nomo-export h3 {
   color: var(--md-editor-heading-fg);
   line-height: 1.2;
 }
-.prosemirror-host .ProseMirror h1,
 .nomo-export h1 {
   margin: 0 0 22px;
   font-size: 32px;
 }
-.prosemirror-host .ProseMirror h2,
 .nomo-export h2 {
   margin-top: 30px;
   font-size: 26px;
 }
-.prosemirror-host .ProseMirror blockquote,
 .nomo-export blockquote {
   margin: 18px 0;
   padding: 8px 0 8px 16px;
@@ -232,7 +221,6 @@
   color: var(--md-editor-blockquote-fg);
   position: relative;
 }
-.prosemirror-host .ProseMirror blockquote::before,
 .nomo-export blockquote::before {
   content: '';
   position: absolute;
@@ -244,17 +232,14 @@
   background: var(--md-editor-blockquote-border);
   pointer-events: none;
 }
-[data-block-style='classic'] .prosemirror-host .ProseMirror blockquote,
 [data-block-style='classic'] .nomo-export blockquote {
   border-left: 4px solid var(--md-editor-blockquote-border);
   border-radius: var(--md-editor-radius-md);
   background: var(--md-editor-blockquote-bg-classic);
 }
-[data-block-style='classic'] .prosemirror-host .ProseMirror blockquote::before,
 [data-block-style='classic'] .nomo-export blockquote::before {
   display: none;
 }
-.prosemirror-host .ProseMirror .callout-card,
 .nomo-export .callout-card {
   position: relative;
   margin: 18px 0;
@@ -265,7 +250,6 @@
   color: var(--md-editor-callout-note-fg);
   overflow: visible;
 }
-.prosemirror-host .ProseMirror .callout-card::before,
 .nomo-export .callout-card::before {
   content: '';
   position: absolute;
@@ -277,108 +261,71 @@
   background: var(--md-editor-callout-note-border);
   pointer-events: none;
 }
-[data-block-style='classic'] .prosemirror-host .ProseMirror .callout-card,
 [data-block-style='classic'] .nomo-export .callout-card {
   border-left: 4px solid var(--md-editor-callout-note-border);
   border-radius: var(--md-editor-radius-md);
   background: var(--md-editor-callout-note-bg-classic);
 }
-[data-block-style='classic'] .prosemirror-host .ProseMirror .callout-card::before,
 [data-block-style='classic'] .nomo-export .callout-card::before {
   display: none;
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='note'],
 .nomo-export .callout-card[data-callout-type='note'] {
   border-color: var(--md-editor-callout-note-border);
   background: var(--md-editor-callout-note-bg);
   color: var(--md-editor-callout-note-fg);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='note']::before,
 .nomo-export .callout-card[data-callout-type='note']::before {
   background: var(--md-editor-callout-note-border);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='tip'],
 .nomo-export .callout-card[data-callout-type='tip'] {
   border-color: var(--md-editor-callout-tip-border);
   background: var(--md-editor-callout-tip-bg);
   color: var(--md-editor-callout-tip-fg);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='tip']::before,
 .nomo-export .callout-card[data-callout-type='tip']::before {
   background: var(--md-editor-callout-tip-border);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='important'],
 .nomo-export .callout-card[data-callout-type='important'] {
   border-color: var(--md-editor-callout-important-border);
   background: var(--md-editor-callout-important-bg);
   color: var(--md-editor-callout-important-fg);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='important']::before,
 .nomo-export .callout-card[data-callout-type='important']::before {
   background: var(--md-editor-callout-important-border);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='warning'],
 .nomo-export .callout-card[data-callout-type='warning'] {
   border-color: var(--md-editor-callout-warning-border);
   background: var(--md-editor-callout-warning-bg);
   color: var(--md-editor-callout-warning-fg);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='warning']::before,
 .nomo-export .callout-card[data-callout-type='warning']::before {
   background: var(--md-editor-callout-warning-border);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='caution'],
 .nomo-export .callout-card[data-callout-type='caution'] {
   border-color: var(--md-editor-callout-caution-border);
   background: var(--md-editor-callout-caution-bg);
   color: var(--md-editor-callout-caution-fg);
 }
-.prosemirror-host .ProseMirror .callout-card[data-callout-type='caution']::before,
 .nomo-export .callout-card[data-callout-type='caution']::before {
   background: var(--md-editor-callout-caution-border);
 }
-[data-block-style='classic']
-  .prosemirror-host
-  .ProseMirror
-  .callout-card[data-callout-type='note'],
-[data-block-style='classic']
-  .nomo-export
-  .callout-card[data-callout-type='note'] {
+[data-block-style='classic'] .nomo-export .callout-card[data-callout-type='note'] {
   border-left-color: var(--md-editor-callout-note-border);
   background: var(--md-editor-callout-note-bg-classic);
 }
-[data-block-style='classic'] .prosemirror-host .ProseMirror .callout-card[data-callout-type='tip'],
 [data-block-style='classic'] .nomo-export .callout-card[data-callout-type='tip'] {
   border-left-color: var(--md-editor-callout-tip-border);
   background: var(--md-editor-callout-tip-bg-classic);
 }
-[data-block-style='classic']
-  .prosemirror-host
-  .ProseMirror
-  .callout-card[data-callout-type='important'],
-[data-block-style='classic']
-  .nomo-export
-  .callout-card[data-callout-type='important'] {
+[data-block-style='classic'] .nomo-export .callout-card[data-callout-type='important'] {
   border-left-color: var(--md-editor-callout-important-border);
   background: var(--md-editor-callout-important-bg-classic);
 }
-[data-block-style='classic']
-  .prosemirror-host
-  .ProseMirror
-  .callout-card[data-callout-type='warning'],
-[data-block-style='classic']
-  .nomo-export
-  .callout-card[data-callout-type='warning'] {
+[data-block-style='classic'] .nomo-export .callout-card[data-callout-type='warning'] {
   border-left-color: var(--md-editor-callout-warning-border);
   background: var(--md-editor-callout-warning-bg-classic);
 }
-[data-block-style='classic']
-  .prosemirror-host
-  .ProseMirror
-  .callout-card[data-callout-type='caution'],
-[data-block-style='classic']
-  .nomo-export
-  .callout-card[data-callout-type='caution'] {
+[data-block-style='classic'] .nomo-export .callout-card[data-callout-type='caution'] {
   border-left-color: var(--md-editor-callout-caution-border);
   background: var(--md-editor-callout-caution-bg-classic);
 }
@@ -412,14 +359,12 @@
 .callout-body > :last-child {
   margin-bottom: 0;
 }
-.prosemirror-host .ProseMirror code,
 .nomo-export code {
   padding: 2px 5px;
   border-radius: var(--md-editor-radius-sm);
   background: color-mix(in srgb, var(--md-editor-code-bg) 12%, transparent);
   font-family: var(--md-editor-font-mono);
 }
-.prosemirror-host .ProseMirror pre,
 .nomo-export pre {
   overflow: auto;
   padding: 16px;
@@ -428,13 +373,11 @@
   background: var(--md-editor-code-bg);
   color: var(--md-editor-code-fg);
 }
-.prosemirror-host .ProseMirror pre code,
 .nomo-export pre code {
   padding: 0;
   background: transparent;
   color: inherit;
 }
-.prosemirror-host .ProseMirror a,
 .nomo-export a {
   color: var(--md-editor-link-fg);
   text-decoration-thickness: 1px;
@@ -446,7 +389,6 @@
     text-decoration-color 120ms ease;
 }
 .image-node img,
-.prosemirror-host .ProseMirror img,
 .nomo-export img {
   max-width: 100%;
   min-width: 160px;
@@ -458,10 +400,6 @@
   user-select: none;
 }
 /* 图片地址内嵌后仍通过展示标记保留徽章的行内布局。 */
-.prosemirror-host .ProseMirror img[width],
-.prosemirror-host .ProseMirror img[height],
-.prosemirror-host .ProseMirror img[src*='img.shields.io'],
-.prosemirror-host .ProseMirror img[src*='badgen.net'],
 .nomo-export .html-widget img[width],
 .nomo-export .html-widget img[height],
 .nomo-export img[data-nomo-badge] {
@@ -472,8 +410,6 @@
   background: transparent;
   box-shadow: none;
 }
-.prosemirror-host .ProseMirror img[src*='img.shields.io'],
-.prosemirror-host .ProseMirror img[src*='badgen.net'],
 .nomo-export img[data-nomo-badge] {
   display: inline-block;
   width: auto;
@@ -481,9 +417,6 @@
   margin: 2px 4px;
   vertical-align: text-bottom;
 }
-.prosemirror-host .ProseMirror a:has(.image-node.is-badge),
-.prosemirror-host .ProseMirror a:has(img[src*='img.shields.io']),
-.prosemirror-host .ProseMirror a:has(img[src*='badgen.net']),
 .nomo-export a:has(img[data-nomo-badge]) {
   display: inline-flex;
   align-items: center;
@@ -492,39 +425,22 @@
   text-decoration: none;
   vertical-align: text-bottom;
 }
-.prosemirror-host .ProseMirror a:has(.image-node.is-badge) .image-node.is-badge,
-.prosemirror-host .ProseMirror a:has(img[src*='img.shields.io']) img,
-.prosemirror-host .ProseMirror a:has(img[src*='badgen.net']) img,
 .nomo-export a:has(img[data-nomo-badge]) img {
   margin: 0;
 }
-.prosemirror-host .ProseMirror p:has(.image-node.is-badge),
-.prosemirror-host .ProseMirror p:has(img[src*='img.shields.io']),
-.prosemirror-host .ProseMirror p:has(img[src*='badgen.net']),
-.prosemirror-host .ProseMirror .html-widget:has(img[src*='img.shields.io']),
-.prosemirror-host .ProseMirror .html-widget:has(img[src*='badgen.net']),
-.prosemirror-host .ProseMirror .html-widget p:has(img[src*='img.shields.io']),
-.prosemirror-host .ProseMirror .html-widget p:has(img[src*='badgen.net']),
 .nomo-export p:has(img[data-nomo-badge]),
 .nomo-export .html-widget:has(img[data-nomo-badge]) {
   white-space: normal;
 }
-.prosemirror-host .ProseMirror p:has(.image-node.is-badge),
-.prosemirror-host .ProseMirror p:has(img[src*='img.shields.io']),
-.prosemirror-host .ProseMirror p:has(img[src*='badgen.net']),
 .nomo-export p:has(img[data-nomo-badge]) {
   line-height: 1.4;
 }
-.prosemirror-host .ProseMirror .html-widget:has(img[src*='img.shields.io']),
-.prosemirror-host .ProseMirror .html-widget:has(img[src*='badgen.net']),
 .nomo-export .html-widget:has(img[data-nomo-badge]) {
   display: block;
 }
-.prosemirror-host .ProseMirror ul li p:first-child,
 .nomo-export ul li p:first-child {
   margin-bottom: 0;
 }
-.prosemirror-host .ProseMirror table,
 .nomo-export table {
   width: auto;
   max-width: 100%;
@@ -536,17 +452,12 @@
   font-size: 14px;
   line-height: 1.55;
 }
-.prosemirror-host .ProseMirror table,
 .nomo-export table,
-.prosemirror-host .ProseMirror th,
 .nomo-export th,
-.prosemirror-host .ProseMirror td,
 .nomo-export td {
   border: 1px solid var(--md-editor-table-border);
 }
-.prosemirror-host .ProseMirror th,
 .nomo-export th,
-.prosemirror-host .ProseMirror td,
 .nomo-export td {
   position: relative;
   min-width: 0;
@@ -556,21 +467,17 @@
   overflow-wrap: anywhere;
   word-break: normal;
 }
-.prosemirror-host .ProseMirror th,
 .nomo-export th {
   background: var(--md-editor-table-header-bg);
   color: var(--md-editor-heading-fg);
   font-size: 13px;
   font-weight: 800;
 }
-.prosemirror-host .ProseMirror td,
 .nomo-export td {
   font-size: 14px;
   font-weight: 400;
 }
-.prosemirror-host .ProseMirror th p,
 .nomo-export th p,
-.prosemirror-host .ProseMirror td p,
 .nomo-export td p {
   margin: 0;
   min-width: 0;
@@ -594,7 +501,6 @@
   font-size: 1.05em;
 }
 .inline-code,
-.prosemirror-host .ProseMirror code.inline-code,
 .nomo-export code.inline-code {
   display: inline;
   vertical-align: baseline;
@@ -690,13 +596,13 @@
   overflow-wrap: anywhere;
 }
 
-:is(.prosemirror-host, .nomo-export) sup:not(.footnote-ref),
-:is(.prosemirror-host, .nomo-export) sub {
+.nomo-export sup:not(.footnote-ref),
+.nomo-export sub {
   font-size: 0.75em;
   line-height: 0;
 }
-:is(.prosemirror-host, .nomo-export) sup:not(.footnote-ref) { vertical-align: super; }
-:is(.prosemirror-host, .nomo-export) sub { vertical-align: sub; }
+.nomo-export sup:not(.footnote-ref) { vertical-align: super; }
+.nomo-export sub { vertical-align: sub; }
 
 /* —— 表格布局（原 src/lib/table-layout/table-layout.css）—— */
 /* The shell owns overflow; the view-only colgroup owns widths. */
@@ -706,7 +612,6 @@
   overflow-x: auto;
   margin: 42px 0 20px;
 }
-.prosemirror-host .ProseMirror .nomo-table-scroll > table,
 .nomo-export .nomo-table-scroll > table {
   margin: 0;
   max-width: none;
@@ -715,8 +620,6 @@
   border-right: 0;
   border-bottom: 0;
 }
-.prosemirror-host .ProseMirror .nomo-table-scroll th,
-.prosemirror-host .ProseMirror .nomo-table-scroll td,
 .nomo-export .nomo-table-scroll th,
 .nomo-export .nomo-table-scroll td {
   box-sizing: border-box;
