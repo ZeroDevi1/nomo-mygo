@@ -8,6 +8,8 @@ import (
 	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/docfs"
+	"nomo/desktop/provider"
+	"nomo/desktop/providers"
 	"nomo/desktop/ui/mdedit"
 )
 
@@ -35,15 +37,18 @@ type Tab struct {
 	left       bool
 	comparePct float32
 
-	// plain 为 true 表示 TXT/JSON 标签：源码编辑器的 rope 缓冲是唯一事实源，不建 Markdown 文档（Doc 为空文档，
+	// plain 为 true 表示纯源码标签：源码编辑器的 rope 缓冲是唯一事实源，不建 Markdown 文档（Doc 为空文档，
 	// 只为满足共用代码路径）；未保存判定、保存与外部重载都走缓冲。大文件因此只占一份原文、打开不做 Markdown 解析。
-	plain bool
+	plain       bool
+	typesetMode int
 
 	Doc *mdedit.Document
 	Ed  *mdedit.Editor
 
-	source         *editor.State
-	srcVer, docVer uint64
+	syntaxProvider   *provider.Descriptor
+	afterSourceInput func()
+	source           *editor.State
+	srcVer, docVer   uint64
 
 	savedVersion uint64 // 最近一次保存（或打开）时 Doc 的版本
 	savedText    string // 最近一次保存时的原文，用于判断撤销回原样后不再算未保存
@@ -58,6 +63,7 @@ type Tab struct {
 
 	statsVer uint64
 	stats    mdedit.Stats
+	outSnap  editor.Snapshot
 	outVer   uint64
 	outline  []mdedit.Heading
 	// outFold 记录大纲中与默认展开状态相反的标题（按标题序号）；标题数变化时清空。outRows 缓存可见标题序号，
@@ -135,8 +141,7 @@ func (t *Tab) markSaved(text string) {
 	t.dirtyVer, t.dirty = t.Doc.Version(), false
 }
 
-// 文档类型与原版 getDocumentKindFromPath 一致：.txt、.json 只用源码编辑器编辑（无语义模式、
-// 格式检查、快捷插入与导出），其余（含未保存的新文档）按 Markdown。
+// TXT、JSON、LaTeX 和 Typst 使用源码编辑器；其余（含未保存的新文档）按 Markdown。
 const (
 	kindMarkdown = "markdown"
 	kindText     = "text"
@@ -147,6 +152,9 @@ const (
 func (t *Tab) Kind() string { return documentKind(t.Path) }
 
 func documentKind(path string) string {
+	if p := providers.ForPath(path); p != nil {
+		return p.ID
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".txt":
 		return kindText
@@ -199,6 +207,9 @@ func (t *Tab) Stats() mdedit.Stats {
 // Outline 返回按版本缓存的大纲。
 func (t *Tab) Outline() []mdedit.Heading {
 	if t.plain {
+		if providers.ForPath(t.Path) != nil {
+			return t.typesetHeadings(t.Source().Buffer.Snapshot())
+		}
 		return nil
 	}
 	if v := t.Doc.Version(); v != t.outVer || t.outline == nil {
@@ -248,13 +259,18 @@ func (t *Tab) newSource(text string) *editor.State {
 	buf := editor.NewBuffer(text)
 	label, lang, numbers := "Markdown", "document.md", editor.LineNumbersOff
 	switch t.Kind() {
+	default:
+		if p := providers.ForPath(t.Path); p != nil {
+			label, lang, numbers = p.Name, "", editor.LineNumbersOn
+		}
 	case kindJSON:
 		label, lang, numbers = "JSON", "document.json", editor.LineNumbersOn
 	case kindText:
 		label, lang = "Text", "document.txt"
 	}
 	buf.SetLanguage(editor.LanguageFor(lang))
-	return &editor.State{Buffer: buf, SoftWrap: true, LineNumbers: numbers, Label: label}
+	st := &editor.State{Buffer: buf, SoftWrap: true, LineNumbers: numbers, Label: label}
+	return st
 }
 
 // replaceText 把原文整体换成 text（LF 换行），按最小差异写入，保留撤销历史；未保存判定照常按保存时的原文比较。

@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -448,6 +449,20 @@ func (s *Shell) exportHTML() {
 // A4、纵向、20mm 设置）。
 func (s *Shell) exportPDF() {
 	tab := s.activeTab()
+	if tab != nil && tab.Kind() != kindMarkdown {
+		pr := s.previewProvider(tab)
+		if pr == nil || pr.ExportPDF == nil {
+			return
+		}
+		s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() (string, error) {
+			snap := tab.Source().Buffer.Snapshot()
+			src := tab.Path
+			return func() (string, error) {
+				return "", pr.ExportPDF(context.Background(), src, strings.NewReader(snap.String()), path)
+			}
+		})
+		return
+	}
 	if tab == nil || s.pdfExporter == nil {
 		return
 	}
@@ -521,7 +536,7 @@ func (s *Shell) exportWord() {
 // exportTo 在后台弹出保存框；选定路径后在 UI 线程调用 render 生成文档（读取标签状态），
 // 再在后台执行其返回的写出函数（返回附加在成功提示后的说明），结果写入状态栏（success 为成功文案键）。
 func (s *Shell) exportTo(t *Tab, ext, filter, success string, render func(path string) func() (string, error)) {
-	if t.Kind() != kindMarkdown {
+	if t.Kind() != kindMarkdown && !(ext == "pdf" && s.previewProvider(t) != nil) {
 		return
 	}
 	t.syncFromSource()
@@ -536,7 +551,7 @@ func (s *Shell) exportTo(t *Tab, ext, filter, success string, render func(path s
 			path += "." + ext
 		}
 		s.postToSettings(func() {
-			if s.tabWithID(t.ID) == nil {
+			if s.tabWithID(t.ID) == nil || t.Kind() != kindMarkdown && s.previewProvider(t) == nil {
 				return
 			}
 			write := render(path)

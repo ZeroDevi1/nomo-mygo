@@ -25,6 +25,7 @@ import (
 	"nomo/desktop/internal/emoji"
 	"nomo/desktop/internal/i18n"
 	"nomo/desktop/internal/memtrim"
+	"nomo/desktop/providers"
 	"nomo/desktop/ui/mdedit"
 	"nomo/desktop/ui/themes"
 )
@@ -84,8 +85,9 @@ type Shell struct {
 	// post 把后台任务（对话框、文件写入）的结果交回 UI 线程；默认为 win.Update，测试中可替换。
 	post func(func())
 
-	mini miniState // Markdown 小窗（mini.go）
-	opts Options   // 创建参数，“移动到新窗口”用它创建新窗口（windows.go）
+	compile *compilePane
+	mini    miniState // Markdown 小窗（mini.go）
+	opts    Options   // 创建参数，“移动到新窗口”用它创建新窗口（windows.go）
 	// 托盘（tray.go）：trayOK 为托盘是否可用；quitting 为正在退出（不再按关闭到托盘拦截）；closeChoice* 为
 	// “关闭 Nomo”选择框的状态。
 	installTray         func(show, quit func()) bool
@@ -233,6 +235,14 @@ func (s *Shell) split() bool {
 // setPref 修改一项偏好并写盘；同时刷新主窗口（设置窗口的修改需要主窗口重绘）。
 func (s *Shell) setPref(key string) {
 	s.prefs.Store(s.cfg, key)
+	if key == "providerPreview" || key == "providerSyntax" || key == "disabledProviders" {
+		s.releaseDisabledProviders()
+		for _, other := range registry.shells {
+			if other != s {
+				other.releaseDisabledProviders()
+			}
+		}
+	}
 	if key == "themeMode" && s.win != nil {
 		// 只在窗口（即应用主循环）存在时切换：SetSource 需要主线程处理，无窗口时会一直等待。
 		applyAppearance(s.prefs.ThemeMode)
@@ -306,6 +316,7 @@ func (s *Shell) Open() *mygo.Window {
 	})
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
+		s.closeCompile()
 		s.finishWorkspaceClose()
 		unregister(s)
 		s.images.Close()
@@ -557,8 +568,11 @@ func (s *Shell) openDropped(paths []string) {
 }
 
 func (s *Shell) markdownFilters() []mygo.FileFilter {
-	return []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown", "mdown", "mkd"}},
-		{Name: "Text / JSON", Extensions: []string{"txt", "json"}}}
+	filters := []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown", "mdown", "mkd"}}, {Name: "Text / JSON", Extensions: []string{"txt", "json"}}}
+	for p := range providers.All() {
+		filters = append(filters, mygo.FileFilter{Name: p.Name, Extensions: []string{strings.TrimPrefix(p.Extension, ".")}})
+	}
+	return filters
 }
 
 // openDialog 在后台显示打开对话框，选择后回到 UI 线程打开。

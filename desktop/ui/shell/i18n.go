@@ -8,9 +8,8 @@ import (
 	"nomo/desktop/internal/i18n"
 	"nomo/desktop/ui/icons"
 
-	// MyGo 自身的文字（系统菜单项、对话框按钮、查找栏、编辑右键菜单等）的中文翻译：没有 MyGo i18n 目录的应用须自行
-	// 导入，否则这些文字只有英文（与 shell.applyAppLocale 声明的语言一致）。MyGo 0.6.3 没有日文语言包，
-	// 日文界面下这部分文字为英文（macOS 的系统菜单项由 Info.plist 的 CFBundleLocalizations 交给 AppKit 本地化）。
+	// 注册 MyGo 系统菜单、对话框、查找栏和编辑菜单的语言包。
+	_ "github.com/egoist/mygo/locales/ja"
 	_ "github.com/egoist/mygo/locales/zh-Hans"
 	_ "github.com/egoist/mygo/locales/zh-Hant"
 )

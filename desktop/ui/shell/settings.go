@@ -3,6 +3,7 @@ package shell
 import (
 	"fmt"
 	"math"
+	"nomo/desktop/providers"
 	"regexp"
 	"runtime"
 	"slices"
@@ -146,6 +147,26 @@ func (sw *settingsWindow) page(c *ui.Context) {
 				[]string{"system", "zh-CN", "zh-TW", "en-US", "ja-JP"}, []string{s.tr("themeSystem"), "简体中文", "繁體中文", "English", "日本語"})
 		})
 	case "editor":
+		sw.section(c, "typesetProviders", func() {
+			for pr := range providers.All() {
+				enabled := !p.DisabledProviders[pr.ID]
+				ui.Field(c.Key("provider."+pr.ID), pr.Name, func() {
+					if ui.Switch(c, &enabled).Changed() {
+						if enabled {
+							delete(p.DisabledProviders, pr.ID)
+						} else {
+							if p.DisabledProviders == nil {
+								p.DisabledProviders = make(map[string]bool)
+							}
+							p.DisabledProviders[pr.ID] = true
+						}
+						s.setPref("disabledProviders")
+					}
+				})
+			}
+			sw.toggle(c, "providerSyntax", "providerSyntax", &p.ProviderSyntax)
+			sw.toggle(c, "providerPreview", "providerPreview", &p.ProviderPreview)
+		})
 		sw.section(c, "typographySettings", func() {
 			sw.toggle(c, "typographyEnabled", "typographyEnabled", &p.TypographyEnabled)
 		})

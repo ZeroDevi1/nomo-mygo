@@ -74,18 +74,19 @@ Upgrade with `scoop update nomo-mygo`; uninstall with `scoop uninstall nomo-mygo
 
 ## Features
 
+- **LaTeX / Typst**: Open a trusted `.tex` or `.typ` main file to switch between preview, source and split views, click PDF text to locate its source line, or export the current buffer from the File menu. Eligible LaTeX paragraphs update in place before XeLaTeX corrects pagination. Both source editors offer syntax highlighting and completions. See the [compiler dependencies and Go API](docs/typeset-preview.md).
 - **Markdown editing**: Live preview, source and split modes, with `/` for quick insertion.
 - **Rich content**: Tables, syntax highlighting, math formulas, Mermaid diagrams, callouts and text colors.
 - **File management**: Type to locate files in the explorer, work in multiple tabs and edit large TXT / JSON files in segments.
 - **Save and restore**: Optional autosave and local Markdown snapshots, plus workspace and reading position restoration.
 - **Comfortable writing**: Light and dark themes, [custom color themes and fonts](docs/custom-themes.md) (guide in Chinese), optional fine typography and an always-on-top Markdown mini window.
-- **Export and preview**: Export HTML / PDF (paper size, margins, page numbers, header and footer, optional fine typography) / Word (.docx, with editable text and tables, formulas and diagrams as images), and Quick Look previews on macOS.
+- **Export and preview**: Export HTML / PDF (paper size, margins, page numbers, header and footer, optional fine typography) / Word (.docx, with editable text and tables, formulas and diagrams as images), and Finder Quick Look previews of Markdown and compiled LaTeX / Typst PDFs on macOS.
 
 See [release notes](https://github.com/ZeroDevi1/nomo-mygo/releases) for version changes.
 
 ## Development
 
-The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`); it is a pure Go project and needs no Node.js. Requires Go 1.27; the MyGo CLI is a tool dependency in `go.mod`, run with `go tool mygo`, and the app is configured in `mygo.json`.
+The interface is built with Go and the [MyGo](https://github.com/egoist/mygo) native UI (`desktop/`); it is a pure Go project and needs no Node.js. Requires Go 1.27.3 or later. the MyGo CLI is a tool dependency in `go.mod`, run with `go tool mygo`, and the app is configured in `mygo.json`.
 
 - macOS: Xcode Command Line Tools; building the Quick Look extension requires the full Xcode.
 

@@ -58,6 +58,7 @@ for SWIFT_TARGET_ARCH in "${SWIFT_TARGET_ARCHS[@]}"; do
   # desktop/ui/themes/builtin.go 的内置主题保持一致（两边同步维护）。
   xcrun swiftc \
     "$EXTENSION_SRC_DIR/PreviewViewController.swift" \
+    "$EXTENSION_SRC_DIR/TypesetPreview.swift" \
     "$EXTENSION_SRC_DIR/MarkdownRenderer.swift" \
     "$EXTENSION_SRC_DIR/BuiltinThemes.swift" \
     -emit-executable \
@@ -74,6 +75,7 @@ for SWIFT_TARGET_ARCH in "${SWIFT_TARGET_ARCHS[@]}"; do
     -o "$SLICE" \
     -framework Cocoa \
     -framework QuickLook \
+    -framework PDFKit \
     -framework QuickLookUI
   SLICES+=("$SLICE")
 done

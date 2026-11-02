@@ -1,5 +1,6 @@
 import Cocoa
 import Darwin
+import PDFKit
 import OSLog
 import QuickLookUI
 
@@ -8,16 +9,25 @@ private let appearanceLogger = Logger(
     category: "appearance"
 )
 
-/// 用原生 AppKit 文本视图展示 Markdown 文件的 Quick Look 预览控制器（渲染见 MarkdownRenderer）。
+/// 用原生 AppKit 文本视图展示 Markdown 和排版源文件的 Quick Look 预览控制器（渲染见 MarkdownRenderer）。
 ///
 /// 控制器由系统扩展进程通过 `NSExtensionPrincipalClass` 创建；渲染期间只读取传入文件与 Nomo 的
-/// 配置、用户主题，不写入任何文件，也不启动 WebKit 进程。无法生成预览时在面板内显示错误文字，
+/// 配置、用户主题。排版预览优先读取已编译的 PDF。无法生成预览时在面板内显示错误文字，
 /// 而不是让扩展进程退出。
 @objc(PreviewViewController)
 final class PreviewViewController: NSViewController, QLPreviewingController {
     /// 正文的只读文本视图（TextKit 1：`NSTextBlock` / `NSTextTable` 需要它）；在 `loadView()` 中创建。
     private var textView: NSTextView!
     private var scrollView: NSScrollView!
+
+    private var pdfPanel: NSView?
+    private var compileTask: Task<TypesetPreview.Snapshot?, Error>?
+    private var revision = 0
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        compileTask?.cancel()
+    }
 
     /// 正文最大宽度（pt）：面板更宽时左右留白居中，接近主应用的阅读宽度。
     private let maxContentWidth: CGFloat = 820
@@ -56,7 +66,11 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
         textView = tv
         scrollView = scroll
-        view = scroll
+        let root = NSView(frame: .zero)
+        scroll.frame = root.bounds
+        scroll.autoresizingMask = [.width, .height]
+        root.addSubview(scroll)
+        view = root
     }
 
     /// 面板尺寸变化时按最大宽度重新计算左右留白，使正文居中。
@@ -77,7 +91,40 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     /// - Throws: 为满足 `QLPreviewingController` 协议保留；当前实现不向系统抛出。
     @MainActor
     func preparePreviewOfFile(at url: URL) async throws {
+        _ = view
+        revision += 1
+        let request = revision
+        compileTask?.cancel()
+        compileTask = nil
+        pdfPanel?.removeFromSuperview()
+        pdfPanel = nil
+        scrollView.isHidden = false
         do {
+            if ["tex", "typ"].contains(url.pathExtension.lowercased()) {
+                textView.string = "正在读取预览…"
+                let cache = try resolveUserHomeDirectory().appendingPathComponent("Library/Caches/com.nomo.desktop/QuickLookPDF")
+                let task = Task.detached(priority: .userInitiated) { try TypesetPreview.load(url, cacheDirectory: cache) }
+                compileTask = task
+                defer { if request == revision { compileTask = nil } }
+                let snapshot = try await withTaskCancellationHandler(operation: {
+                    try await task.value
+                }, onCancel: { task.cancel() })
+                guard request == revision, !Task.isCancelled else { return }
+                if let snapshot, let pdf = PDFDocument(data: snapshot.data), pdf.pageCount > 0 {
+                    showPDF(pdf, caption: snapshot.caption)
+                    appearanceLogger.notice("Prepared typeset preview with \(pdf.pageCount, privacy: .public) pages")
+                } else {
+                    let f = try FileHandle(forReadingFrom: url)
+                    defer { try? f.close() }
+                    let limit = 256 * 1024
+                    let bytes = try f.read(upToCount: limit + 1) ?? Data()
+                    let prefix = Data(bytes.prefix(limit))
+                    let source = (try? decodeText(prefix)) ?? String(decoding: prefix, as: UTF8.self)
+                    textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+                    textView.string = "源码预览 · 在 Nomo 中预览或导出已保存的文档后，此处可查看分页 PDF。\n\n" + source + (bytes.count > limit ? "\n…（源码已截断）" : "")
+                }
+                return
+            }
             let markdown = try readMarkdown(url)
             let options = previewOptions()
             let dark = isDark(options.themeMode)
@@ -97,6 +144,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
                 }
                 return RenderedText(text)
             }.value.text
+            guard request == revision, !Task.isCancelled else { return }
             let background = palette.color("documentBackground")
             scrollView.backgroundColor = background
             textView.backgroundColor = background
@@ -105,15 +153,49 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
             textView.selectedTextAttributes = [.backgroundColor: palette.color("selection")]
             textView.textStorage?.setAttributedString(rendered)
         } catch {
-            showError(error)
+            if request == revision && !(error is CancellationError) {
+                appearanceLogger.error("Preview failed: \(error.localizedDescription, privacy: .private)")
+                showError(error)
+            }
         }
+    }
+
+    private func showPDF(_ document: PDFDocument, caption: String) {
+        let panel = NSView(frame: view.bounds)
+        panel.autoresizingMask = [.width, .height]
+        let label = NSTextField(labelWithString: caption)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        let pdf = PDFView()
+        pdf.displayMode = .singlePageContinuous
+        pdf.displayDirection = .vertical
+        pdf.document = document
+        pdf.autoScales = true
+        for subview in [label, pdf] {
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            panel.addSubview(subview)
+        }
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
+            label.topAnchor.constraint(equalTo: panel.topAnchor, constant: 4),
+            pdf.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+            pdf.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            pdf.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            pdf.bottomAnchor.constraint(equalTo: panel.bottomAnchor)
+        ])
+        scrollView.isHidden = true
+        view.addSubview(panel)
+        pdfPanel = panel
     }
 
     // MARK: - 读取
 
     /// 按 UTF-8（含 BOM）、UTF-16 BOM、GB18030 的顺序解码，与主应用支持的编码一致。
     private func readMarkdown(_ url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
+        try decodeText(Data(contentsOf: url))
+    }
+
+    private func decodeText(_ data: Data) throws -> String {
         if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]), let s = String(data: data, encoding: .utf16) {
             return s
         }

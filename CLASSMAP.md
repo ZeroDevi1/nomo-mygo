@@ -52,6 +52,9 @@
 | 上下标语法（^上标^、~下标~） | `desktop/ui/mdedit/script.go` | `projection.go`（`text`、删除线改判）, `api.go`（`toggleScript`）, `desktop/ui/shell/export.go`（`ExpandScripts`） | 修改上下标与 GFM 删除线的分工规则、工具栏写法、导出改写 |
 | 内嵌 SVG 显示 | `desktop/ui/mdedit/imageview.go`（`svgDataURI`、`svgElementEnd`） | `projection.go`（`svgClose`）, `images.go`（data URI 解码） | 修改 HTML 块与段落内 `<svg>` 作为图片显示的识别规则 |
 | 导出 HTML 安全清理 | `desktop/ui/shell/sanitize.go` | `export.go`（`exportDocument`） | 修改导出时去掉的元素、属性与 URL 协议 |
+| LaTeX / Typst 编译、预览与 PDF 导出 | `desktop/typeset/session.go`（Go 接口）、`anchor.go`（PDF 段落定位）、`inverse.go`（点击文字反查源码行）、`paragraph.go`（段落转译与 Typst watch） | `desktop/ui/shell/compile.go`（快照、异步取消与双栏）、`export.go`（保存对话框） | 修改编译器、段落快览、整页校正或导出流程 |
+| 排版扩展注册与设置 | `desktop/provider/provider.go`、`desktop/providers/builtin.go` | `desktop/ui/shell/providers.go`、`settings.go` | 新增语言包、绑定可选能力与处理开关 |
+| LaTeX / Typst 语法提示 | `desktop/providers/typesetting/syntax.go` | `tab.go`（编辑器绑定） | 修改词法高亮、内置签名、文档声明补全与括号匹配 |
 | 源码模式 HTML 补全 | `desktop/ui/shell/htmlcomplete.go` | `desktop/ui/mdedit/api.go`（`Document.CodeAt`） | 修改标签/属性/CSS 补全项与触发条件 |
 | 双栏模式 | `desktop/ui/shell/split.go` | `tab.go`（双向同步）, `desktop/ui/mdedit/api.go`（`TopSourceOffset`、`ScrollToSource`） | 修改双栏布局、比例保存、活动一侧与滚动同步 |
 | 组合标签 | `desktop/ui/shell/compare.go` | `view.go`（标签栏、右键菜单）, `tab.go`（`partner`） | 修改组合/解散/交换、并排显示与活动文档 |
@@ -84,7 +87,7 @@
 | 历史快照窗口 | `desktop/ui/shell/snapshots.go` | `desktop/internal/config/snapshot.go`（`ListSnapshots`） | 修改快照列表、预览与恢复 |
 | 工作区恢复与恢复副本、首次示例文档 | `desktop/ui/shell/workspace.go` | `shell.go`（`New`、关闭流程）, `desktop/native.go`（`resolveSampleDocument`） | 修改设置 `nativeWorkspace` 的结构、副本写入时机与冲突处理、示例文档条件 |
 | Windows 文件关联与右键菜单 | `desktop/windows_integration_windows.go` | `desktop/windows_integration.go`（接入外壳）, `desktop/ui/shell/winintegration.go`（设置页） | 修改注册表写入、MSIX 包内右键菜单开关、设置页按钮 |
-| 大纲面板（可折叠树、默认展开层级） | `desktop/ui/shell/outline.go` | `view.go`（`outline`） | 修改大纲可见项、展开箭头与默认层级 |
+| 大纲面板（Markdown 标题、排版源码标题与 PDF 书签） | `desktop/ui/shell/outline.go` | `view.go`（`outline`）、`typesetoutline.go`（源码标题）、`desktop/typeset/outline.go`（PDF 书签） | 修改大纲可见项、展开箭头与默认层级 |
 | 快捷插入菜单 | `desktop/ui/shell/quickinsert.go` | `desktop/ui/mdedit/api.go`（`CaretRect`、`Delete`、`Intercept`） | 修改触发条件、菜单项与键盘操作 |
 | 原生表情建议与选择器 | `desktop/ui/shell/emoji.go` | `desktop/internal/emoji`, `desktop/ui/mdedit/api.go`（`CaretContext`、`Replace`）, `Document.InputVersion` | 修改冒号建议的弹出与排除条件、键盘操作、选择器分类/网格/搜索、插入目标校验 |
 | 图片粘贴、拖放与插入 | `desktop/ui/shell/images.go` | `desktop/internal/imageasset`, `mdedit` `PasteData` | 修改图片导入策略、PicGo 上传、插入的 Markdown / HTML |
@@ -138,7 +141,7 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| macOS 扩展入口 | `desktop/packaging/macos/NomoQuickLookPreview/PreviewViewController.swift` | `MarkdownRenderer.swift`, `BuiltinThemes.swift` | 读取文件、Nomo 设置与用户主题，用 NSTextView 显示原生渲染结果 |
+| macOS 扩展入口 | `desktop/packaging/macos/NomoQuickLookPreview/PreviewViewController.swift` | `MarkdownRenderer.swift`, `BuiltinThemes.swift` | 读取文件、Nomo 设置与用户主题，Markdown 使用 NSTextView；LaTeX / Typst 通过 `TypesetPreview.swift` 和 `desktop/typeset/quicklook.go` 读取编译快照，用 PDFKit 连续分页显示 |
 | Quick Look 原生 Markdown 渲染 | `desktop/packaging/macos/NomoQuickLookPreview/MarkdownRenderer.swift` | `PreviewViewController.swift` | 修改 PresentationIntent 到富文本的映射（标题、列表、引用 / 提示块、代码、表格、图片）、行内 HTML 样式、公式与上下标的预处理、元数据卡片、大文件截断（`previewLimit`） |
 
 ### 软件更新

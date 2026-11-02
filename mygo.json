@@ -19,6 +19,32 @@
       "CFBundleDevelopmentRegion": "en",
       "CFBundleLocalizations": ["en", "zh-Hans", "zh-Hant", "ja"],
       "CFBundlePlugIns": ["Contents/PlugIns/NomoQuickLookPreview.appex"],
+      "UTImportedTypeDeclarations": [
+        {
+          "UTTypeIdentifier": "public.tex",
+          "UTTypeDescription": "TeX Document",
+          "UTTypeConformsTo": [
+            "public.plain-text"
+          ],
+          "UTTypeTagSpecification": {
+            "public.filename-extension": [
+              "tex"
+            ]
+          }
+        },
+        {
+          "UTTypeIdentifier": "org.typst.document",
+          "UTTypeDescription": "Typst Document",
+          "UTTypeConformsTo": [
+            "public.plain-text"
+          ],
+          "UTTypeTagSpecification": {
+            "public.filename-extension": [
+              "typ"
+            ]
+          }
+        }
+      ],
       "UTExportedTypeDeclarations": [
         {
           "UTTypeIdentifier": "net.daringfireball.markdown",

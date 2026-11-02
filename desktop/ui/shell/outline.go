@@ -12,7 +12,7 @@ func (s *Shell) outlineExpanded(tab *Tab, hs []mdedit.Heading, i int) bool {
 // outlineRows 返回大纲中可见的标题序号：所有上级标题都展开时可见（原版大纲树按默认层级展开）。按大纲版本、
 // 折叠状态与默认层级缓存，每帧 O(1)，变化后 O(标题数)。
 func (s *Shell) outlineRows(tab *Tab, hs []mdedit.Heading) []int {
-	if len(tab.outFold) > 0 && len(tab.outline) != tab.outFoldCount {
+	if len(tab.outFold) > 0 && len(hs) != tab.outFoldCount {
 		tab.outFold, tab.outFoldGen = nil, tab.outFoldGen+1 // 标题增删后序号对不上，回到默认
 	}
 	tab.outFoldCount = len(hs)

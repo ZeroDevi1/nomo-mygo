@@ -109,7 +109,7 @@ func (s *Shell) comparisonView(c *ui.Context, left, right *Tab) (active ui.Eleme
 					}
 				})
 				if s.mode() == modeSource {
-					ui.Row(ck).Grow(1).FillWidth().Padding(8, 0, 0, 12).Children(func() {
+					ui.Row(ck).Grow(1).FillWidth().Justify(ui.Center).Padding(8, 0, 0, 0).Children(func() {
 						st := t.Source()
 						if st.OnCompletion == nil {
 							st.OnCompletion = func(req editor.CompletionRequest) { s.sourceEmojiCompletion(t, req) }
@@ -117,7 +117,7 @@ func (s *Shell) comparisonView(c *ui.Context, left, right *Tab) (active ui.Eleme
 						if st.Focused() {
 							s.focusComparisonMember(t)
 						}
-						editor.View(ck, st).Fill()
+						els[k] = s.sourceEditor(ck, t)
 					})
 					return
 				}

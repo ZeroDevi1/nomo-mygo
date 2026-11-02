@@ -4,6 +4,13 @@
 package shell
 
 var msgZhCN = map[string]string{
+	"typesetProviders":                      "排版扩展",
+	"providerSyntax":                        "语法高亮与补全",
+	"providerPreview":                       "编译预览与 PDF 导出",
+	"compiledPage":                          "编译后的页面",
+	"inlineDraft":                           "原位段落试排",
+	"liveParagraph":                         "Typst 段落试排 · 以整页为准",
+	"compiling":                             "编译中…",
 	"mygoRepository":                        "MyGo 版仓库",
 	"originalRepository":                    "原版 Nomo 仓库",
 	"mygoEditionDescription":                "此版本基于原版 Nomo（Tauri）用 Go 与 MyGo 原生界面重写。",
@@ -1005,6 +1012,13 @@ var msgZhCN = map[string]string{
 }
 
 var msgZhTW = map[string]string{
+	"typesetProviders":                      "排版擴充",
+	"providerSyntax":                        "語法醒目提示與補全",
+	"providerPreview":                       "編譯預覽與 PDF 匯出",
+	"compiledPage":                          "編譯後的頁面",
+	"inlineDraft":                           "原位段落試排",
+	"liveParagraph":                         "Typst 段落試排 · 以整頁為準",
+	"compiling":                             "編譯中…",
 	"mygoRepository":                        "MyGo 版儲存庫",
 	"originalRepository":                    "原版 Nomo 儲存庫",
 	"mygoEditionDescription":                "此版本基於原版 Nomo（Tauri）以 Go 與 MyGo 原生介面重寫。",
@@ -2002,6 +2016,13 @@ var msgZhTW = map[string]string{
 }
 
 var msgEnUS = map[string]string{
+	"typesetProviders":                      "Typesetting extensions",
+	"providerSyntax":                        "Syntax highlighting and completion",
+	"providerPreview":                       "Compile preview and PDF export",
+	"compiledPage":                          "Compiled page",
+	"inlineDraft":                           "Inline paragraph draft",
+	"liveParagraph":                         "Typst paragraph draft · updating page",
+	"compiling":                             "Compiling…",
 	"mygoRepository":                        "MyGo edition repository",
 	"originalRepository":                    "Original Nomo repository",
 	"mygoEditionDescription":                "This edition is a rewrite of the original Nomo (Tauri) in Go with the MyGo native UI.",
@@ -2999,6 +3020,13 @@ var msgEnUS = map[string]string{
 }
 
 var msgJaJP = map[string]string{
+	"typesetProviders":                      "組版拡張",
+	"providerSyntax":                        "構文強調と入力補完",
+	"providerPreview":                       "コンパイルプレビューと PDF 書き出し",
+	"compiledPage":                          "コンパイル済みページ",
+	"inlineDraft":                           "段落の仮組み",
+	"liveParagraph":                         "Typst 段落プレビュー · ページを更新中",
+	"compiling":                             "コンパイル中…",
 	"mygoRepository":                        "MyGo 版リポジトリ",
 	"originalRepository":                    "オリジナル版 Nomo リポジトリ",
 	"mygoEditionDescription":                "このエディションはオリジナル版 Nomo（Tauri）を Go と MyGo のネイティブ UI で書き直したものです。",

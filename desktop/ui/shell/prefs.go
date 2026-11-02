@@ -18,42 +18,45 @@ import (
 //
 // 由主窗口与设置窗口共享（同一进程、同一 UI 线程）；修改后调用 Store 写盘。
 type Prefs struct {
-	ThemeMode                   string  `json:"themeMode"`
-	InterfaceLanguage           string  `json:"interfaceLanguage"`
-	EditorMode                  string  `json:"editorMode"`
-	SplitViewLayout             string  `json:"splitViewLayout"`  // 双栏左右：semantic-source（语义在左）或 source-semantic
-	SplitLeftPercent            float64 `json:"splitLeftPercent"` // 双栏左侧宽度百分比，25–75
-	AutoSaveEnabled             bool    `json:"autoSaveEnabled"`
-	AutoSaveDelayMs             float64 `json:"autoSaveDelayMs"`
-	CreateSnapshotBeforeSave    bool    `json:"createSnapshotBeforeSave"`
-	FontSize                    float64 `json:"fontSize"`
-	LineHeight                  float64 `json:"lineHeight"`
-	TypographyEnabled           bool    `json:"typographyEnabled"`
-	ContentWidthPercent         float64 `json:"contentWidthPercent"`
-	LargeDocumentLimit          float64 `json:"largeDocumentLimit"`
-	DocumentStyleID             string  `json:"documentStyleId"`
-	OpenDefaultBehavior         string  `json:"openDefaultBehavior"`
-	FilePreviewEnabled          bool    `json:"filePreviewEnabled"`
-	CloseWindowBehavior         string  `json:"closeWindowBehavior"`
-	ExternalFileChangeBehavior  string  `json:"externalFileChangeBehavior"`
-	SidebarHidden               bool    `json:"sidebarHidden"`
-	ToolbarHidden               bool    `json:"toolbarHidden"`
-	OutlineVisible              bool    `json:"outlineVisible"`
-	WritingStatsVisible         bool    `json:"writingStatsVisible"`
-	WritingStatsMetric          string  `json:"writingStatsMetric"`
-	ReadingTimeVisible          bool    `json:"readingTimeVisible"`
-	DefaultCodeBlockLanguage    string  `json:"defaultCodeBlockLanguage"`
-	DefaultDiagramType          string  `json:"defaultDiagramType"`
-	ZoomPercent                 float64 `json:"zoomPercent"`
-	CtrlWheelZoomEnabled        bool    `json:"ctrlWheelZoomEnabled"`
-	OutlineDefaultExpandLevel   float64 `json:"outlineDefaultExpandLevel"`
-	CodeBlockLineNumbersVisible bool    `json:"codeBlockLineNumbersVisible"`
-	CodeBlockIndent             string  `json:"codeBlockIndent"`
-	InlineCodeRenderingEnabled  bool    `json:"inlineCodeRenderingEnabled"`
-	CopyMarkdownSyntaxEnabled   bool    `json:"copyMarkdownSyntaxEnabled"`
-	RenderMode                  string  `json:"renderMode"`
-	DeveloperMode               bool    `json:"developerMode"`
-	SoftwareUpdateAutoCheck     bool    `json:"softwareUpdateAutoCheckEnabled"`
+	DisabledProviders           map[string]bool `json:"disabledProviders"`
+	ProviderSyntax              bool            `json:"providerSyntax"`
+	ProviderPreview             bool            `json:"providerPreview"`
+	ThemeMode                   string          `json:"themeMode"`
+	InterfaceLanguage           string          `json:"interfaceLanguage"`
+	EditorMode                  string          `json:"editorMode"`
+	SplitViewLayout             string          `json:"splitViewLayout"`  // 双栏左右：semantic-source（语义在左）或 source-semantic
+	SplitLeftPercent            float64         `json:"splitLeftPercent"` // 双栏左侧宽度百分比，25–75
+	AutoSaveEnabled             bool            `json:"autoSaveEnabled"`
+	AutoSaveDelayMs             float64         `json:"autoSaveDelayMs"`
+	CreateSnapshotBeforeSave    bool            `json:"createSnapshotBeforeSave"`
+	FontSize                    float64         `json:"fontSize"`
+	LineHeight                  float64         `json:"lineHeight"`
+	TypographyEnabled           bool            `json:"typographyEnabled"`
+	ContentWidthPercent         float64         `json:"contentWidthPercent"`
+	LargeDocumentLimit          float64         `json:"largeDocumentLimit"`
+	DocumentStyleID             string          `json:"documentStyleId"`
+	OpenDefaultBehavior         string          `json:"openDefaultBehavior"`
+	FilePreviewEnabled          bool            `json:"filePreviewEnabled"`
+	CloseWindowBehavior         string          `json:"closeWindowBehavior"`
+	ExternalFileChangeBehavior  string          `json:"externalFileChangeBehavior"`
+	SidebarHidden               bool            `json:"sidebarHidden"`
+	ToolbarHidden               bool            `json:"toolbarHidden"`
+	OutlineVisible              bool            `json:"outlineVisible"`
+	WritingStatsVisible         bool            `json:"writingStatsVisible"`
+	WritingStatsMetric          string          `json:"writingStatsMetric"`
+	ReadingTimeVisible          bool            `json:"readingTimeVisible"`
+	DefaultCodeBlockLanguage    string          `json:"defaultCodeBlockLanguage"`
+	DefaultDiagramType          string          `json:"defaultDiagramType"`
+	ZoomPercent                 float64         `json:"zoomPercent"`
+	CtrlWheelZoomEnabled        bool            `json:"ctrlWheelZoomEnabled"`
+	OutlineDefaultExpandLevel   float64         `json:"outlineDefaultExpandLevel"`
+	CodeBlockLineNumbersVisible bool            `json:"codeBlockLineNumbersVisible"`
+	CodeBlockIndent             string          `json:"codeBlockIndent"`
+	InlineCodeRenderingEnabled  bool            `json:"inlineCodeRenderingEnabled"`
+	CopyMarkdownSyntaxEnabled   bool            `json:"copyMarkdownSyntaxEnabled"`
+	RenderMode                  string          `json:"renderMode"`
+	DeveloperMode               bool            `json:"developerMode"`
+	SoftwareUpdateAutoCheck     bool            `json:"softwareUpdateAutoCheckEnabled"`
 	// PDF 排版（原生版新增，Todo“PDF 排版设置”）：纸张、方向、四边相同的页边距（毫米，10–40）、页眉页脚文字模板
 	// （{title}、{date}）、页码位置（none / center / right）与一级标题前分页。
 	PDFPaperSize     string  `json:"pdfPaperSize"`
@@ -99,7 +102,7 @@ var defaultShortcuts = map[string]string{
 
 // defaultPrefs 与原版 DEFAULT_APP_PREFERENCES 一致。
 func defaultPrefs() Prefs {
-	return Prefs{
+	return Prefs{ProviderSyntax: true, ProviderPreview: true,
 		ThemeMode: "system", InterfaceLanguage: "system", EditorMode: modeSemantic,
 		SplitViewLayout: "semantic-source", SplitLeftPercent: 50,
 		AutoSaveDelayMs: 1000, CreateSnapshotBeforeSave: true, FontSize: 16, LineHeight: 1.75,
@@ -119,7 +122,7 @@ func defaultPrefs() Prefs {
 
 // prefKeys 列出每个字段的设置键与读写入口（逐键存储，未写过的键保持默认值）。
 func (p *Prefs) fields() map[string]any {
-	return map[string]any{
+	return map[string]any{"disabledProviders": &p.DisabledProviders, "providerSyntax": &p.ProviderSyntax, "providerPreview": &p.ProviderPreview,
 		"themeMode": &p.ThemeMode, "interfaceLanguage": &p.InterfaceLanguage, "editorMode": &p.EditorMode,
 		"splitViewLayout": &p.SplitViewLayout, "splitLeftPercent": &p.SplitLeftPercent,
 		"autoSaveEnabled": &p.AutoSaveEnabled, "autoSaveDelayMs": &p.AutoSaveDelayMs,

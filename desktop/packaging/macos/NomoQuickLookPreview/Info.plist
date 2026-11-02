@@ -35,6 +35,9 @@
       <array>
         <string>net.daringfireball.markdown</string>
         <string>public.markdown</string>
+        <string>public.tex</string>
+        <string>org.tug.tex</string>
+        <string>org.typst.document</string>
       </array>
       <key>QLIsDataBasedPreview</key>
       <false/>

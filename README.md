@@ -76,16 +76,17 @@ scoop install nomo-mygo/nomo-mygo
 
 - **Markdown 编辑**：即时预览、源码与双栏模式，输入 `/` 快速插入内容。
 - **丰富内容**：支持表格、代码高亮、数学公式、Mermaid 图表、提示块与文字颜色。
+- **LaTeX / Typst**：打开可信的 `.tex` 或 `.typ` 主文件，可切换预览、源码与双栏，在预览正文上点击定位源码行，也可从文件菜单导出未保存版本的 PDF。LaTeX 正文可在 PDF 原位置实时试排，再由 XeLaTeX 校正分页；两种源码均支持语法高亮与补全。依赖、Go 接口与适用范围见[编译预览](docs/typeset-preview.md)。
 - **文件管理**：文件树键入定位、多标签，以及 TXT / JSON 大文件分段编辑。
 - **保存与恢复**：可启用自动保存和 Markdown 本地快照，恢复工作区与阅读位置。
 - **舒适写作**：浅深色主题、[自定义配色主题与字体](docs/custom-themes.md)、可手动开启的精细排版，以及可置顶的 Markdown 小窗。
-- **导出与预览**：导出 HTML / PDF（可设纸张、边距、页码与页眉页脚，可选精细排版）/ Word（.docx，正文与表格可编辑，公式与图表转为图片）；macOS 支持 Quick Look 快速预览。
+- **导出与预览**：导出 HTML / PDF（可设纸张、边距、页码与页眉页脚，可选精细排版）/ Word（.docx，正文与表格可编辑，公式与图表转为图片）；macOS 的 Finder 空格预览支持 Markdown，以及已编译的 LaTeX / Typst 分页 PDF。
 
 版本变化请查看[更新记录](https://github.com/ZeroDevi1/nomo-mygo/releases)。
 
 ## 开发
 
-界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`），纯 Go 项目，不需要 Node.js。需要 Go 1.27；MyGo 命令行作为 `go.mod` 中的工具依赖，经 `go tool mygo` 运行，应用配置在 `mygo.json`。
+界面由 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建（`desktop/`），纯 Go 项目，不需要 Node.js。需要 Go 1.27.3 或更新版本。MyGo 命令行作为 `go.mod` 中的工具依赖，经 `go tool mygo` 运行，应用配置在 `mygo.json`。
 
 - macOS：Xcode Command Line Tools；构建 Quick Look 扩展需要完整 Xcode。
 

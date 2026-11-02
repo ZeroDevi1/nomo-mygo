@@ -12,10 +12,10 @@ import (
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/config"
 	"nomo/desktop/ui/icons"
+	"nomo/desktop/ui/mdedit"
 )
 
 // 外壳版式。
@@ -28,6 +28,9 @@ const (
 )
 
 func (s *Shell) view(c *ui.Context) {
+	if p := s.compile; p != nil && (s.previewProvider(p.tab) == nil || p.tab != s.activeTab() || p.tab.Path != p.path || p.tab.partner != 0 || s.mini.active) {
+		s.closeCompile()
+	}
 	s.applyTheme(c)
 	t := c.Theme()
 	s.ch = s.pf.chrome(t, c.Vibrancy())
@@ -44,6 +47,7 @@ func (s *Shell) view(c *ui.Context) {
 		if s.mode() == modeSource {
 			tab.syncFromSource()
 		}
+		s.applyProviderSyntax(tab)
 		s.applyEditorStyle(tab)
 	}
 	s.applyDocumentAppearance(c, tab)
@@ -477,15 +481,31 @@ func (s *Shell) documentTools(c *ui.Context) {
 	if t == nil {
 		return
 	}
-	modes := []string{modeSemantic, modeSource, modeSplit}
-	mode := 0
-	for k, m := range modes {
-		if s.prefs.EditorMode == m {
-			mode = k
+	modes := [...]string{modeSemantic, modeSource, modeSplit}
+	md := t.Kind() == kindMarkdown
+	pr := s.previewProvider(t)
+	if md || pr != nil && pr.Open != nil && t.partner == 0 && !s.mini.active {
+		mode := 0
+		if md {
+			mode = max(0, slices.Index(modes[:], s.prefs.EditorMode))
+		} else {
+			switch t.typesetMode {
+			case typesetSource:
+				mode = 1
+			case typesetSplit:
+				mode = 2
+			}
 		}
-	}
-	if t.Kind() == kindMarkdown && ui.Segmented(c, &mode, s.tr("semanticEditing"), s.tr("sourceMode"), s.tr("splitMode")).FontSize(12).Changed() {
-		s.setMode(modes[mode])
+		if ui.Segmented(c, &mode, s.tr("semanticEditing"), s.tr("sourceMode"), s.tr("splitMode")).FontSize(12).Changed() {
+			if md {
+				s.setMode(modes[mode])
+			} else {
+				t.typesetMode = [...]int{typesetPreview, typesetSource, typesetSplit}[mode]
+				if t.typesetMode == typesetSource {
+					s.closeCompile()
+				}
+			}
+		}
 	}
 	ui.Box(c).Width(6)
 	// 查找栏开着时再点一次关闭（与“完成”、Esc 相同）。
@@ -599,14 +619,7 @@ func (s *Shell) document(c *ui.Context) {
 				s.linkPopover(c, tab, el)
 				s.emojiSuggest(c, tab, el)
 			} else if s.mode() == modeSource {
-				// 与语义模式同宽居中（原版源码模式同样受内容宽度约束）。
-				ui.Row(ck).Grow(1).Fill().Justify(ui.Center).Padding(16, 0, 0, 0).Children(func() {
-					st := tab.Source()
-					if st.OnCompletion == nil && tab.Kind() == kindMarkdown {
-						st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(tab, req) }
-					}
-					el = editor.View(ck, st).Fill().MaxWidth(820)
-				})
+				el = s.sourceDocument(ck, tab)
 			} else {
 				el = s.editorView(ck, tab)
 				if r := el.Bounds(); r.W > 0 {
@@ -694,12 +707,24 @@ func (s *Shell) outline(c *ui.Context, tab *Tab) {
 				ui.Text(c, s.tr("documentOutline")).FontSize(11).Bold().TextColor(s.ch.muted)
 			})
 			// 虚拟列表：只为可见的标题建元素，万级标题的文档每帧成本与标题数无关。
-			hs := tab.Outline()
+			p := s.compile
+			pdf := p != nil && len(p.bookmarks) > 0
+			var hs []mdedit.Heading
+			if pdf {
+				hs = p.bookmarks
+			} else {
+				hs = tab.Outline()
+			}
 			rows := s.outlineRows(tab, hs)
 			// 当前章节：语义模式按阅读参考线（视口上部 20%，与大纲跳转的落点一致，滚动阅读时随之更新），
 			// 源码模式按光标。
 			at := tab.Doc.Sel.Head
-			if s.mode() != modeSource {
+			if pdf {
+				row, _ := p.list.Visible()
+				at = row + 1
+			} else if s.mode() == modeSource {
+				at = tab.Source().Cursor()
+			} else {
 				if off, ok := tab.Ed.ReadingSourceOffset(); ok {
 					at = off
 				}
@@ -744,8 +769,26 @@ func (s *Shell) outline(c *ui.Context, tab *Tab) {
 						}
 					})
 					if b.Clicked() {
-						tab.Ed.JumpTo(h.Pos)
-						s.focusEditor = true
+						switch {
+						case pdf:
+							p.list.ScrollTo(h.Pos-1, ui.Start)
+						case s.mode() == modeSource:
+							st := tab.Source()
+							line := st.Buffer.Snapshot().LineOf(h.Pos)
+							st.Select(h.Pos, h.Pos)
+							st.ScrollTo(line)
+							if p != nil && !p.busy && p.err == "" {
+								select {
+								case <-p.sections:
+								default:
+								}
+								p.sections <- line
+							}
+							s.focusEditor = true
+						default:
+							tab.Ed.JumpTo(h.Pos)
+							s.focusEditor = true
+						}
 					}
 				})
 			}).Grow(1).FillWidth().Padding(0, 0, 8, 0)
