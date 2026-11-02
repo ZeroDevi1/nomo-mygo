@@ -12,6 +12,7 @@ import (
 type Session interface {
 	Compile(context.Context, io.Reader) (int, error)
 	Page(context.Context, int) (image.Image, error)
+	PageAtSize(context.Context, int, int) (image.Image, error)
 	Close()
 }
 

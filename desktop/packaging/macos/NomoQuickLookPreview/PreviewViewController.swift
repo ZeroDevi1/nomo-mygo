@@ -101,7 +101,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         scrollView.isHidden = false
         do {
             if ["tex", "typ"].contains(url.pathExtension.lowercased()) {
-                textView.string = "正在读取预览…"
+                textView.string = ""
                 let cache = try resolveUserHomeDirectory().appendingPathComponent("Library/Caches/com.nomo.desktop/QuickLookPDF")
                 let task = Task.detached(priority: .userInitiated) { try TypesetPreview.load(url, cacheDirectory: cache) }
                 compileTask = task
@@ -117,11 +117,10 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
                     let f = try FileHandle(forReadingFrom: url)
                     defer { try? f.close() }
                     let limit = 256 * 1024
-                    let bytes = try f.read(upToCount: limit + 1) ?? Data()
-                    let prefix = Data(bytes.prefix(limit))
-                    let source = (try? decodeText(prefix)) ?? String(decoding: prefix, as: UTF8.self)
+                    let bytes = try f.read(upToCount: limit) ?? Data()
+                    let source = (try? decodeText(bytes)) ?? String(decoding: bytes, as: UTF8.self)
                     textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-                    textView.string = "源码预览 · 在 Nomo 中预览或导出已保存的文档后，此处可查看分页 PDF。\n\n" + source + (bytes.count > limit ? "\n…（源码已截断）" : "")
+                    textView.string = source
                 }
                 return
             }

@@ -55,14 +55,16 @@ func (s *Session) Close() {
 	os.RemoveAll(s.dir)
 }
 
+const MaxPageEdge = 5120
+
 // Page 渲染最近一次成功编译的指定页（从 1 起），长边上限 1400 像素。
 func (s *Session) Page(ctx context.Context, n int) (image.Image, error) {
 	return s.PageAtSize(ctx, n, 1400)
 }
 
-// PageAtSize 可降低小尺寸连续预览的栅格分辨率，避免在一屏显示多页时放大缓存。
+// PageAtSize 以指定的像素长边栅格化正式 PDF。
 func (s *Session) PageAtSize(ctx context.Context, n, edge int) (image.Image, error) {
-	if n < 1 || n > s.pages || edge < 1 || edge > 1400 {
+	if n < 1 || n > s.pages || edge < 1 || edge > MaxPageEdge {
 		return nil, errors.New("invalid page")
 	}
 	return renderPage(ctx, filepath.Join(s.dir, "pages", "current.pdf"), n, edge)

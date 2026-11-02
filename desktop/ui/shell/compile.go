@@ -2,7 +2,6 @@ package shell
 
 import (
 	"context"
-	"image"
 	"math"
 	"strings"
 	"time"
@@ -136,37 +135,18 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	return
 }
 
-// 只向编译协程提交一个可见页请求。每页长边最多 1400px，五张 RGBA 位图最多约 38 MiB。
+// 整页缓存的原始 RGBA 像素预算为 128 MiB；拖宽窗口时保留现有位图，待后台从 PDF 补绘。
 func (s *Shell) previewPages(c *ui.Context, p *compilePane, st *editor.State) {
 	first, last := p.list.Visible()
-	if !p.busy && p.err == "" && p.loading == 0 {
-		// 通常保留五页。极窄栏可同时露出更多页，按同一像素预算分配更多、较小的页图。
-		slots := 5
-		for slots < last-first+1 {
-			slots *= 2
-		}
-		if slots != p.cacheSlots {
-			p.cacheSlots = slots
-			p.cached = nil
-		}
-		edge := int(1400 * math.Sqrt(5/float64(slots)))
-
-		for row := max(0, first); row <= min(last, p.pages-1); row++ {
-			n := row + 1
-			if p.cached[n] == nil && n != p.page {
-				select {
-				case p.requests <- pageRequest{n, edge}:
-					p.loading = n
-				default:
-				}
-				break
-			}
-		}
+	slots := max(2, last-first+1)
+	if slots != p.cacheSlots && p.loading == 0 {
+		p.cached = nil
+		p.cacheSlots = slots
 	}
 	ui.List(c, &p.list, p.pages, func(row int) {
 		number := row + 1
 		bmp := p.cached[number]
-		if number == p.page {
+		if bmp == nil && number == p.page {
 			bmp = p.image
 		}
 		w, h := p.image.Size()
@@ -175,6 +155,29 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane, st *editor.State) {
 		}
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(0, 0, 8, 0).Children(func() {
 			frame := ui.Box(c).WidthPercent(float32(s.prefs.ContentWidthPercent)).AspectRatio(float32(w) / float32(h)).Clip()
+			frame.Draw(func(painter *ui.Painter, rect ui.Rect) {
+				if p.busy || p.err != "" || p.loading != 0 || row < first || row > last {
+					return
+				}
+				// Painter.Scale 已包含当前屏幕的 backing scale 与应用缩放。
+				pixels := int(math.Ceil(float64(max(rect.W, rect.H) * painter.Scale())))
+				limit := int(math.Sqrt(float64((128 << 20) / 4 / p.cacheSlots)))
+				edge := min(typeset.MaxPageEdge, limit, ((pixels+127)/128)*128)
+				if edge <= 0 {
+					return
+				}
+				if bmp != nil {
+					bw, bh := bmp.Size()
+					if max(bw, bh)+1 >= edge {
+						return
+					}
+				}
+				select {
+				case p.requests <- pageRequest{number, edge}:
+					p.loading = number
+				default:
+				}
+			})
 			frame.Children(func() {
 				if bmp == nil {
 					return
@@ -241,7 +244,7 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 	s.closeCompile()
 	ctx, cancel := context.WithCancel(context.Background())
 	initial := t.Source().Buffer.Snapshot()
-	p := &compilePane{provider: pr, tab: t, path: t.Path, version: initial.Version(), cancel: cancel, cacheSlots: 5, requests: make(chan pageRequest, 1), sections: make(chan int, 1), clicks: make(chan pageClick, 1), busy: true, split: 50}
+	p := &compilePane{provider: pr, tab: t, path: t.Path, version: initial.Version(), cancel: cancel, cacheSlots: 2, requests: make(chan pageRequest, 1), sections: make(chan int, 1), clicks: make(chan pageClick, 1), busy: true, split: 50}
 	buildCtx, cancelBuild := context.WithCancel(ctx)
 	p.lifetime = ctx
 	p.cancelBuild = cancelBuild
@@ -394,15 +397,7 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 		case request := <-p.requests:
 			n := request.number
 			if n >= 1 && n <= pages {
-				var img image.Image
-				var err error
-				if sized, ok := session.(interface {
-					PageAtSize(context.Context, int, int) (image.Image, error)
-				}); ok {
-					img, err = sized.PageAtSize(buildCtx, n, request.edge)
-				} else {
-					img, err = session.Page(buildCtx, n)
-				}
+				img, err := session.PageAtSize(buildCtx, n, request.edge)
 				if err != nil {
 					if buildCtx.Err() == nil {
 						return err

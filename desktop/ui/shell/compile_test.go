@@ -88,6 +88,24 @@ func TestCompiledPreview(t *testing.T) {
 			if narrow.W <= 0 || wide.W < narrow.W*1.98 || wide.W > narrow.W*2.02 {
 				t.Fatalf("PDF size at 45%% and 90%%: %v %v", narrow, wide)
 			}
+			// 对应 3840 × 1938 的 2× 显示器；首张快览也必须按实际纸面重新栅格化。
+			tt.SetSize(1920, 969)
+			tt.SetScale(2)
+			wide, _ = tt.Find(s.tr("compiledPage"))
+			for {
+				bmp := s.compile.cached[1]
+				if bmp != nil {
+					w, h := bmp.Size()
+					if w >= int(2*wide.W)-1 && max(w, h) > 1400 {
+						t.Logf("Retina page: %.0f DIP, %d × %d px", wide.W, w, h)
+						break
+					}
+				}
+				wait()
+			}
+			tt.SetScale(1)
+			tt.SetSize(1200, 800)
+			tt.Frame()
 			snapshot(t, tt, "compile-"+tc.ext)
 			// 点击真实栅格页首个墨迹像素，覆盖两侧留白、文字命中和单栏到双栏的切换。
 			tt.Frame()
