@@ -179,6 +179,10 @@ if ($Mode -eq 'Store' -and $Configuration -ne 'Release') {
 }
 # 版本唯一来源是 mygo.json 的 version（mygo build 用同一字段写入可执行文件版本信息）。
 $appVersion = [string]$mygoConfig.version
+$appName = [string]$mygoConfig.name
+$appExeName = "$appName.exe"
+$installerPattern = "$($mygoConfig.slug)-setup-*.exe"
+$packageDisplayName = if ($Mode -eq 'Store') { [string]$identity.displayName } else { $appName }
 if ($appVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
     throw "MSIX 只接受稳定三段 SemVer，当前为：$appVersion"
 }
@@ -194,7 +198,7 @@ $msixVersion = $msixSegments -join '.'
 Reset-TaskDirectory $stagingRoot
 Reset-TaskDirectory $outputRoot
 
-# MyGo 构建输出目录（mygo.json 的 out）下的 windows-amd64：Nomo.exe、随包资源与 NSIS 安装包。
+# MyGo 构建输出目录（mygo.json 的 out）下的 windows-amd64：主程序、随包资源与 NSIS 安装包。
 $applicationTarget = Join-Path $repoRoot 'target\mygo\windows-amd64'
 if (-not $SkipApplicationBuild) {
     Push-Location $repoRoot
@@ -211,7 +215,7 @@ if (-not $SkipApplicationBuild) {
 
 & (Join-Path $PSScriptRoot 'Build-ShellExtension.ps1') -Configuration $Configuration -RunTests
 
-$applicationPath = Join-Path $applicationTarget 'Nomo.exe'
+$applicationPath = Join-Path $applicationTarget $appExeName
 if (-not (Test-Path -LiteralPath $applicationPath -PathType Leaf)) {
     throw "找不到本次 x64 MyGo 构建输出：$applicationPath"
 }
@@ -221,7 +225,7 @@ $applicationSha256 = (Get-FileHash -LiteralPath $applicationPath -Algorithm SHA2
 # NSIS 安装包不进 MSIX。
 Copy-Item -LiteralPath $applicationPath -Destination (Join-Path $stagingRoot 'nomo.exe')
 Get-ChildItem -LiteralPath $applicationTarget |
-    Where-Object { $_.Name -ne 'Nomo.exe' -and $_.Name -notlike 'Nomo Setup *.exe' } |
+    Where-Object { $_.Name -ne $appExeName -and $_.Name -notlike $installerPattern } |
     ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stagingRoot $_.Name) -Recurse }
 
 $shellOutput = Join-Path $repoRoot "desktop\packaging\windows-shell-extension\bin\x64\$Configuration"
@@ -230,7 +234,7 @@ Copy-Item -LiteralPath (Join-Path $shellOutput 'NomoShellExtension.dll') -Destin
 $manifest = Get-Content -LiteralPath $manifestTemplatePath -Raw
 $replacements = @{
     '{{PACKAGE_NAME}}' = [Security.SecurityElement]::Escape([string]$identity.name)
-    '{{DISPLAY_NAME}}' = [Security.SecurityElement]::Escape([string]$identity.displayName)
+    '{{DISPLAY_NAME}}' = [Security.SecurityElement]::Escape($packageDisplayName)
     '{{PUBLISHER}}' = [Security.SecurityElement]::Escape([string]$identity.publisher)
     '{{PUBLISHER_DISPLAY_NAME}}' = [Security.SecurityElement]::Escape([string]$identity.publisherDisplayName)
     '{{APPLICATION_ID}}' = [Security.SecurityElement]::Escape([string]$identity.applicationId)
@@ -274,11 +278,11 @@ $visualElementsNode = $manifestXml.SelectSingleNode(
 )
 if (
     -not $displayNameNode -or
-    $displayNameNode.InnerText -ne [string]$identity.displayName -or
+    $displayNameNode.InnerText -ne $packageDisplayName -or
     -not $publisherDisplayNameNode -or
     $publisherDisplayNameNode.InnerText -ne [string]$identity.publisherDisplayName -or
     -not $visualElementsNode -or
-    $visualElementsNode.DisplayName -ne [string]$identity.displayName
+    $visualElementsNode.DisplayName -ne $packageDisplayName
 ) {
     throw '生成的 AppxManifest.xml 显示名称验证失败。'
 }
@@ -304,7 +308,7 @@ $manifestFileTypes = @(
     $manifestXml.SelectNodes('//uap:FileTypeAssociation/uap:SupportedFileTypes/uap:FileType', $namespaceManager) |
         ForEach-Object { $_.InnerText }
 )
-$expectedFileTypes = @('.md', '.markdown', '.txt', '.json')
+$expectedFileTypes = @($mygoConfig.fileAssociations | ForEach-Object { $_.ext } | ForEach-Object { ".$_" })
 if (Compare-Object -ReferenceObject $expectedFileTypes -DifferenceObject $manifestFileTypes) {
     throw "生成的 AppxManifest.xml 文件关联不一致：$($manifestFileTypes -join ', ')"
 }
@@ -418,7 +422,7 @@ $report = [ordered]@{
     mode = $Mode
     identityState = [string]$identity.state
     packageName = [string]$identity.name
-    packageDisplayName = [string]$identity.displayName
+    packageDisplayName = $packageDisplayName
     publisher = [string]$identity.publisher
     publisherDisplayName = [string]$identity.publisherDisplayName
     configuredPackageFamilyName = $identity.packageFamilyName

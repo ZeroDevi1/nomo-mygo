@@ -1,6 +1,7 @@
 {
-  "name": "Nomo",
-  "identifier": "com.nomo.desktop",
+  "name": "Nomo Scholar",
+  "slug": "nomo",
+  "identifier": "com.nomo.scholar",
   "version": "0.8.1",
   "icon": "desktop/packaging/icons/nomo/source/nomo-app-light-1024.png",
   "main": "./desktop",
@@ -10,7 +11,9 @@
   "fileAssociations": [
     { "ext": ["md", "markdown"], "name": "Markdown Document", "mimeType": "text/markdown", "role": "Editor" },
     { "ext": ["txt"], "name": "Text Document", "mimeType": "text/plain", "role": "Editor" },
-    { "ext": ["json"], "name": "JSON Document", "mimeType": "application/json", "role": "Editor" }
+    { "ext": ["json"], "name": "JSON Document", "mimeType": "application/json", "role": "Editor" },
+    { "ext": ["tex", "ltx"], "name": "LaTeX Source", "mimeType": "text/x-tex", "role": "Editor" },
+    { "ext": ["typ"], "name": "Typst Source", "mimeType": "text/x-typst", "role": "Editor" }
   ],
   "macos": {
     "minimumSystemVersion": "12.0",
@@ -19,29 +22,38 @@
       "CFBundleDevelopmentRegion": "en",
       "CFBundleLocalizations": ["en", "zh-Hans", "zh-Hant", "ja"],
       "CFBundlePlugIns": ["Contents/PlugIns/NomoQuickLookPreview.appex"],
+      "CFBundleDocumentTypes": [
+        { "CFBundleTypeName": "Markdown Document", "CFBundleTypeRole": "Editor", "LSHandlerRank": "Default", "LSItemContentTypes": ["net.daringfireball.markdown", "public.markdown"] },
+        { "CFBundleTypeName": "Text Document", "CFBundleTypeRole": "Editor", "LSHandlerRank": "Default", "LSItemContentTypes": ["public.plain-text"] },
+        { "CFBundleTypeName": "JSON Document", "CFBundleTypeRole": "Editor", "LSHandlerRank": "Default", "LSItemContentTypes": ["public.json"] },
+        { "CFBundleTypeName": "LaTeX Source", "CFBundleTypeRole": "Editor", "LSHandlerRank": "Alternate", "LSItemContentTypes": ["org.tug.tex", "org.tug.ltx", "public.tex"] },
+        { "CFBundleTypeName": "Typst Source", "CFBundleTypeRole": "Editor", "LSHandlerRank": "Alternate", "LSItemContentTypes": ["org.typst.document"] }
+      ],
       "UTImportedTypeDeclarations": [
         {
-          "UTTypeIdentifier": "public.tex",
-          "UTTypeDescription": "TeX Document",
-          "UTTypeConformsTo": [
-            "public.plain-text"
-          ],
+          "UTTypeIdentifier": "org.tug.tex",
+          "UTTypeDescription": "TeX Source",
+          "UTTypeConformsTo": ["public.plain-text"],
           "UTTypeTagSpecification": {
-            "public.filename-extension": [
-              "tex"
-            ]
+            "public.filename-extension": ["tex"],
+            "public.mime-type": ["text/x-tex"]
+          }
+        },
+        {
+          "UTTypeIdentifier": "org.tug.ltx",
+          "UTTypeDescription": "LaTeX Source",
+          "UTTypeConformsTo": ["public.plain-text"],
+          "UTTypeTagSpecification": {
+            "public.filename-extension": ["ltx"]
           }
         },
         {
           "UTTypeIdentifier": "org.typst.document",
-          "UTTypeDescription": "Typst Document",
-          "UTTypeConformsTo": [
-            "public.plain-text"
-          ],
+          "UTTypeDescription": "Typst Source",
+          "UTTypeConformsTo": ["public.plain-text"],
           "UTTypeTagSpecification": {
-            "public.filename-extension": [
-              "typ"
-            ]
+            "public.filename-extension": ["typ"],
+            "public.mime-type": ["text/x-typst"]
           }
         }
       ],

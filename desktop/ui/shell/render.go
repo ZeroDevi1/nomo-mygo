@@ -100,7 +100,7 @@ func (r *renderService) ensureLocked(ctx context.Context) error {
 	renderPageOnce.Do(func() { mygo.SetFrontend(render.FS()) })
 	loaded := make(chan error, 1)
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title: "Nomo Render", URL: render.PagePath, Width: renderViewport, Height: renderViewport,
+		Title: "Nomo Scholar Render", URL: render.PagePath, Width: renderViewport, Height: renderViewport,
 		Hidden: true, Frameless: true, SkipTaskbar: true,
 	})
 	page := win.Page()

@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"nomo/desktop/internal/config"
 	"nomo/desktop/internal/i18n"
 	"nomo/desktop/internal/imageasset"
 )
@@ -286,7 +287,7 @@ func (sw *settingsWindow) page(c *ui.Context) {
 			if icon != nil {
 				ui.Image(c, icon).Size(72, 72)
 			}
-			ui.Text(c, "Nomo").FontSize(20).Bold()
+			ui.Text(c, config.AppName).FontSize(20).Bold()
 			ui.Text(c, fmt.Sprintf("%s %s · %s/%s", s.tr("version"), s.version, runtime.GOOS, runtime.GOARCH)).TextColor(c.Theme().TextMuted)
 			ui.Text(c, s.tr("positioningDescription")).Wrap().TextColor(c.Theme().TextMuted)
 			ui.Text(c, s.tr("mygoEditionDescription")).Wrap().TextColor(c.Theme().TextMuted)

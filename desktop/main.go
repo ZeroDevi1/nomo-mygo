@@ -18,7 +18,8 @@ import (
 
 func main() {
 	started := time.Now()
-	dataDir, err := config.ResolveAppDataDir(appIdentifier)
+	mygo.App.SetName(config.AppName)
+	dataDir, err := config.ResolveAppDataDir(appDataIdentifier)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "定位应用数据目录失败：", err)
 		os.Exit(1)

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./desktop/packaging/icons/nomo/source/nomo-app-light-128.png" alt="Nomo 图标" width="60">
+  <img src="./desktop/packaging/icons/nomo/source/nomo-app-light-128.png" alt="Nomo Scholar 图标" width="60">
 </p>
 
-<h1 align="center">Nomo</h1>
+<h1 align="center">Nomo Scholar</h1>
 
 <p align="center">
   <a href="https://github.com/ZeroDevi1/nomo-mygo/releases/latest">
@@ -21,11 +21,11 @@
 </p>
 
 <p align="center">
-  <strong>一款本地优先的 Markdown 编辑器，让写作保持简单。</strong>
+  <strong>本地优先的学术写作编辑器，支持 Markdown、LaTeX 与 Typst。</strong>
 </p>
 
 > [!NOTE]
-> 本仓库是 **Nomo 的 MyGo 重写版**，不是原版 Nomo。
+> **Nomo Scholar** 基于原版 Nomo，使用 Go 与 MyGo 构建。
 >
 > - **原版 Nomo**：[nomo-md/nomo](https://github.com/nomo-md/nomo)，作者 [LIXianSenQwQ](https://github.com/LIXianSenQwQ)，基于 Tauri + Svelte，界面由 WebView 渲染。原版的问题、发布与 Homebrew 安装请到原版仓库。
 > - **MyGo 重写版（本仓库）**：[ZeroDevi1/nomo-mygo](https://github.com/ZeroDevi1/nomo-mygo)，沿用原版的功能、设置格式与界面设计，用 Go 与 MyGo 原生 UI 重写，不再依赖 WebView 与 Node.js。
@@ -58,8 +58,8 @@ brew install --cask zerodevi1/nomo-mygo/nomo-mygo
 
 升级用 `brew upgrade --cask nomo-mygo`，卸载用 `brew uninstall --cask nomo-mygo`（加 `--zap` 同时删除配置与草稿）。
 
-- 官方仓库中的 `nomo` cask 是原版（Tauri），与本版本安装同一个 `Nomo.app`，需先 `brew uninstall --cask nomo` 再安装。
-- 本版本暂未经过 Apple 公证，若提示“无法验证开发者”或“已损坏”，执行 `xattr -dr com.apple.quarantine /Applications/Nomo.app` 后再打开。
+- 原版 `nomo` cask 与本版共用配置和恢复目录。升级后仍读取 `~/Library/Application Support/com.nomo.desktop`。请先退出旧版，再打开 Nomo Scholar。
+- 本版本暂未经过 Apple 公证，若提示“无法验证开发者”或“已损坏”，对安装的应用执行 `xattr -dr com.apple.quarantine "/Applications/Nomo Scholar.app"` 后再打开。旧发行包使用 `/Applications/Nomo.app`。
 
 ### Scoop（Windows）
 
@@ -76,7 +76,8 @@ scoop install nomo-mygo/nomo-mygo
 
 - **Markdown 编辑**：即时预览、源码与双栏模式，输入 `/` 快速插入内容。
 - **丰富内容**：支持表格、代码高亮、数学公式、Mermaid 图表、提示块与文字颜色。
-- **LaTeX / Typst**：打开可信的 `.tex` 或 `.typ` 主文件，可切换预览、源码与双栏，在预览正文上点击定位源码行，也可从文件菜单导出未保存版本的 PDF。LaTeX 正文可在 PDF 原位置实时试排，再由 XeLaTeX 校正分页；两种源码均支持语法高亮与补全。依赖、Go 接口与适用范围见[编译预览](docs/typeset-preview.md)。
+- **LaTeX / Typst**：打开可信的 `.tex`、`.ltx` 或 `.typ` 主文件，可切换预览、源码与双栏，在预览正文上点击定位源码行，也可从文件菜单导出未保存版本的 PDF。LaTeX 正文可在 PDF 原位置实时试排，再由 XeLaTeX 校正分页；两种源码均支持语法高亮与补全。依赖、Go 接口与适用范围见[编译预览](docs/typeset-preview.md)。
+- **学术工作区**：在 LaTeX / Typst 工作区查找项目与 Zotero 文献、查看最近一次编辑的词级或行级差异，并审阅 Codex 的选区改写提议及可选 PDF 试排。见[使用说明](docs/nomo-scholar.md)。
 - **文件管理**：文件树键入定位、多标签，以及 TXT / JSON 大文件分段编辑。
 - **保存与恢复**：可启用自动保存和 Markdown 本地快照，恢复工作区与阅读位置。
 - **舒适写作**：浅深色主题、[自定义配色主题与字体](docs/custom-themes.md)、可手动开启的精细排版，以及可置顶的 Markdown 小窗。

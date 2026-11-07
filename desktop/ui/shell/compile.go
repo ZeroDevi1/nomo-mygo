@@ -3,12 +3,14 @@ package shell
 import (
 	"context"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
+	"nomo/desktop/internal/scholar"
 	"nomo/desktop/provider"
 	"nomo/desktop/typeset"
 	"nomo/desktop/ui/mdedit"
@@ -22,50 +24,67 @@ const (
 
 type pageRequest struct{ number, edge int }
 
+type sourcePageRequest struct {
+	line    int
+	text    string
+	version uint64
+}
+
 type pageClick struct {
 	page    int
 	version uint64
 	x, y    float64
 }
 type previewRevision struct {
-	snap editor.Snapshot
-	ctx  context.Context
+	snap    editor.Snapshot
+	ctx     context.Context
+	version uint64
+	project *scholarPreviewRevision
 }
 
 // 工作协程拥有编译会话；UI 只保留有限页缓存与一张临时段落位图。
 type compilePane struct {
-	provider    *provider.Descriptor
-	liveUpdates chan previewRevision
-	lifetime    context.Context
-	cancelBuild context.CancelFunc
-	anchor      typeset.PageAnchor
-	shown       uint64
-	inlineText  string
-	paragraph   *ui.Bitmap
-	stopped     bool
-	tab         *Tab
-	path        string
-	version     uint64
-	cancel      context.CancelFunc
-	list        ui.ListState
-	cached      map[int]*ui.Bitmap
-	loading     int
-	bookmarks   []mdedit.Heading
-	cacheSlots  int
-	requests    chan pageRequest
-	sections    chan int
-	clicks      chan pageClick
-	jump        func(int)
-	page, pages int
-	busy        bool
-	err         string
-	image       *ui.Bitmap
-	split       float32
+	provider                *provider.Descriptor
+	liveUpdates             chan previewRevision
+	lifetime                context.Context
+	cancelBuild             context.CancelFunc
+	anchor                  typeset.PageAnchor
+	shown                   uint64
+	fullVersion, fullSerial uint64
+	inlineText              string
+	paragraph               *ui.Bitmap
+	stopped                 bool
+	tab                     *Tab
+	path, sourcePath        string
+	project                 scholar.Project
+	projectInput            *scholarPreviewRevision
+	sourceVersion           uint64
+	version                 uint64
+	cancel                  context.CancelFunc
+	list                    ui.ListState
+	cached                  map[int]*ui.Bitmap
+	loading                 int
+	bookmarks               []mdedit.Heading
+	cacheSlots              int
+	requests                chan pageRequest
+	sections                chan sourcePageRequest
+	clicks                  chan pageClick
+	jump                    func(int)
+	jumpProject             func(typeset.ProjectLocation)
+	page, pages             int
+	busy                    bool
+	elapsed                 time.Duration
+	warnings                []typeset.Diagnostic
+	err                     string
+	image                   *ui.Bitmap
 }
 
 func (s *Shell) closeCompile() {
 	if p := s.compile; p != nil {
 		p.cancel()
+		if s.scholar != nil && s.scholar.bodyConfirmed != nil && s.scholar.bodyConfirmed.pane == p {
+			s.scholar.bodyConfirmed = nil
+		}
 		p.tab.outRows = nil
 		s.compile = nil
 	}
@@ -73,39 +92,57 @@ func (s *Shell) closeCompile() {
 
 func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	st := t.Source()
+	workspace := s.scholarForTab(t)
+	trial := workspace != nil && s.canPreviewTypeset(t) && workspace.agent.trial.show
+	if trial && t.typesetMode != typesetSource && workspace.agent.trial.compare {
+		s.closeCompile()
+		el = ui.Column(c).Fill()
+		el.Children(func() { s.scholarTrialPaper(c, workspace) })
+		return
+	}
 	if st.OnCompletion == nil && t.Kind() == kindMarkdown {
 		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(t, req) }
 	}
-	if t.typesetMode != typesetSource && s.compile == nil {
+	compact := workspace != nil && s.scholarCanvasWidth(c) < 620 && t.typesetMode == typesetSplit
+	wantPreview := s.canPreviewTypeset(t) && t.typesetMode != typesetSource &&
+		(!compact || workspace.compactPDF) && (s.scholar == nil || workspace != nil)
+	var project scholar.Project
+	if wantPreview && !trial {
+		project = s.typesetProject(t)
+	}
+	if p := s.compile; p != nil && (p.tab != t || !wantPreview || t.typesetPaused || trial || p.project != project) {
+		s.closeCompile()
+	}
+	if wantPreview && !t.typesetPaused && !trial && s.compile == nil {
 		s.openTypeset(t, true)
 	}
 	if p := s.compile; p != nil {
-		if p.liveUpdates != nil && !p.stopped && p.version != st.Buffer.Version() {
-			snap := st.Buffer.Snapshot()
-			select {
-			case <-p.liveUpdates:
-			default:
-			}
-			p.cancelBuild()
-			buildCtx, cancel := context.WithCancel(p.lifetime)
-			p.cancelBuild = cancel
-			p.liveUpdates <- previewRevision{snap, buildCtx}
-			p.version = snap.Version()
-			p.busy = true
+		if p.project.Root != "" {
+			s.updateProjectPreview(p)
+		} else if p.liveUpdates != nil && !p.stopped && p.version != st.Buffer.Version() {
+			s.queuePreview(p, previewRevision{snap: st.Buffer.Snapshot(), version: st.Buffer.Version()})
 		}
 	}
+
 	source := func() {
 		ui.Row(c).Grow(1).Fill().Justify(ui.Center).Padding(16, 0, 0, 0).Children(func() {
 			el = s.sourceEditor(c, t)
 		})
 	}
-	if p := s.compile; p != nil {
+	if p := s.compile; p != nil || wantPreview && (trial || t.typesetPaused) {
 		preview := func() {
+			if trial && s.scholarTrialPaper(c, workspace) {
+				return
+			}
 			ui.Column(c).Fill().MinWidth(0).Clip().Background(c.Theme().SurfaceHover).Padding(8).Gap(6).Children(func() {
-				if p.busy && p.image == nil {
+				if p == nil {
+					return
+				}
+				// 学术工作区的排版状态与错误详情由状态栏和诊断检查器呈现。
+				if workspace == nil && p.busy && p.image == nil {
 					ui.Text(c, s.tr("compiling"))
 				}
-				if p.err != "" {
+				if workspace == nil && p.err != "" {
 					el := ui.Scroll(c).FillWidth().MaxHeight(150)
 					el.Children(func() { ui.Text(c, p.err).Wrap() })
 				}
@@ -113,7 +150,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				if p.image == nil {
 					return
 				}
-				s.previewPages(c, p, st)
+				s.previewPages(c, p)
 				if p.paragraph != nil && p.anchor.Page == 0 {
 					ui.Column(c).Absolute().Bottom(12).Left(12).Right(12).Background(c.Theme().Surface).Padding(6).Gap(3).Children(func() {
 						ui.Text(c, s.tr("liveParagraph")).FontSize(12)
@@ -123,11 +160,20 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				}
 			})
 		}
-		if t.typesetMode == typesetPreview {
+		if t.typesetMode == typesetPreview || compact {
 			el = ui.Column(c).Fill()
 			el.Children(preview)
+		} else if !trial {
+			if t.typesetSplitPercent == 0 {
+				t.typesetSplitPercent = 50
+			}
+			ui.SplitPercent(c, &t.typesetSplitPercent, source, preview).Fill()
 		} else {
-			ui.SplitPercent(c, &p.split, source, preview).Fill()
+			v := &workspace.agent.trial
+			if v.split == 0 {
+				v.split = 50
+			}
+			ui.SplitPercent(c, &v.split, source, preview).Fill()
 		}
 	} else {
 		source()
@@ -136,7 +182,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 }
 
 // 整页缓存的原始 RGBA 像素预算为 128 MiB；拖宽窗口时保留现有位图，待后台从 PDF 补绘。
-func (s *Shell) previewPages(c *ui.Context, p *compilePane, st *editor.State) {
+func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 	first, last := p.list.Visible()
 	slots := max(2, last-first+1)
 	if slots != p.cacheSlots && p.loading == 0 {
@@ -183,13 +229,13 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane, st *editor.State) {
 					return
 				}
 				pageImage := ui.Image(c, bmp).Fill().Label(s.tr("compiledPage"))
-				if pageImage.Clicked() && !p.busy && p.err == "" && p.shown == st.Buffer.Version() {
+				if pageImage.Clicked() && !p.busy && p.err == "" && p.fullVersion == p.version {
 					x, y, over := pageImage.PointerPosition()
 					box := pageImage.Bounds()
 					x, y = x/box.W, y/box.H
 					if over && x >= 0 && y >= 0 && x <= 1 && y <= 1 {
 						select {
-						case p.clicks <- pageClick{number, p.shown, float64(x), float64(y)}:
+						case p.clicks <- pageClick{number, p.fullVersion, float64(x), float64(y)}:
 						default:
 						}
 					}
@@ -230,6 +276,8 @@ func (p *compilePane) keepPage(n int, bmp *ui.Bitmap) {
 
 func (s *Shell) sourceEditor(c *ui.Context, t *Tab) ui.Element {
 	st := t.Source()
+	s.bindScholarCitations(t)
+	s.scholarGutter(c, t)
 	if t.afterSourceInput != nil {
 		t.afterSourceInput()
 	}
@@ -237,14 +285,19 @@ func (s *Shell) sourceEditor(c *ui.Context, t *Tab) ui.Element {
 }
 
 func (s *Shell) openTypeset(t *Tab, live bool) {
-	pr := s.previewProvider(t)
+	project := s.typesetProject(t)
+	path := t.Path
+	if project.Root != "" {
+		path = project.Main
+	}
+	pr := s.previewProvider(&Tab{Path: path})
 	if pr == nil || pr.Open == nil {
 		return
 	}
 	s.closeCompile()
 	ctx, cancel := context.WithCancel(context.Background())
 	initial := t.Source().Buffer.Snapshot()
-	p := &compilePane{provider: pr, tab: t, path: t.Path, version: initial.Version(), cancel: cancel, cacheSlots: 2, requests: make(chan pageRequest, 1), sections: make(chan int, 1), clicks: make(chan pageClick, 1), busy: true, split: 50}
+	p := &compilePane{provider: pr, tab: t, path: path, sourcePath: t.Path, project: project, version: initial.Version(), sourceVersion: initial.Version(), cancel: cancel, cacheSlots: 2, requests: make(chan pageRequest, 1), sections: make(chan sourcePageRequest, 1), clicks: make(chan pageClick, 1), busy: true}
 	buildCtx, cancelBuild := context.WithCancel(ctx)
 	p.lifetime = ctx
 	p.cancelBuild = cancelBuild
@@ -252,23 +305,33 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 		p.liveUpdates = make(chan previewRevision, 1)
 	}
 	p.jump = func(line int) {
-		st := t.Source()
-		off := st.Buffer.Snapshot().LineStart(line)
-		st.Select(off, off)
-		st.ScrollTo(line)
-		if t.typesetMode == typesetPreview {
-			t.typesetMode = typesetSplit
+		snap := t.Source().Buffer.Snapshot()
+		if line >= 0 && line < snap.LineCount() {
+			s.jumpScholarOutline(t, snap.LineStart(line))
 		}
-		s.focusEditor = true
 	}
+	if project.Root != "" {
+		p.jumpProject = func(location typeset.ProjectLocation) { s.jumpProjectPreview(p, location) }
+		p.projectInput = s.projectPreviewRevision(p)
+	}
+	revision := previewRevision{snap: initial, ctx: buildCtx, version: p.version, project: p.projectInput}
 	s.compile = p
 	go func() {
-		err := p.runPreview(ctx, buildCtx, initial, func(v uint64, draft bool, apply func()) {
+		err := p.runPreview(ctx, revision, func(v uint64, draft bool, apply func()) {
 			s.post(func() {
-				if s.compile == p && (!live || t.Source().Buffer.Version() == v || draft && v >= p.shown) {
-					p.shown = v
-					apply()
+				if s.compile != p || s.activeTab() != t || t.Path != p.sourcePath {
+					return
 				}
+				if project.Root != "" {
+					s.updateProjectPreview(p)
+					if v != p.version {
+						return
+					}
+				} else if live && t.Source().Buffer.Version() != v && !(draft && v >= p.shown) {
+					return
+				}
+				p.shown = v
+				apply()
 			})
 		})
 		if err != nil && ctx.Err() == nil {
@@ -286,15 +349,37 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 }
 
 // 工作协程独占编译器与临时文件。界面只投递最新的只读 rope 快照，过期结果不能覆盖当前版本。
-func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snapshot, publish func(uint64, bool, func())) error {
-	session, err := p.provider.Open(p.path)
-	if err != nil {
-		return err
+func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, publish func(uint64, bool, func())) error {
+	var session provider.Session
+	var projectSession *typeset.Session
+	var disk uint64
+	if revision.project == nil {
+		var err error
+		session, err = p.provider.Open(p.path)
+		if err != nil {
+			return err
+		}
 	}
-	defer session.Close()
-	fast, canPatch := session.(typeset.ParagraphSession)
-	canPatch = canPatch && p.provider.Fragment != nil
+	defer func() {
+		if session != nil {
+			session.Close()
+		}
+	}()
+	snap, buildCtx := revision.snap, revision.ctx
+	sourceName, _ := scholar.Relative(p.project.Root, p.sourcePath)
 	var base editor.Snapshot
+	var baseVersion uint64
+	var baseProject *scholarPreviewRevision
+	fragment := func(input editor.Snapshot, offset int) (string, string, int, bool) {
+		if projectSession == nil || samePath(p.sourcePath, p.path) {
+			return p.provider.Fragment(input, offset)
+		}
+		if p.provider.IncludedFragment == nil {
+			return "", "", 0, false
+		}
+		body, start, ok := p.provider.IncludedFragment(input, offset)
+		return projectSession.ProjectPreamble(), body, start, ok
+	}
 	var pageBitmap *ui.Bitmap
 	var follow string
 	var settled typeset.PageAnchor
@@ -307,7 +392,7 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 		bmp := ui.NewBitmap(img)
 		pageBitmap = bmp
 		n, total, placement := page, pages, settled
-		publish(snap.Version(), false, func() {
+		publish(revision.version, false, func() {
 			p.bookmarks = heads
 			p.tab.outRows = nil
 			p.cached = nil
@@ -324,8 +409,42 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 		return nil
 	}
 	full := func() {
-		n, e := session.Compile(buildCtx, strings.NewReader(snap.String()))
+		started := time.Now()
+		var n int
+		var e error
+		if inputs := revision.project; inputs != nil {
+			e = inputs.err
+			if e == nil {
+				if projectSession == nil {
+					projectSession, e = typeset.OpenProjectPreview(buildCtx, p.project.Root, p.project.Main, inputs.readers())
+					if e == nil {
+						session = projectSession
+					}
+				} else {
+					e = projectSession.SyncProjectPreview(buildCtx, disk != inputs.disk, inputs.readers())
+				}
+				if e == nil {
+					disk = inputs.disk
+					n, e = projectSession.CompileProjectPreview(buildCtx)
+				}
+			}
+		} else {
+			n, e = session.Compile(buildCtx, strings.NewReader(snap.String()))
+		}
+		version := revision.version
 		if e == nil {
+			elapsed := time.Since(started)
+			var warnings []typeset.Diagnostic
+			if logged, ok := session.(interface{ Warnings() []typeset.Diagnostic }); ok {
+				warnings = slices.Clone(logged.Warnings())
+			}
+			if projectSession != nil {
+				for i := range warnings {
+					warnings[i].File = projectSession.ProjectLog(warnings[i].File)
+					warnings[i].Text = projectSession.ProjectLog(warnings[i].Text)
+				}
+			}
+			publish(version, false, func() { p.elapsed, p.warnings = elapsed, warnings; p.fullVersion = version; p.fullSerial++ })
 			var heads []mdedit.Heading
 			if book, ok := session.(interface {
 				Bookmarks(context.Context) []typeset.Bookmark
@@ -334,7 +453,7 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 					heads = append(heads, mdedit.Heading{Level: b.Level, Text: b.Title, Pos: b.Page})
 				}
 			}
-			if p.liveUpdates != nil && canPatch {
+			if fast, ok := session.(typeset.ParagraphSession); p.liveUpdates != nil && ok && p.provider.Fragment != nil {
 				fast.PrepareAnchors(buildCtx)
 				settled = typeset.PageAnchor{}
 				if follow != "" {
@@ -344,15 +463,18 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 					}
 				}
 			}
-			base = snap
+			base, baseVersion, baseProject = snap, version, revision.project
 			pages = n
 			page = min(page, pages)
 			e = draw(heads)
 		}
 		if e != nil && buildCtx.Err() == nil {
 			msg := e.Error()
+			if projectSession != nil {
+				msg = projectSession.ProjectLog(msg)
+			}
 			pages = 0
-			publish(snap.Version(), false, func() { p.err = msg; p.busy = false; p.paragraph = nil; p.inlineText = "" })
+			publish(version, false, func() { p.err = msg; p.busy = false; p.paragraph = nil; p.inlineText = ""; p.warnings = nil })
 		}
 	}
 	full()
@@ -368,10 +490,17 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 		case <-ctx.Done():
 			return ctx.Err()
 		case click := <-p.clicks:
-			locator, ok := session.(interface {
+			if click.page < 1 || click.page > pages || click.version != baseVersion || buildCtx.Err() != nil {
+				continue
+			}
+			if projectSession != nil {
+				location := projectSession.ProjectSourceLocation(buildCtx, click.page, click.x, click.y)
+				if location.Path != "" {
+					publish(click.version, false, func() { p.jumpProject(location) })
+				}
+			} else if locator, ok := session.(interface {
 				SourceLine(context.Context, int, float64, float64, func() string) int
-			})
-			if ok && click.page >= 1 && click.page <= pages && click.version == base.Version() && buildCtx.Err() == nil {
+			}); ok {
 				line := locator.SourceLine(buildCtx, click.page, click.x, click.y, base.String)
 				if line >= 0 && line < base.LineCount() {
 					publish(click.version, false, func() {
@@ -381,19 +510,28 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 					})
 				}
 			}
-		case line := <-p.sections:
-			if rev, ok := session.(interface {
+		case section := <-p.sections:
+			line := section.line
+			if buildCtx.Err() != nil || pages == 0 || section.version != baseVersion {
+				continue
+			}
+			dest := 0
+			if projectSession != nil {
+				dest = projectSession.PageForProjectLine(buildCtx, p.sourcePath, line, section.text)
+			} else if rev, ok := session.(interface {
 				PageForLine(context.Context, int) int
 			}); ok {
-				dest := rev.PageForLine(buildCtx, line)
-				publish(base.Version(), false, func() {
-					if dest > 0 && dest <= p.pages {
-						p.list.ScrollTo(dest-1, ui.Start)
-					} else {
-						p.jump(line)
-					}
-				})
+				dest = rev.PageForLine(buildCtx, line)
+			} else {
+				continue
 			}
+			publish(baseVersion, false, func() {
+				if dest > 0 && dest <= p.pages {
+					p.list.ScrollTo(dest-1, ui.Start)
+				} else {
+					p.jump(line)
+				}
+			})
 		case request := <-p.requests:
 			n := request.number
 			if n >= 1 && n <= pages {
@@ -405,9 +543,10 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 					continue
 				}
 				bmp := ui.NewBitmap(img)
-				publish(base.Version(), false, func() { p.keepPage(n, bmp); p.loading = 0 })
+				publish(baseVersion, false, func() { p.keepPage(n, bmp); p.loading = 0 })
 			}
 		case next := <-p.liveUpdates:
+			revision = next
 			snap, buildCtx = next.snap, next.ctx
 			if quick == nil {
 				qt.Reset(12 * time.Millisecond)
@@ -417,14 +556,18 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 			layout = lt.C
 		case <-quick:
 			quick = nil
-			if buildCtx.Err() == nil && canPatch {
+			if fast, ok := session.(typeset.ParagraphSession); buildCtx.Err() == nil && ok && p.provider.Fragment != nil && (revision.project == nil || revision.project.onlySourceChanged(baseProject, sourceName)) {
 				off := changedOffset(old, snap)
-				if header, text, start, ok := p.provider.Fragment(snap, off); ok {
+				if off == old.Len() && off == snap.Len() {
+					old = snap
+					continue
+				}
+				if header, text, start, ok := fragment(snap, off); ok {
 					var anchor typeset.PageAnchor
 					if pages > 0 {
 						first := changedOffset(base, snap)
 						if first >= start && first <= start+len(text) {
-							_, orig, baseStart, ok := p.provider.Fragment(base, first)
+							_, orig, baseStart, ok := fragment(base, first)
 							if ok && start == baseStart && sameSuffix(base, start+len(orig), snap, start+len(text)) {
 								anchor = fast.Anchor(ctx, orig)
 							}
@@ -458,7 +601,7 @@ func (p *compilePane) runPreview(ctx, buildCtx context.Context, snap editor.Snap
 							follow = ""
 						}
 						target, total := pageBitmap, pages
-						publish(snap.Version(), true, func() {
+						publish(revision.version, true, func() {
 							if anchor.Page != 0 {
 								first, last := p.list.Visible()
 								if anchor.Page-1 < first || anchor.Page-1 > last {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"nomo/desktop/internal/childproc"
 )
 
 // 只翻译能独立解释的正文与简单行内公式；未知命令、引用和环境交给完整编译。
@@ -141,13 +143,15 @@ func startParagraph(ctx context.Context, dir, doc string) (*paragraphEngine, err
 		return nil, e
 	}
 	cmd.Stderr = cmd.Stdout
-	if e = cmd.Start(); e != nil {
+	cleanup, e := childproc.Start(cmd)
+	if e != nil {
 		cancel()
 		return nil, e
 	}
 	p := &paragraphEngine{dir: dir, cancel: cancel, ready: make(chan bool, 1), done: make(chan struct{})}
 	go func() {
 		defer close(p.done)
+		defer cleanup()
 		defer cmd.Wait()
 		defer cancel()
 		sc := bufio.NewScanner(stream)
@@ -176,7 +180,7 @@ func (p *paragraphEngine) close() { p.cancel(); <-p.done }
 // Paragraph 用常驻 Typst 试排 LaTeX 正文片段，返回临时预览而非最终分页。
 // 仅在首次可试排编辑时启动进程；ctx 应贯穿会话。不可转换、编译失败或超时时返回 nil，交给整页编译。
 func (s *Session) Paragraph(ctx context.Context, header, body string) image.Image {
-	if !strings.EqualFold(filepath.Ext(s.path), ".tex") || s.fastUnavailable {
+	if !IsLaTeXPath(s.path) || s.fastUnavailable {
 		return nil
 	}
 	doc, ok := paragraphDocument(header, body)

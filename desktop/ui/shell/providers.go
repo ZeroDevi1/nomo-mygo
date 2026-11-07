@@ -35,9 +35,13 @@ func (s *Shell) applyProviderSyntax(tab *Tab) {
 		return
 	}
 	st := tab.source
-	if tab.syntaxProvider != nil {
+	if tab.syntaxProvider != nil || tab.scholarBound {
 		st.ShowCompletions(-1, nil)
 		st.OnCompletion = nil
+		st.OnHover = nil
+		st.RenderHover = nil
+		st.OnDefinition = nil
+		tab.scholarBound = false
 		st.OnInput = nil
 		tab.afterSourceInput = nil
 		st.Buffer.SetLanguage(nil)

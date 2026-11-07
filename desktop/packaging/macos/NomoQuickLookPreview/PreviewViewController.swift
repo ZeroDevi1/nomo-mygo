@@ -5,7 +5,7 @@ import OSLog
 import QuickLookUI
 
 private let appearanceLogger = Logger(
-    subsystem: "com.nomo.desktop.quicklook",
+    subsystem: "com.nomo.scholar.quicklook",
     category: "appearance"
 )
 
@@ -100,7 +100,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         pdfPanel = nil
         scrollView.isHidden = false
         do {
-            if ["tex", "typ"].contains(url.pathExtension.lowercased()) {
+            if ["tex", "ltx", "typ"].contains(url.pathExtension.lowercased()) {
                 textView.string = ""
                 let cache = try resolveUserHomeDirectory().appendingPathComponent("Library/Caches/com.nomo.desktop/QuickLookPDF")
                 let task = Task.detached(priority: .userInitiated) { try TypesetPreview.load(url, cacheDirectory: cache) }
@@ -328,7 +328,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     private func showError(_ error: Error) {
         let para = NSMutableParagraphStyle()
         para.alignment = .center
-        let text = NSMutableAttributedString(string: "无法生成 Nomo 预览\n", attributes: [
+        let text = NSMutableAttributedString(string: "无法生成 Nomo Scholar 预览\n", attributes: [
             .font: NSFont.boldSystemFont(ofSize: 16), .foregroundColor: NSColor.labelColor, .paragraphStyle: para,
         ])
         text.append(NSAttributedString(string: String(describing: error), attributes: [

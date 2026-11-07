@@ -22,20 +22,39 @@ type pdfWord struct {
 
 // SourceLine 返回主文件中从零起算的行。空白、外部 TeX 文件或无法唯一定位时返回 -1。
 func (s *Session) SourceLine(ctx context.Context, page int, x, y float64, source func() string) int {
+	hit := s.sourceHit(ctx, page, x, y)
+	if hit == nil {
+		return -1
+	}
+	if IsLaTeXPath(s.path) {
+		if line, ok := s.syncTeXLine(ctx, page, hit.x, hit.y); ok {
+			return line
+		}
+	}
+	return matchSourceLine(ctx, source(), hit.words, hit.index)
+}
+
+type pdfSourceHit struct {
+	x, y  float64
+	words []pdfWord
+	index int
+}
+
+func (s *Session) sourceHit(ctx context.Context, page int, x, y float64) *pdfSourceHit {
 	dir := filepath.Join(s.dir, "pages")
 	n := strconv.Itoa(page)
 	file := filepath.Join(dir, "click.xhtml")
 	defer os.Remove(file)
 	if _, err := run(ctx, dir, "", nil, "pdftotext", "-f", n, "-l", n, "-bbox-layout", "current.pdf", "click.xhtml"); err != nil {
-		return -1
+		return nil
 	}
 	f, err := os.Open(file)
 	if err != nil {
-		return -1
+		return nil
 	}
 	defer f.Close()
 	if stat, err := f.Stat(); err != nil || stat.Size() > 2<<20 {
-		return -1
+		return nil
 	}
 	var doc struct {
 		Page struct {
@@ -47,7 +66,7 @@ func (s *Session) SourceLine(ctx context.Context, page int, x, y float64, source
 		} `xml:"body>doc>page"`
 	}
 	if xml.NewDecoder(pdfXML{f}).Decode(&doc) != nil {
-		return -1
+		return nil
 	}
 	x *= doc.Page.Width
 	y *= doc.Page.Height
@@ -56,15 +75,10 @@ func (s *Session) SourceLine(ctx context.Context, page int, x, y float64, source
 			if x < w.X || x > w.R || y < w.Y || y > w.B {
 				continue
 			}
-			if strings.EqualFold(filepath.Ext(s.path), ".tex") {
-				if line, ok := s.syncTeXLine(ctx, page, x, y); ok {
-					return line
-				}
-			}
-			return matchSourceLine(ctx, source(), line.Words, i)
+			return &pdfSourceHit{x: x, y: y, words: line.Words, index: i}
 		}
 	}
-	return -1
+	return nil
 }
 
 func (s *Session) syncTeXLine(ctx context.Context, page int, x, y float64) (int, bool) {
@@ -96,6 +110,11 @@ func (s *Session) syncTeXLine(ctx context.Context, page int, x, y float64) (int,
 
 // Typst 普通文本按点击词及左右文匹配；保留最强匹配，多个源码行同分时放弃。
 func matchSourceLine(ctx context.Context, source string, words []pdfWord, hit int) int {
+	line, _ := scoreSourceLine(ctx, source, words, hit)
+	return line
+}
+
+func scoreSourceLine(ctx context.Context, source string, words []pdfWord, hit int) (int, int) {
 	compact := func(s string) string {
 		return strings.Map(func(r rune) rune {
 			if unicode.IsSpace(r) || r == '*' || r == '_' {
@@ -106,7 +125,7 @@ func matchSourceLine(ctx context.Context, source string, words []pdfWord, hit in
 	}
 	target := compact(words[hit].Text)
 	if target == "" {
-		return -1
+		return -1, -1
 	}
 	var left, right string
 	for _, w := range words[max(0, hit-4):hit] {
@@ -119,7 +138,7 @@ func matchSourceLine(ctx context.Context, source string, words []pdfWord, hit in
 	line := 0
 	for raw := range strings.Lines(source) {
 		if ctx.Err() != nil {
-			return -1
+			return -1, -1
 		}
 		row := compact(raw)
 		for at := 0; at < len(row); {
@@ -144,5 +163,5 @@ func matchSourceLine(ctx context.Context, source string, words []pdfWord, hit in
 		}
 		line++
 	}
-	return found
+	return found, best
 }

@@ -845,11 +845,12 @@ struct ThemePalette {
     init(themeID: String, dark: Bool, userThemeJSON: String?) {
         let scheme = dark ? "dark" : "light"
         let builtin = (try? JSONSerialization.jsonObject(with: Data(builtinThemeTokensJSON.utf8))) as? [String: [String: [String: String]]] ?? [:]
-        fallback = builtin[defaultColorThemeID]?[scheme] ?? [:]
+        let legacy = builtin[legacyColorThemeID]?[scheme] ?? [:]
+        fallback = legacy.merging(iosBlueOverrides[scheme] ?? [:]) { _, new in new }
         var t = builtin[themeID]?[scheme] ?? fallback
         if let json = userThemeJSON,
            let root = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] {
-            let base = root["baseThemeId"] as? String ?? defaultColorThemeID
+            let base = root["baseThemeId"] as? String ?? legacyColorThemeID
             t = builtin[base]?[scheme] ?? fallback
             if let variants = root["variants"] as? [String: Any],
                let v = variants[scheme] as? [String: Any],

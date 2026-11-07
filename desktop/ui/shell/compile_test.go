@@ -56,7 +56,15 @@ func TestCompiledPreview(t *testing.T) {
 			tab := s.activeTab()
 			tab.replaceText(tc.doc)
 			posted := make(chan func(), 2)
-			s.post = func(fn func()) { posted <- fn }
+			done := make(chan struct{})
+			defer close(done)
+			s.post = func(fn func()) {
+				select {
+				case posted <- fn:
+				case <-done:
+				}
+			}
+			defer s.closeScholar()
 			defer s.closeCompile()
 			click := func(label string) {
 				t.Helper()
@@ -64,18 +72,22 @@ func TestCompiledPreview(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			wait := func() {
+			wait := func(ready func() bool) {
 				t.Helper()
-				select {
-				case fn := <-posted:
-					fn()
-				case <-time.After(90 * time.Second):
-					t.Fatal("preview timed out")
+				deadline := time.After(90 * time.Second)
+				// Scholar and the compiler both post to the UI queue.
+				for !ready() {
+					select {
+					case fn := <-posted:
+						fn()
+						tt.Frame()
+					case <-deadline:
+						t.Fatal("preview timed out")
+					}
 				}
-				tt.Frame()
 			}
 			click(s.tr("semanticEditing"))
-			wait()
+			wait(func() bool { return s.compile != nil && !s.compile.busy })
 			if p := s.compile; p == nil || p.err != "" || p.image == nil || p.pages != 2 {
 				t.Fatalf("preview: %+v", p)
 			}
@@ -89,20 +101,22 @@ func TestCompiledPreview(t *testing.T) {
 				t.Fatalf("PDF size at 45%% and 90%%: %v %v", narrow, wide)
 			}
 			// 对应 3840 × 1938 的 2× 显示器；首张快览也必须按实际纸面重新栅格化。
+			// 选择在位图缓存预算内的纸面宽度，以验证完整的 2× 栅格化。
+			s.prefs.ContentWidthPercent = 70
 			tt.SetSize(1920, 969)
 			tt.SetScale(2)
 			wide, _ = tt.Find(s.tr("compiledPage"))
-			for {
+			wait(func() bool {
 				bmp := s.compile.cached[1]
-				if bmp != nil {
-					w, h := bmp.Size()
-					if w >= int(2*wide.W)-1 && max(w, h) > 1400 {
-						t.Logf("Retina page: %.0f DIP, %d × %d px", wide.W, w, h)
-						break
-					}
+				if bmp == nil {
+					return false
 				}
-				wait()
-			}
+				w, h := bmp.Size()
+				return w >= int(2*wide.W)-1 && max(w, h) > 1400
+			})
+			w, h := s.compile.cached[1].Size()
+			t.Logf("Retina page: %.0f DIP, %d × %d px", wide.W, w, h)
+			s.prefs.ContentWidthPercent = 90
 			tt.SetScale(1)
 			tt.SetSize(1200, 800)
 			tt.Frame()
@@ -147,17 +161,16 @@ func TestCompiledPreview(t *testing.T) {
 			if len(s.compile.bookmarks) == 0 {
 				t.Fatal("missing PDF bookmarks")
 			}
+			click(s.tr("scholarOutline"))
 			click("Later chapter")
 			tt.Frame()
-			for s.compile.cached[2] == nil {
-				wait()
-			}
+			wait(func() bool { return s.compile.cached[2] != nil })
 			if first, last := s.compile.list.Visible(); first > 1 || last < 1 {
 				t.Fatal(tt.Texts())
 			}
 			tab.replaceText(map[string]string{"tex": `\badcommand`, "typ": "#invalid("}[tc.ext])
 			tt.Frame()
-			wait()
+			wait(func() bool { return !s.compile.busy })
 			if s.compile.err == "" || s.compile.busy {
 				t.Fatal("expected compile error")
 			}

@@ -94,7 +94,7 @@ void TestLocalization() {
     Expect(ResolveNomoLocale(L"fr-FR") == NomoLocale::English, "falls back to English");
     Expect(std::wstring(GetNomoCommandTitle(
                NomoCommandKind::Folder, NomoLocale::SimplifiedChinese)) ==
-               L"在 Nomo 中打开文件夹",
+               L"在 Nomo Scholar 中打开文件夹",
            "returns localized folder title");
 }
 

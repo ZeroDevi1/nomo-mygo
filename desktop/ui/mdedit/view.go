@@ -253,8 +253,8 @@ type Editor struct {
 	dsyncVer     uint64
 	// opts 为外壳设置中影响编辑区的选项（SetOptions）。
 	opts Options
-	// kpWidths 缓存精细排版用的空格与连字符宽度（按字体，kpGlyphWidths）。
-	kpWidths map[ui.Font][2]float64
+	// kpHyphenWidths 按字体缓存精细排版用的连字符宽度。
+	kpHyphenWidths map[ui.Font]float64
 	// ctxPos 为最近一次右键的原文位置，ctxDetails 为右键落在折叠块标题行时该块的键（否则 -1），供 ContextTarget 使用。
 	ctxPos, ctxDetails int
 }
@@ -317,7 +317,7 @@ func (e *Editor) SetStyle(fontSize, zoomPercent, widthPercent float32) {
 		return
 	}
 	e.scale, e.widthPct = scale, widthPercent
-	e.kpWidths = nil
+	e.kpHyphenWidths = nil
 	e.measureLine()
 	e.contentW, e.viewW = 0, 0 // 下次 prepare 按新宽度重算
 	e.layoutGen++
@@ -357,7 +357,7 @@ func (e *Editor) SetFonts(body, mono string) {
 		return
 	}
 	e.fontBody, e.fontMono = body, mono
-	e.kpWidths = nil
+	e.kpHyphenWidths = nil
 	e.measureLine()
 	e.layoutGen++
 	e.dirty = true

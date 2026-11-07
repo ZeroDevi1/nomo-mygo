@@ -1,4 +1,4 @@
-// Command icons 从 SVG 母版生成 Nomo 的浅深色、托盘、Windows 与 macOS 图标位图（用 MyGo 的无头渲染栅格化）。
+// Command icons 从 SVG 母版生成 Nomo Scholar 的浅深色、托盘、Windows 与 macOS 图标位图（用 MyGo 的无头渲染栅格化）。
 //
 // 用法（仓库根目录）：
 //
@@ -48,12 +48,12 @@ func main() {
 	}
 	lightLogo := string(raw)
 	darkLogo := strings.NewReplacer(
-		"Nomo 浅色图标", "Nomo 深色图标",
-		"圆角白色底板、深色 N", "圆角深色底板、白色 N",
+		"Nomo Scholar 浅色图标", "Nomo Scholar 深色图标",
+		"圆角浅色底板", "圆角深色底板",
 		"#fefefe", "#2b313b",
-		"#252c36", "#f8f9fb",
-		"#4d86fd", "#5b9bff",
-		"#999ca3", "#b6bac3",
+		"#192f4d", "#f8f9fb",
+		"#007aff", "#64aaff",
+		"#e8f3ff", "#243d5e",
 	).Replace(lightLogo)
 	write(filepath.Join("nomo/source", "nomo-app-dark.svg"), []byte(darkLogo))
 	light := desktopIcon(lightLogo, "#fefefe", "#c8cdd4")
@@ -118,7 +118,7 @@ func catalogLayer(svg string) string {
 }
 
 // generateTray 生成浅深色 × 激活/未激活托盘图标：不透明圆角底板与对比边框保证任意任务栏背景下可辨认，
-// 未激活时只把 N 与横线改为灰色。运行时嵌入 48px，24px 仅作预览。
+// 未激活时将书页轮廓、N 与排版线改为灰色。运行时嵌入 48px，24px 仅作预览。
 func generateTray() {
 	for _, theme := range []string{"light", "dark"} {
 		for _, state := range []string{"active", "inactive"} {
@@ -131,17 +131,17 @@ func generateTray() {
 			}
 			background, border := pick("#2b313b", "#fefefe"), pick("#7b8594", "#c2c8d0")
 			foreground := pick("#b6bac3", "#646b76")
-			underline := foreground
+			accent := foreground
 			if active {
-				foreground, underline = pick("#f8f9fb", "#252c36"), pick("#5b9bff", "#4d86fd")
+				foreground, accent = pick("#f8f9fb", "#192f4d"), pick("#64aaff", "#007aff")
 			}
 			svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  <title>Nomo 托盘图标 · %s · %s</title>
+  <title>Nomo Scholar 托盘图标 · %s · %s</title>
   <rect x="1.5" y="1.5" width="21" height="21" rx="4.5" fill="%s" stroke="%s" stroke-width="1"/>
-  <path d="M 7 14 V 5.8 L 17 14 V 5.8" fill="none" stroke="%s" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="5.5" y="18.5" width="13" height="1.5" rx="0.75" fill="%s"/>
+  <path d="M 12 7.5 Q 8.7 5 4.8 6.3 V 16.6 Q 8.7 15.6 12 18 Q 15.3 15.6 19.2 16.6 V 6.3 Q 15.3 5 12 7.5 Z M 12 7.5 V 18 M 14.5 11.9 L 16.7 11.5" fill="none" stroke="%s" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 7.1 13.2 V 9.3 L 9.8 13.5 V 9.7" fill="none" stroke="%s" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
-`, theme, state, background, border, foreground, underline)
+`, theme, state, background, border, accent, foreground)
 			name := "nomo/tray/nomo-tray-" + theme + "-" + state
 			write(name+".svg", []byte(svg))
 			render(svg, 24, name+"-24-preview.png")

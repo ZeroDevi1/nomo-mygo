@@ -53,6 +53,12 @@
 | 内嵌 SVG 显示 | `desktop/ui/mdedit/imageview.go`（`svgDataURI`、`svgElementEnd`） | `projection.go`（`svgClose`）, `images.go`（data URI 解码） | 修改 HTML 块与段落内 `<svg>` 作为图片显示的识别规则 |
 | 导出 HTML 安全清理 | `desktop/ui/shell/sanitize.go` | `export.go`（`exportDocument`） | 修改导出时去掉的元素、属性与 URL 协议 |
 | LaTeX / Typst 编译、预览与 PDF 导出 | `desktop/typeset/session.go`（Go 接口）、`anchor.go`（PDF 段落定位）、`inverse.go`（点击文字反查源码行）、`paragraph.go`（段落转译与 Typst watch） | `desktop/ui/shell/compile.go`（快照、异步取消与双栏）、`export.go`（保存对话框） | 修改编译器、段落快览、整页校正或导出流程 |
+| Nomo Scholar 项目与三区布局 | `desktop/ui/shell/scholar.go`（根目录、主文件菜单、导航、检查器与状态栏） | `view.go`、`platform.go`、`prefs.go`、`scholar_navigation.go`、`scholar_files.go`、`scholar_watch.go`、`scholar_budget.go`、`docs/nomo-scholar.md` | 修改学术工作区布局、项目设置、状态栏与生命周期 |
+| 学术视图选择与命令 | `desktop/ui/shell/scholar_toolbar.go` | `view.go`、`menu.go`、`platform.go`、`compile.go` | 修改标题栏／命令栏、紧凑视图选择、溢出菜单、检查器开关或排版取消与重试 |
+| 项目文献、Zotero 与元数据 | `desktop/internal/scholar`（`project.go`、`library.go`、`library_disk.go`、`local_search.go`、`bibtex.go`、`citations.go`、`zotero.go`、`zotero_search.go`、`search.go`） | `desktop/ui/shell/scholar_literature.go`、`scholar_citation_card.go`、`scholar_query.go`、`scholar_pdf.go`、`scholar_quicklook_*.go`、`providers.go` | 修改索引预算、文献解析与写入、Zotero 分页、引用补全与诊断 |
+| 学术编辑改动审阅 | `desktop/ui/shell/scholar_changes.go`（共享快照、输入合批、改动记录） | `scholar_diff.go`、`scholar_peek.go`、`previewdelta.go`、`scholar_agent.go`、`menu.go` | 修改最近一次改动、词级与行级对比、撤销重做与 Codex 接受记录 |
+| Codex 提议与隔离试排 | `desktop/internal/scholar/codex.go`、`codex_conversation.go`（stdio 与会话）、`patch.go`（补丁契约）、`desktop/ui/shell/scholar_agent.go`、`scholar_context.go`、`scholar_patchset.go`（审阅与基准校验） | `desktop/typeset/project_mirror.go`、`project_trial.go`、`session.go`（增量镜像、冻结输入和试排）、`scholar_trial.go`、`diagnostics.go`、`desktop/internal/childproc` | 修改流式响应、取消、试排发布边界和子进程回收 |
+| 学术项目常规预览 | `desktop/ui/shell/scholar_preview.go`、`compile.go`（编译入口、缓冲版本、合批与 PDF） | `desktop/typeset/project_mirror.go`、`project_location.go`、`project_typst.go`、`quicklook.go`、`scholar_watch.go` | 修改主稿与章节联动、项目镜像、跨文件定位、外部输入失效及 Finder 缓存发布 |
 | 排版扩展注册与设置 | `desktop/provider/provider.go`、`desktop/providers/builtin.go` | `desktop/ui/shell/providers.go`、`settings.go` | 新增语言包、绑定可选能力与处理开关 |
 | LaTeX / Typst 语法提示 | `desktop/providers/typesetting/syntax.go` | `tab.go`（编辑器绑定） | 修改词法高亮、内置签名、文档声明补全与括号匹配 |
 | 源码模式 HTML 补全 | `desktop/ui/shell/htmlcomplete.go` | `desktop/ui/mdedit/api.go`（`Document.CodeAt`） | 修改标签/属性/CSS 补全项与触发条件 |
@@ -80,7 +86,7 @@
 | 设置窗口 | `desktop/ui/shell/settings.go` | `prefs.go`, `platform.go` | 增删设置分类与设置项 |
 | 资源管理器与标签的文件操作 | `desktop/ui/shell/fileops.go` | `explorer.go`, `view.go` | 修改新建、重命名、复制路径、在文件夹中显示 |
 | 资源管理器目录树 | `desktop/ui/shell/explorer.go` | `desktop/internal/docfs/tree.go` | 修改目录懒加载、刷新与点击打开 |
-| 颜色主题、字体与用户主题导入导出 | `desktop/ui/shell/appearance.go` | `desktop/ui/themes`, `settings.go` | 修改主题到编辑器配色的映射、字体应用、用户主题文件读写 |
+| 颜色主题、字体与用户主题导入导出 | `desktop/ui/shell/appearance.go` | `desktop/ui/themes`、`view.go`（控件强调色）、`settings.go`、`desktop/packaging/macos/NomoQuickLookPreview/BuiltinThemes.swift` | 修改默认主题、明暗强调色、编辑器配色、Quick Look 预览与用户主题文件 |
 | 编辑区右键菜单 | `desktop/ui/shell/editormenu.go` | `desktop/ui/mdedit/api.go`（`ContextTarget`）, `desktop/ui/mdedit/blockedit.go` | 修改右键目标判断与各目标的菜单项（原版 buildEditorContextMenuItems），含表格、代码块、公式与图表菜单 |
 | 块级命令（表格增删行列与对齐、代码块语言、复制块内容、删除块） | `desktop/ui/mdedit/blockedit.go` | `editormenu.go`（`blockMenu`） | 修改表格原文重写规则、围栏内容范围、公式块闭合行 |
 | 链接快速编辑浮层 | `desktop/ui/shell/linkedit.go` | `desktop/ui/mdedit/api.go`（`LinkAt`） | 修改链接插入/编辑/移除、地址校验与浮层位置 |
@@ -96,7 +102,7 @@
 | 导出精细排版（HTML / PDF） | `desktop/ui/kpexport`（`Script`、assets/kp.js） | `desktop/ui/typography/wasm`（编译为 WebAssembly 的排版入口）, `scripts/kpwasm`（构建时生成 gen/，mygo.json 的 buildCommand）, `desktop/export.go`（`__NOMO_PREPARE_PRINT__`） | 修改导出页面的段落选择、测量、断行应用或打印前重排 |
 | 界面文案 | `desktop/ui/shell/messages.go`（直接维护，简体 / 繁体 / 英文 / 日文） | `i18n.go`（语言选择、MyGo 内置文案语言包）, `i18n_test.go`（日文与英文键一一对应） | 新增或修改界面文案（四种语言同步） |
 | 界面图标（Lucide） | `desktop/ui/icons/lucide.go`（直接维护） | `icons.go` | 增删界面所用图标 |
-| MyGo 应用配置（名称、版本、图标、随包资源、文件关联、Info.plist） | `mygo.json` | `desktop/packaging/samples`（示例文档）, `go.mod` 的 `tool`（`go tool mygo`） | 修改版本号、打包资源或平台配置；版本号唯一来源 |
+| MyGo 应用配置（Nomo Scholar 名称、打包 ID、版本、图标、资源和文件关联） | `mygo.json` | `desktop/packaging/samples`（示例文档）, `go.mod` 的 `tool`（`go tool mygo`） | 修改版本号、打包资源或平台配置；版本号唯一来源。运行时显示名见 `desktop/internal/config/config.go`，兼容数据目录见 `desktop/app.go` |
 | 应用与界面图标 | `desktop/ui/icons/icons.go` | `desktop/appicon.go`, `desktop/native.go` | 修改文件类型图标、提示块图标、应用图标（窗口 / Dock / 关于页） |
 | 内置主题、导出样式与 Quick Look 主题表 | `desktop/ui/themes/builtin.go`（直接维护） | `export_document.css`, `desktop/packaging/macos/NomoQuickLookPreview/BuiltinThemes.swift` | 修改内置配色或导出样式；改内置主题时同步 Quick Look 主题表 |
 | 主题解析、校验与导出 | `desktop/ui/themes/themes.go` | `export.go` | 修改用户主题 JSON 规则（与 userThemeDefinition.ts 一致）、颜色解析、导出 CSS 变量 |
@@ -161,7 +167,7 @@
 
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
-| macOS 构建、Quick Look 嵌入与 DMG | `scripts/build-macos.sh` | `scripts/build-macos-quicklook.sh`, `scripts/verify-macos-bundle.sh`, `desktop/packaging/macos/NomoQuickLookPreview/`, `mygo.json` | 修改 MyGo 产物后处理、扩展架构/版本同步、由内向外签名（扩展保留沙盒 entitlements，主应用不带 `--deep`）或 DMG 生成 |
+| macOS 构建、Quick Look 嵌入与 DMG | `scripts/build-macos.sh` | `scripts/build-macos-quicklook.sh`, `scripts/verify-macos-bundle.sh`, `desktop/packaging/macos/NomoQuickLookPreview/`, `mygo.json` | 按 `mygo.json` 定位产物，修改扩展架构/版本同步、由内向外签名（扩展保留沙盒 entitlements，主应用不带 `--deep`）或 DMG 生成 |
 | SVG 图标与平台资源生成 | `scripts/icons/main.go`（`go run ./scripts/icons`） | `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, `desktop/packaging/icons/nomo/macos/AppIcon.icon`（mygo.json 的 `macos.icon`）, `desktop/tray.go` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 保持母版造型 |
 | Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.json` | 修改 Store 包身份、版本映射、MyGo 构建与产物复制、图标 PRI 生成、Shell 扩展封装或上传产物 |
 

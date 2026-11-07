@@ -47,10 +47,14 @@ func (s *Session) Bookmarks(ctx context.Context) []Bookmark {
 
 // 未写 PDF 书签的 LaTeX 文档可通过编译时的行号定位页面。
 func (s *Session) PageForLine(ctx context.Context, line int) int {
-	if !strings.EqualFold(filepath.Ext(s.path), ".tex") {
+	if !IsLaTeXPath(s.path) {
 		return 0
 	}
-	out, err := run(ctx, s.dir, "", nil, "synctex", "view", "-i", fmt.Sprintf("%d:0:preview.tex", line+1), "-o", filepath.Base(s.pdf))
+	return s.syncTeXPage(ctx, "preview.tex", line)
+}
+
+func (s *Session) syncTeXPage(ctx context.Context, input string, line int) int {
+	out, err := run(ctx, s.dir, "", nil, "synctex", "view", "-i", fmt.Sprintf("%d:0:%s", line+1, input), "-o", filepath.Base(s.pdf))
 	if err == nil {
 		for row := range strings.Lines(out) {
 			if n, ok := strings.CutPrefix(strings.TrimSpace(row), "Page:"); ok {

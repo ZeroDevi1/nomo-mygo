@@ -21,10 +21,10 @@ import (
 
 // Windows 安装形态（供更新检查判断是否提供更新）：Store 包、NSIS 安装版或免安装版。
 
-// uninstallKeys 是安装器登记卸载信息的键：MyGo 的 NSIS 安装器按应用标识（com.nomo.desktop）登记；Tauri 时期的
-// 安装器登记为 Nomo，升级前装的版本仍在那里。
+// 卸载项按当前及历史安装器的应用标识查找。NSIS 使用 mygo.json 的 identifier。
 var uninstallKeys = []string{
-	`Software\Microsoft\Windows\CurrentVersion\Uninstall\` + appIdentifier,
+	`Software\Microsoft\Windows\CurrentVersion\Uninstall\com.nomo.scholar`,
+	`Software\Microsoft\Windows\CurrentVersion\Uninstall\` + appDataIdentifier,
 	`Software\Microsoft\Windows\CurrentVersion\Uninstall\Nomo`,
 }
 

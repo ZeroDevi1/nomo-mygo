@@ -129,3 +129,22 @@ func (ch chrome) paint(c ui.Color, materialArea bool) ui.Color {
 	}
 	return c
 }
+
+const (
+	scholarCompactWidth = 1060
+	scholarRailWidth    = 40
+)
+
+func (pf platform) scholarNavHeight() float32 {
+	if pf.windows {
+		return 32
+	}
+	return 27
+}
+
+func (pf platform) scholarCommandThreshold() float32 {
+	if pf.mac {
+		return 640 // 为标题、交通灯与窗口按钮预留空间。
+	}
+	return 510
+}

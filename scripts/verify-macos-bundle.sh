@@ -8,7 +8,10 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 默认校验 build-macos.sh 的 universal 产物；单架构构建传入 .app 路径。
-APP_BUNDLE="${1:-$ROOT_DIR/target/mygo/darwin-universal/Nomo.app}"
+APP_NAME="$(plutil -extract name raw -o - "$ROOT_DIR/mygo.json")"
+APP_ID="$(plutil -extract identifier raw -o - "$ROOT_DIR/mygo.json")"
+APP_OUT="$(plutil -extract out raw -o - "$ROOT_DIR/mygo.json")"
+APP_BUNDLE="${1:-$ROOT_DIR/$APP_OUT/darwin-universal/$APP_NAME.app}"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
   echo "macOS app bundle not found: $APP_BUNDLE." >&2
@@ -21,6 +24,13 @@ EXTENSION_INFO="$EXTENSION_BUNDLE/Contents/Info.plist"
 
 if [[ ! -d "$EXTENSION_BUNDLE" || ! -f "$EXTENSION_INFO" ]]; then
   echo "Quick Look extension is missing from $APP_BUNDLE." >&2
+  exit 1
+fi
+
+if [[ "$(plutil -extract CFBundleDisplayName raw -o - "$APP_INFO")" != "$APP_NAME" ||
+      "$(plutil -extract CFBundleIdentifier raw -o - "$APP_INFO")" != "$APP_ID" ||
+      "$(plutil -extract CFBundleIdentifier raw -o - "$EXTENSION_INFO")" != "$APP_ID.quicklook" ]]; then
+  echo "App or Quick Look identity does not match mygo.json." >&2
   exit 1
 fi
 

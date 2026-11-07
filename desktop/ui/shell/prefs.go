@@ -10,6 +10,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/config"
+	"nomo/desktop/ui/themes"
 )
 
 // Prefs 是原生外壳读写的应用偏好。字段名、默认值、取值范围与原版
@@ -67,6 +68,8 @@ type Prefs struct {
 	PDFPageNumbers   string  `json:"pdfPageNumbers"`
 	PDFBreakBeforeH1 bool    `json:"pdfBreakBeforeH1"`
 
+	ScholarProjects map[string]scholarProjectPrefs `json:"scholarProjects"`
+
 	ColorThemeID          string            `json:"colorThemeId"`
 	UIFontFamily          string            `json:"uiFontFamily"`
 	DocumentFontFamily    string            `json:"documentFontFamily"`
@@ -77,6 +80,16 @@ type Prefs struct {
 	MarkdownLintRuleSet   string            `json:"markdownLintRuleSet"`
 	ShortcutPreferences   map[string]string `json:"shortcutPreferences"`
 	ImageHandlingSettings ImageSettings     `json:"imageHandlingSettings"`
+}
+
+type scholarProjectPrefs struct {
+	Sources             map[string]scholarSourceLink `json:"sources,omitempty"`
+	ExcludeBibliography bool                         `json:"excludeBibliography,omitempty"`
+	BodyEndPage         int                          `json:"bodyEndPage,omitempty"`
+	MainSelected        bool                         `json:"mainSelected,omitempty"`
+	Main                string                       `json:"main,omitempty"`
+	PageBudget          int                          `json:"pageBudget,omitempty"`
+	DrawerWidth         int                          `json:"drawerWidth,omitempty"`
 }
 
 // ImageSettings 与原版 ImageHandlingSettings（src/lib/services/render.ts）一致。
@@ -113,7 +126,7 @@ func defaultPrefs() Prefs {
 		OutlineDefaultExpandLevel: 2, CodeBlockLineNumbersVisible: true, CodeBlockIndent: "spaces-2",
 		InlineCodeRenderingEnabled: true, CopyMarkdownSyntaxEnabled: true, RenderMode: "hardware",
 		SoftwareUpdateAutoCheck: true, PDFPaperSize: "A4", PDFOrientation: "portrait", PDFMarginMm: 20, PDFPageNumbers: "none",
-		ColorThemeID: "nomo-default", QuickInsertEnabled: true, QuickInsertTrigger: "/",
+		ColorThemeID: themes.DefaultThemeID, QuickInsertEnabled: true, QuickInsertTrigger: "/",
 		MarkdownLintRuleSet: "relaxed", ShortcutPreferences: maps.Clone(defaultShortcuts),
 		ImageHandlingSettings: ImageSettings{ImageInsertStrategy: "copy-assets", UploadProvider: "picgo",
 			PicgoServerURL: "http://127.0.0.1:36677/upload", PicgoCoreCommand: "picgo", DefaultImageAlign: "none"},
@@ -122,7 +135,7 @@ func defaultPrefs() Prefs {
 
 // prefKeys 列出每个字段的设置键与读写入口（逐键存储，未写过的键保持默认值）。
 func (p *Prefs) fields() map[string]any {
-	return map[string]any{"disabledProviders": &p.DisabledProviders, "providerSyntax": &p.ProviderSyntax, "providerPreview": &p.ProviderPreview,
+	return map[string]any{"scholarProjects": &p.ScholarProjects, "disabledProviders": &p.DisabledProviders, "providerSyntax": &p.ProviderSyntax, "providerPreview": &p.ProviderPreview,
 		"themeMode": &p.ThemeMode, "interfaceLanguage": &p.InterfaceLanguage, "editorMode": &p.EditorMode,
 		"splitViewLayout": &p.SplitViewLayout, "splitLeftPercent": &p.SplitLeftPercent,
 		"autoSaveEnabled": &p.AutoSaveEnabled, "autoSaveDelayMs": &p.AutoSaveDelayMs,

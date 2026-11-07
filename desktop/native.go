@@ -55,7 +55,7 @@ func runNativeShell(args []string) {
 		sh = shell.New(shell.Options{Config: app.config, Locale: effectiveLocale(), SystemLocale: system, Version: appVersion(),
 			Files: targets.markdownPaths, Folders: targets.folderPaths, IconLight: appIconLight, IconDark: appIconDark,
 			ExportPDF: exportNativePDF, CheckUpdate: checkNativeUpdate,
-			LoadEmoji:   func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appIdentifier, retry) },
+			LoadEmoji:   func(retry bool) ([]emoji.Entry, error) { return emoji.Catalog(appDataIdentifier, retry) },
 			InstallTray: installNativeTray, SetIconTheme: setDesktopIconTheme, SetTrayActive: setTrayActive,
 			Primary: true, SampleDocument: resolveSampleDocument, Windows: nativeWindowsIntegration(),
 			DownloadUpdate: downloadUpdate, InstallUpdate: installUpdate, ReleaseNotes: releaseNotes})
@@ -113,7 +113,7 @@ func checkNativeUpdate() (shell.UpdateInfo, error) {
 // installNativeTray 为原生外壳创建托盘：单击恢复主窗口（Linux 只能显示菜单），菜单为“打开 Nomo / 退出”，
 // 图标与文案沿用 WebView 版托盘（tray.go）。
 func installNativeTray(show, quit func()) bool {
-	tray, err := mygo.NewTray(mygo.TrayOptions{ID: "nomo-native-tray", Icon: trayIcon(), ToolTip: "Nomo"})
+	tray, err := mygo.NewTray(mygo.TrayOptions{ID: "nomo-native-tray", Icon: trayIcon(), ToolTip: mygo.App.Name()})
 	if err != nil {
 		applog.Warn("Tray", "创建托盘图标失败："+err.Error())
 		return false

@@ -5,8 +5,8 @@ cask "nomo-mygo" do
   sha256 "12019a0eee6e7868d64ebfbd07cb983870f46df04c856cc47bee8fdbf6cfe452"
 
   url "https://github.com/ZeroDevi1/nomo-mygo/releases/download/v#{version}/Nomo_#{version}_aarch64.dmg"
-  name "Nomo (MyGo)"
-  desc "Local-first Markdown editor, MyGo rewrite of Nomo"
+  name "Nomo Scholar"
+  desc "Local-first editor for Markdown, LaTeX, and Typst"
   homepage "https://github.com/ZeroDevi1/nomo-mygo"
 
   livecheck do
@@ -14,7 +14,7 @@ cask "nomo-mygo" do
     strategy :github_latest
   end
 
-  # 与原版 cask 安装的是同名 Nomo.app，共用配置目录。
+  # 与原版共用配置和恢复目录。当前发行物的 .app 名称随 release.yml 一起更新。
   conflicts_with cask: "nomo"
   depends_on arch: :arm64
   depends_on macos: :monterey

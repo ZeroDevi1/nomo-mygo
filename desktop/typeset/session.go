@@ -21,20 +21,34 @@ import (
 
 // Session 由单个调用方串行使用；Close 结束段落引擎并删除预览临时目录。
 type Session struct {
-	indexed         bool
-	anchors         map[[32]byte]PageAnchor
-	path, dir, pdf  string
-	pages           int
-	fast            *paragraphEngine
-	fastUnavailable bool
-	lastDoc         string
-	lastParagraph   image.Image
+	trialRoot                    string
+	mirror                       *projectMirror
+	liveProject, depsUnsupported bool
+	sourceDeps                   []string
+	indexed                      bool
+	anchors                      map[[32]byte]PageAnchor
+	path, dir, pdf               string
+	pages                        int
+	warnings                     []Diagnostic
+	fast                         *paragraphEngine
+	fastUnavailable              bool
+	lastDoc                      string
+	lastParagraph                image.Image
+}
+
+// IsLaTeXPath reports whether the path uses a TeX or LaTeX source suffix.
+func IsLaTeXPath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".tex", ".ltx":
+		return true
+	default:
+		return false
+	}
 }
 
 // Open 以主文件目录为资源根目录；主文件正文由 Compile 的 reader 提供。
 func Open(path string) (*Session, error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext != ".tex" && ext != ".typ" {
+	if !IsLaTeXPath(path) && !strings.EqualFold(filepath.Ext(path), ".typ") {
 		return nil, fmt.Errorf("unsupported document: %s", path)
 	}
 	abs, err := filepath.Abs(path)
@@ -53,6 +67,9 @@ func (s *Session) Close() {
 		s.fast.close()
 	}
 	os.RemoveAll(s.dir)
+	if s.trialRoot != "" {
+		os.RemoveAll(s.trialRoot)
+	}
 }
 
 const MaxPageEdge = 5120
@@ -92,7 +109,7 @@ func ExportPDF(ctx context.Context, path string, source io.Reader, target string
 	if runtime.GOOS == "darwin" {
 		source = io.TeeReader(source, digest)
 	}
-	if e = s.build(ctx, source, true); e != nil {
+	if e = s.build(ctx, source, true, false); e != nil {
 		return e
 	}
 	in, e := os.Open(s.pdf)
@@ -138,7 +155,8 @@ func renderPage(ctx context.Context, pdf string, page, edge int) (image.Image, e
 	return img, nil
 }
 
-func (s *Session) build(ctx context.Context, source io.Reader, export bool) error {
+func (s *Session) build(ctx context.Context, source io.Reader, export, projectSource bool) error {
+	s.warnings = nil
 	path, pdf := s.path, s.pdf
 	dir := filepath.Dir(pdf)
 	project, err := filepath.Abs(filepath.Dir(path))
@@ -150,13 +168,25 @@ func (s *Session) build(ctx context.Context, source io.Reader, export bool) erro
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".typ":
-		_, err = runReader(ctx, project, source, nil, "typst", "compile", "--root", project, "-", pdf)
-	case ".tex":
+		var log string
+		if projectSource {
+			log, err = s.compileTypstProject(ctx, project, pdf)
+		} else {
+			log, err = runReader(ctx, project, source, nil, "typst", "compile", "--root", s.projectRoot(project), "-", pdf)
+		}
+		if err == nil {
+			s.collectWarnings(log, false)
+		}
+	case ".tex", ".ltx":
 		if err = writeSource(filepath.Join(dir, "preview.tex"), source); err != nil {
 			return err
 		}
 		job := strings.TrimSuffix(filepath.Base(pdf), ".pdf")
-		search := "." + string(os.PathListSeparator) + project + string(os.PathListSeparator)
+		sep := string(os.PathListSeparator)
+		search := "." + sep + project + sep
+		if root := s.projectRoot(project); root != project {
+			search += root + sep
+		}
 		env := []string{"TEXINPUTS=" + search + os.Getenv("TEXINPUTS"), "BIBINPUTS=" + search + os.Getenv("BIBINPUTS"), "BSTINPUTS=" + search + os.Getenv("BSTINPUTS"), "openout_any=p"}
 		// 编译器仅写工作目录。失败（含过期取消）后丢弃本次辅助文件，避免残缺的 aux 污染下一次输入。
 		defer func() {
@@ -174,11 +204,12 @@ func (s *Session) build(ctx context.Context, source io.Reader, export bool) erro
 			if !export {
 				syncFlag = "-synctex=1"
 			}
-			return run(ctx, dir, "", env, "xelatex", syncFlag, "-no-shell-escape", "-no-parse-first-line", "-interaction=nonstopmode", "-halt-on-error", "-jobname="+job, "./preview.tex")
+			return run(ctx, dir, "", env, "xelatex", syncFlag, "-file-line-error", "-no-shell-escape", "-no-parse-first-line", "-interaction=nonstopmode", "-halt-on-error", "-jobname="+job, "./preview.tex")
 		}
 		if e := os.Remove(filepath.Join(dir, job+".bcf")); e != nil && !os.IsNotExist(e) {
 			return e
 		}
+		var backendLog string
 		for pass := 0; pass < 3; pass++ {
 			var log string
 			log, err = latex()
@@ -193,7 +224,7 @@ func (s *Session) build(ctx context.Context, source io.Reader, export bool) erro
 					backend = "bibtex"
 				}
 				if backend != "" {
-					_, err = run(ctx, dir, "", env, backend, job)
+					backendLog, err = run(ctx, dir, "", env, backend, job)
 					if err != nil {
 						break
 					}
@@ -201,7 +232,9 @@ func (s *Session) build(ctx context.Context, source io.Reader, export bool) erro
 				}
 			}
 			rerun := strings.Contains(log, "Rerun") || strings.Contains(log, "rerun") || strings.Contains(log, "undefined references")
-			if !(export && pass == 0) && !rerun {
+			if !(export && pass == 0) && !rerun || pass == 2 {
+				s.collectWarnings(log, true)
+				s.collectWarnings(backendLog, true)
 				break
 			}
 		}
@@ -224,11 +257,20 @@ func (s *Session) build(ctx context.Context, source io.Reader, export bool) erro
 
 // Compile 返回总页数；失败时仍可读取上一份成功预览。
 func (s *Session) Compile(ctx context.Context, source io.Reader) (int, error) {
+	return s.compile(ctx, source, true, false)
+}
+
+// CompileTrial keeps the PDF inside this session and skips Quick Look publication.
+func (s *Session) CompileTrial(ctx context.Context, source io.Reader) (int, error) {
+	return s.compile(ctx, source, false, false)
+}
+
+func (s *Session) compile(ctx context.Context, source io.Reader, publish, projectSource bool) (int, error) {
 	digest := sha256.New()
-	if runtime.GOOS == "darwin" {
+	if publish && runtime.GOOS == "darwin" {
 		source = io.TeeReader(source, digest)
 	}
-	if err := s.build(ctx, source, false); err != nil {
+	if err := s.build(ctx, source, false, projectSource); err != nil {
 		return 0, err
 	}
 	dir, pdf := s.dir, s.pdf
@@ -247,7 +289,9 @@ func (s *Session) Compile(ctx context.Context, source io.Reader) (int, error) {
 				if err = fsutil.ReplaceFile(pdf, filepath.Join(store, "current.pdf")); err != nil {
 					return 0, err
 				}
-				storeQuickLook(ctx, s.path, filepath.Join(store, "current.pdf"), digest.Sum(nil))
+				if publish {
+					storeQuickLook(ctx, s.path, filepath.Join(store, "current.pdf"), digest.Sum(nil))
+				}
 				s.indexed = false
 				s.anchors = nil
 				s.pages = n
@@ -256,4 +300,11 @@ func (s *Session) Compile(ctx context.Context, source io.Reader) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("pdfinfo: missing page count")
+}
+
+func (s *Session) projectRoot(fallback string) string {
+	if s.trialRoot != "" {
+		return s.trialRoot
+	}
+	return fallback
 }

@@ -187,7 +187,7 @@ func ModifiedAt(path string) int64 {
 // 避免某个入口静默隐藏分段文档。
 func IsSupportedDocument(path string) bool {
 	switch strings.ToLower(strings.TrimPrefix(filepath.Ext(path), ".")) {
-	case "md", "markdown", "txt", "json":
+	case "md", "markdown", "txt", "json", "bib", "biblatex", "yml", "yaml":
 		return true
 	}
 	return providers.ForPath(path) != nil

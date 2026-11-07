@@ -6,8 +6,8 @@ import (
 	"nomo/desktop/internal/config"
 )
 
-// appIdentifier 决定应用数据目录（与 Tauri 版本一致），升级后沿用已有配置与恢复数据。
-const appIdentifier = "com.nomo.desktop"
+// appDataIdentifier 保留与旧版共享的配置、恢复数据与缓存路径，独立于 mygo.json 的打包身份。
+const appDataIdentifier = "com.nomo.desktop"
 
 // desktopApp 持有进程级服务；在 main 中 App.Run 之前初始化一次，此后只读。
 type desktopApp struct {

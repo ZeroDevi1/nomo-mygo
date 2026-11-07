@@ -4,6 +4,7 @@ package providers
 import (
 	"iter"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"nomo/desktop/provider"
@@ -22,9 +23,9 @@ func All() iter.Seq[*provider.Descriptor] {
 	}
 }
 func ForPath(path string) *provider.Descriptor {
-	ext := filepath.Ext(path)
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
 	for _, p := range builtins {
-		if strings.EqualFold(ext, p.Extension) {
+		if slices.Contains(p.Extensions, ext) {
 			return p
 		}
 	}

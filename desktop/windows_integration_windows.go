@@ -14,6 +14,7 @@ import (
 	winapi "golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"nomo/desktop/internal/config"
 	"nomo/desktop/internal/i18n"
 )
 
@@ -23,7 +24,7 @@ import (
 
 const (
 	nomoMarkdownProgID        = "Nomo.Markdown"
-	nomoAppName               = "Nomo"
+	nomoRegistrationName      = "Nomo"
 	appCapabilitiesKey        = `Software\Nomo\Capabilities`
 	registeredApplicationsKey = `Software\RegisteredApplications`
 	contextMenuDisabledMarker = "shell-context-menu.disabled"
@@ -185,7 +186,7 @@ func markdownFileAssociationStatus(locale i18n.Locale) (*markdownAssociationStat
 }
 
 func isNomoRegistered(exe string) bool {
-	registeredApp, _ := readRegistryString(registry.CURRENT_USER, registeredApplicationsKey, nomoAppName)
+	registeredApp, _ := readRegistryString(registry.CURRENT_USER, registeredApplicationsKey, nomoRegistrationName)
 	command, _ := readRegistryString(registry.CURRENT_USER, `Software\Classes\Nomo.Markdown\shell\open\command`, "")
 	return strings.EqualFold(registeredApp, appCapabilitiesKey) && strings.Contains(strings.ToLower(command), strings.ToLower(exe))
 }
@@ -220,11 +221,11 @@ func registerMarkdownFileAssociation(locale i18n.Locale) (*desktopActionPayload,
 	}
 	writes = append(writes,
 		struct{ path, name, value string }{`Software\Classes\Applications\` + exeName + `\shell\open\command`, "", openCommand},
-		struct{ path, name, value string }{appCapabilitiesKey, "ApplicationName", nomoAppName},
+		struct{ path, name, value string }{appCapabilitiesKey, "ApplicationName", config.AppName},
 		struct{ path, name, value string }{appCapabilitiesKey, "ApplicationDescription", i18n.Text(locale, "file_assoc_description")},
 		struct{ path, name, value string }{appCapabilitiesKey + `\FileAssociations`, ".md", nomoMarkdownProgID},
 		struct{ path, name, value string }{appCapabilitiesKey + `\FileAssociations`, ".markdown", nomoMarkdownProgID},
-		struct{ path, name, value string }{registeredApplicationsKey, nomoAppName, appCapabilitiesKey},
+		struct{ path, name, value string }{registeredApplicationsKey, nomoRegistrationName, appCapabilitiesKey},
 	)
 	for _, write := range writes {
 		if err := writeRegistryString(write.path, write.name, write.value); err != nil {
@@ -257,7 +258,7 @@ func unregisterMarkdownFileAssociation(locale i18n.Locale) (*desktopActionPayloa
 		deleteRegistryValue(`Software\Classes\`+extension+`\OpenWithProgids`, nomoMarkdownProgID)
 	}
 	deleteRegistryTree(appCapabilitiesKey)
-	deleteRegistryValue(registeredApplicationsKey, nomoAppName)
+	deleteRegistryValue(registeredApplicationsKey, nomoRegistrationName)
 	return &desktopActionPayload{OK: true, Message: i18n.Text(locale, "md_assoc_unregistered_message")}, nil
 }
 

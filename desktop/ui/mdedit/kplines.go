@@ -7,13 +7,13 @@ import (
 )
 
 // kpLine 是精细排版的一个视觉行：l 为该行单独排版（不换行）的文字，覆盖显示 UTF-16 区间 [u0, u1)（行末显示的
-// 连字符不在区间内）；行框位于 [y, y+h)，文字原点为 (x, ty)。相邻行首尾相接：u1 等于下一行的 u0。
+// 连字符不在区间内）。换行符留在本行区间中，供字素导航与选区映射。相邻行首尾相接：u1 等于下一行的 u0。
 type kpLine struct {
-	l          *ui.TextLayout
-	u0, u1     int
-	x, y, h    float32
-	ty         float32
-	lastInPara bool
+	l             *ui.TextLayout
+	u0, u1        int
+	x, y, h       float32
+	ty            float32
+	endsWithBreak bool
 }
 
 // kpLineAt 返回显示偏移 idx 所在的行：位于两行交界时，downstream 取后一行（行首），否则取前一行（行尾）。
@@ -47,12 +47,16 @@ func (ll *lineLayout) kpBoundary(idx, dir int) int {
 	return k.u0 + min(k.l.PreviousBoundary(k.local(idx)), k.u1-k.u0)
 }
 
-// kpIndexAt 按纵坐标找行（行距归属所在行），在行内命中；行末的连字符不对应原文，映射到行尾。
+// kpIndexAt 按纵坐标找行（行距归属所在行），在行内命中。含换行符的行在该字符之前结束命中范围。
 func (ll *lineLayout) kpIndexAt(pt ui.Point) int {
 	j := sort.Search(len(ll.kp), func(j int) bool { return ll.kp[j].y+ll.kp[j].h > pt.Y })
 	k := &ll.kp[min(j, len(ll.kp)-1)]
 	y := min(max(pt.Y-k.ty, 0), max(0, k.h-1))
-	return k.u0 + min(k.l.IndexAt(ui.Point{X: pt.X - k.x, Y: y}), k.u1-k.u0)
+	end := k.u1
+	if k.endsWithBreak {
+		end--
+	}
+	return min(k.u0+k.l.IndexAt(ui.Point{X: pt.X - k.x, Y: y}), end)
 }
 
 // kpRects 返回显示区间的矩形；full 为 true 时扩展到整个行框（选区底色），否则为文字行高。

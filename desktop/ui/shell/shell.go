@@ -86,6 +86,7 @@ type Shell struct {
 	post func(func())
 
 	compile *compilePane
+	scholar *scholarState
 	mini    miniState // Markdown 小窗（mini.go）
 	opts    Options   // 创建参数，“移动到新窗口”用它创建新窗口（windows.go）
 	// 托盘（tray.go）：trayOK 为托盘是否可用；quitting 为正在退出（不再按关闭到托盘拦截）；closeChoice* 为
@@ -289,7 +290,7 @@ func (s *Shell) Open() *mygo.Window {
 		stateKey = ""
 	}
 	s.win = mygo.NewWindow(mygo.WindowOptions{
-		Title: "Nomo", Width: 1180, Height: 760, MinWidth: 920, MinHeight: 640, // 与 WebView 版文档窗口一致
+		Title: config.AppName, Width: 1180, Height: 760, MinWidth: 920, MinHeight: 640, // 与 WebView 版文档窗口一致
 		StateKey: stateKey, TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
 	})
 	s.post = s.win.Update
@@ -312,10 +313,14 @@ func (s *Shell) Open() *mygo.Window {
 		s.win.Update(func() {
 			s.checkExternalChanges()
 			s.images.Revalidate()
+			if p := s.scholar; p != nil && !p.busy {
+				p.libraryReady = false
+			}
 		})
 	})
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
+		s.closeScholar()
 		s.closeCompile()
 		s.finishWorkspaceClose()
 		unregister(s)
@@ -382,9 +387,9 @@ func (s *Shell) updateTitle() {
 	if s.win == nil {
 		return
 	}
-	title := "Nomo"
+	title := config.AppName
 	if t := s.activeTab(); t != nil {
-		title = t.Name(s.untitledName) + " - Nomo"
+		title = t.Name(s.untitledName) + " - " + config.AppName
 	}
 	s.win.SetTitle(title)
 }
@@ -395,6 +400,10 @@ func (s *Shell) activate(i int) {
 		return
 	}
 	if prev := s.activeTab(); prev != nil {
+		if p := s.scholar; p != nil && p.changes.tabID == prev.ID {
+			s.captureScholarChangeSnapshot(p, prev.Source().Buffer.Snapshot(), time.Now())
+			s.flushScholarChanges(p)
+		}
 		prev.syncFromSource()
 		// 同一组合内切换活动文档时两篇都在显示，不释放布局。
 		if prev.partner != s.tabs[i].ID {
@@ -452,6 +461,10 @@ func (s *Shell) OpenExternal(paths []string) {
 // OpenFiles 打开文档；已打开的切换过去。
 func (s *Shell) OpenFiles(paths []string) {
 	for _, p := range paths {
+		if scholarPathReserved(p) {
+			s.status = "文件正在执行学术工作区写入，请稍后打开"
+			continue
+		}
 		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
 			s.openFolder(p)
 			continue
@@ -568,9 +581,9 @@ func (s *Shell) openDropped(paths []string) {
 }
 
 func (s *Shell) markdownFilters() []mygo.FileFilter {
-	filters := []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown", "mdown", "mkd"}}, {Name: "Text / JSON", Extensions: []string{"txt", "json"}}}
+	filters := []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown", "mdown", "mkd"}}, {Name: "Text / JSON", Extensions: []string{"txt", "json"}}, {Name: "Bibliography", Extensions: []string{"bib", "biblatex", "yml", "yaml"}}}
 	for p := range providers.All() {
-		filters = append(filters, mygo.FileFilter{Name: p.Name, Extensions: []string{strings.TrimPrefix(p.Extension, ".")}})
+		filters = append(filters, mygo.FileFilter{Name: p.Name, Extensions: p.Extensions})
 	}
 	return filters
 }
@@ -626,6 +639,10 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 				s.save(t, false, then)
 			})
 		}()
+		return
+	}
+	if scholarPathReserved(t.Path) {
+		s.status = "文件正在执行学术工作区写入，请稍后保存"
 		return
 	}
 	text, ver, path, enc := t.text(), t.version(), t.Path, t.Encoding
@@ -794,6 +811,16 @@ func (s *Shell) setMode(mode string) {
 // run 在当前文档上执行编辑命令；源码模式下格式命令不可用。
 func (s *Shell) run(name string) {
 	t := s.activeTab()
+	if p := s.scholar; p != nil && isManuscript(t) {
+		switch name {
+		case "link":
+			s.openScholarInlinePrompt(p)
+			return
+		case "codeBlock":
+			p.literature.picker, p.literature.focusPicker = true, true
+			return
+		}
+	}
 	if t != nil && name == "details" && s.mode() == modeSource && t.Kind() == kindMarkdown {
 		s.insertSourceDetails(t)
 		return

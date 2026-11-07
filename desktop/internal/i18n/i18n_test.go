@@ -39,16 +39,16 @@ func TestReturnsLocalizedNativeChromeText(t *testing.T) {
 		key    string
 		want   string
 	}{
-		{ZhCN, "tray_open", "打开 Nomo"},
-		{ZhTW, "tray_open", "開啟 Nomo"},
-		{EnUS, "tray_open", "Open Nomo"},
-		{JaJP, "tray_open", "Nomo を開く"},
+		{ZhCN, "tray_open", "打开 Nomo Scholar"},
+		{ZhTW, "tray_open", "開啟 Nomo Scholar"},
+		{EnUS, "tray_open", "Open Nomo Scholar"},
+		{JaJP, "tray_open", "Nomo Scholar を開く"},
 		{ZhCN, "menu_chart_blank", "空白图表"},
 		{ZhTW, "menu_chart_blank", "空白圖表"},
 		{EnUS, "menu_chart_blank", "Blank Diagram"},
 		{JaJP, "menu_chart_blank", "空白の図表"},
 		{JaJP, "menu_file", "ファイル(&F)"},
-		{JaJP, "settings_window_title", "環境設定 - Nomo"},
+		{JaJP, "settings_window_title", "環境設定 - Nomo Scholar"},
 	}
 	for _, c := range cases {
 		if got := Text(c.locale, c.key); got != c.want {

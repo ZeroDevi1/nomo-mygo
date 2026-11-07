@@ -1,10 +1,11 @@
-# Nomo MSIX build
+# Nomo Scholar MSIX build
 
 `package-identity.json` is the only committed source of MSIX identity values. It contains the
 Partner Center identity and reserved display name `Nomo Markdown` for Store product `9P1G24GK650Z`. `ApplicationId` remains `Nomo`, so the
 runtime AUMID is always calculated as `<current PFN>!Nomo`.
 
-Development package:
+Development packages use the Nomo Scholar display name from `mygo.json`. Store packages use the
+reserved Partner Center display name, and the Store listing is managed in Partner Center.
 
 ```powershell
 pwsh -NoProfile -File scripts/msix/Build-Msix.ps1 -Mode Dev
@@ -28,6 +29,6 @@ signs the certified package. PFX files, passwords, and generated artifacts must 
 `AppxManifest.xml`.
 
 The build runs `go tool mygo build -platform windows/amd64` (skip with `-SkipApplicationBuild`) and packages
-`target/mygo/windows-amd64/Nomo.exe` as `nomo.exe`, together with the bundled resources next to it; the
-NSIS installer `Nomo Setup *.exe` stays out of the package. After unpacking the MSIX it verifies that the
+`target/mygo/windows-amd64/Nomo Scholar.exe` as `nomo.exe`, together with the bundled resources next to it; the
+NSIS installer `nomo-setup-*.exe` stays out of the package. After unpacking the MSIX it verifies that the
 executable SHA-256 is unchanged, and records it in `msix-validation-report.json`.

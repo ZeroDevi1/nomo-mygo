@@ -6,6 +6,8 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"nomo/desktop/internal/config"
 )
 
 // command 是一条菜单命令；同一张表生成标题栏菜单、macOS 菜单栏与快捷键。
@@ -27,6 +29,11 @@ type menuGroup struct {
 	label string // 文案键
 	items []command
 }
+
+var (
+	scholarCiteMods  = ui.Cmd | ui.Shift
+	scholarAgentMods = ui.Cmd | ui.Alt
+)
 
 func (s *Shell) menuGroups() []menuGroup {
 	cmd, shift, alt := ui.Cmd, ui.Shift, ui.Alt
@@ -86,8 +93,24 @@ func (s *Shell) menuGroups() []menuGroup {
 					s.setMode(modeSource)
 				}
 			}}, "toggle-source"),
-			{id: "sidebar", label: "showHideExplorer", sep: true, run: (*Shell).toggleSidebar},
-			{id: "outline", label: "showOutline", run: (*Shell).toggleOutline},
+			{id: "sidebar", label: "showHideExplorer", sep: true, run: func(s *Shell) {
+				if p := s.scholarForTab(s.activeTab()); p != nil && s.win != nil {
+					width, _ := s.win.ContentSize()
+					if width < scholarCompactWidth {
+						p.compactNav = !p.compactNav
+						return
+					}
+				}
+				s.toggleSidebar()
+			}},
+			{id: "outline", label: "showOutline", run: func(s *Shell) {
+				if p := s.scholarForTab(s.activeTab()); p != nil && s.win != nil {
+					width, _ := s.win.ContentSize()
+					s.showScholarNavigation(p, scholarOutline, float32(width))
+					return
+				}
+				s.toggleOutline()
+			}},
 			custom(command{id: "toolbar", label: "showToolbar", run: (*Shell).toggleToolbar}, "toggle-toolbar"),
 			custom(command{id: "focus", label: "enterFocusMode", run: (*Shell).toggleFocus}, "toggle-focus"),
 			custom(command{id: "mini", label: "markdownMiniShortcut", run: (*Shell).toggleMini}, "toggle-markdown-mini"),
@@ -96,6 +119,36 @@ func (s *Shell) menuGroups() []menuGroup {
 			custom(command{id: "theme", label: "switchTheme", sep: true, run: func(s *Shell) { s.toggleTheme(s.prefs.ThemeMode == "dark") }}, "toggle-theme"),
 		}},
 	}
+	groups = append(groups, menuGroup{"scholarWorkspace", []command{
+		{id: "scholarCite", label: "scholarInsertLocalCitations", mods: scholarCiteMods, key: ui.KeyK, run: (*Shell).openScholarCitations},
+		{id: "scholarLibrary", label: "scholarOpenLibrary", run: func(s *Shell) {
+			if p := s.scholarForTab(s.activeTab()); p != nil && s.win != nil {
+				width, _ := s.win.ContentSize()
+				s.showScholarNavigation(p, scholarLiterature, float32(width))
+			}
+		}},
+		{id: "scholarAgent", label: "scholarAgentName", mods: scholarAgentMods, key: ui.KeyL, sep: true, run: func(s *Shell) {
+			if p := s.scholarForTab(s.activeTab()); p != nil && !p.literature.picker && !p.navigation.open {
+				s.openScholarAgent(p)
+			}
+		}},
+		{id: "scholarDiagnostics", label: "scholarDiagnostics", run: func(s *Shell) {
+			if p := s.scholarForTab(s.activeTab()); p != nil {
+				s.scholarToggleDrawer(p, scholarDiagnostics)
+			}
+		}},
+		{id: "scholarDiff", label: "scholarViewRecentEdit", sep: true, run: func(s *Shell) {
+			if p := s.scholarForTab(s.activeTab()); p != nil {
+				s.openScholarChange(p, 0)
+			}
+		}},
+		{id: "scholarPalette", label: "scholarCommandPalette", mods: cmd, key: ui.KeyP, run: func(s *Shell) {
+			if p := s.scholarForTab(s.activeTab()); p != nil && !p.literature.picker && !p.navigation.open {
+				s.openScholarPalette(p)
+			}
+		}},
+	}})
+
 	for _, g := range groups {
 		for i := range g.items {
 			if it := &g.items[i]; it.sc != "" {
@@ -140,6 +193,7 @@ func (s *Shell) editCommand(id string) bool {
 		return false
 	}
 	if s.mode() == modeSource {
+		s.tagScholarChange(t, id)
 		if id == "undo" {
 			t.Source().Buffer.Undo()
 		} else {
@@ -154,6 +208,9 @@ func (s *Shell) editCommand(id string) bool {
 func (s *Shell) menus(c *ui.Context) {
 	t := c.Theme()
 	for _, g := range s.menuGroups() {
+		if g.label == "scholarWorkspace" && s.scholarForTab(s.activeTab()) == nil {
+			continue
+		}
 		ck := c.Key(g.label)
 		b := ui.ButtonBase(ck).Padding(4, 10).Radius(6)
 		if b.Hovered() {
@@ -165,7 +222,7 @@ func (s *Shell) menus(c *ui.Context) {
 				if it.sep && i > 0 {
 					m.Separator()
 				}
-				item := m.Item(s.itemLabel(it))
+				item := m.Item(s.itemLabel(it)).Disabled(it.id == "scholarCite" && !isManuscript(s.activeTab()))
 				if it.key != 0 {
 					item.Shortcut(it.mods, it.key)
 				}
@@ -238,7 +295,7 @@ func (s *Shell) installMenu() {
 		return
 	}
 	// 应用菜单按 macOS 惯例自行组织：关于、设置…（⌘,）、服务、隐藏、退出。
-	app := &mygo.MenuItem{Label: "Nomo", Submenu: []*mygo.MenuItem{
+	app := &mygo.MenuItem{Label: config.AppName, Submenu: []*mygo.MenuItem{
 		{Role: mygo.RoleAbout}, mygo.Separator(),
 		{Label: s.tr("settings") + "…", Accelerator: "CmdOrCtrl+,", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
 			if t := shellForWindow(w); t != nil {
@@ -335,30 +392,34 @@ func (s *Shell) shortcutText(id string) string {
 			if it.id != id || it.key == 0 {
 				continue
 			}
-			name := keyNames[it.key]
-			if runtime.GOOS == "darwin" {
-				var b strings.Builder
-				for _, m := range [...]struct {
-					mod ui.Modifiers
-					sym string
-				}{{ui.Ctrl, "⌃"}, {ui.Alt, "⌥"}, {ui.Shift, "⇧"}, {ui.Cmd, "⌘"}} {
-					if it.mods&m.mod != 0 {
-						b.WriteString(m.sym)
-					}
-				}
-				return b.String() + name
-			}
-			parts := []string{}
-			for _, m := range [...]struct {
-				mod  ui.Modifiers
-				name string
-			}{{ui.Cmd, "Ctrl"}, {ui.Alt, "Alt"}, {ui.Shift, "Shift"}} {
-				if it.mods&m.mod != 0 {
-					parts = append(parts, m.name)
-				}
-			}
-			return strings.Join(append(parts, name), "+")
+			return commandShortcutDisplay(it.mods, it.key)
 		}
 	}
 	return ""
+}
+
+func commandShortcutDisplay(mods ui.Modifiers, key ui.Key) string {
+	name := keyNames[key]
+	if runtime.GOOS == "darwin" {
+		var b strings.Builder
+		for _, m := range [...]struct {
+			mod ui.Modifiers
+			sym string
+		}{{ui.Ctrl, "⌃"}, {ui.Alt, "⌥"}, {ui.Shift, "⇧"}, {ui.Cmd, "⌘"}} {
+			if mods&m.mod != 0 {
+				b.WriteString(m.sym)
+			}
+		}
+		return b.String() + name
+	}
+	parts := []string{}
+	for _, m := range [...]struct {
+		mod  ui.Modifiers
+		name string
+	}{{ui.Cmd, "Ctrl"}, {ui.Alt, "Alt"}, {ui.Shift, "Shift"}} {
+		if mods&m.mod != 0 {
+			parts = append(parts, m.name)
+		}
+	}
+	return strings.Join(append(parts, name), "+")
 }

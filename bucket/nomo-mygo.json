@@ -1,6 +1,6 @@
 {
     "version": "0.8.1",
-    "description": "Local-first Markdown editor, MyGo rewrite of Nomo",
+    "description": "Nomo Scholar, a local-first editor for Markdown, LaTeX, and Typst",
     "homepage": "https://github.com/ZeroDevi1/nomo-mygo",
     "license": "AGPL-3.0-or-later",
     "notes": "Settings are stored in %APPDATA%\\com.nomo.desktop. Update with 'scoop update nomo-mygo'.",

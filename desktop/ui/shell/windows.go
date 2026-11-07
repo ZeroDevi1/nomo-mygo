@@ -143,7 +143,15 @@ func (s *Shell) adoptTabs(from *Shell, id, before int) {
 	}
 	for _, t := range moving {
 		t.syncFromSource()
-		t.source = nil // 源码编辑器状态绑定原窗口，在新窗口重建
+		// 源码编辑器视图绑定原窗口；纯文本标签的缓冲及撤销历史需要一起移交。
+		if t.plain {
+			old := t.source
+			t.source = t.sourceWithBuffer(old.Buffer)
+			t.source.SetSelections(old.Selection())
+			t.syntaxProvider, t.afterSourceInput, t.scholarBound = nil, nil, false
+		} else {
+			t.source = nil
+		}
 		t.Ed.ReleaseLayouts()
 		i := from.findTabIndex(t.ID)
 		from.tabs = slices.Delete(from.tabs, i, i+1)

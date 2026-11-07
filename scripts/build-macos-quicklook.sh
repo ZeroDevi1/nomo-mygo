@@ -5,7 +5,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "Nomo Quick Look extension can only be built on macOS." >&2
+  echo "Nomo Scholar Quick Look extension can only be built on macOS." >&2
   exit 1
 fi
 

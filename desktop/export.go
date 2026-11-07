@@ -175,7 +175,7 @@ func renderHTMLToPDF(ctx context.Context, htmlPath string, input exportPDFInput)
 	}
 	loaded := make(chan error, 1)
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:       "Nomo PDF Export",
+		Title:       "Nomo Scholar PDF Export",
 		Width:       1000,
 		Height:      1200,
 		Hidden:      true,

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./desktop/packaging/icons/nomo/source/nomo-app-light-128.png" alt="Nomo icon" width="60">
+  <img src="./desktop/packaging/icons/nomo/source/nomo-app-light-128.png" alt="Nomo Scholar icon" width="60">
 </p>
 
-<h1 align="center">Nomo</h1>
+<h1 align="center">Nomo Scholar</h1>
 
 <p align="center">
   <a href="https://github.com/ZeroDevi1/nomo-mygo/releases/latest">
@@ -21,11 +21,11 @@
 </p>
 
 <p align="center">
-  <strong>A local-first Markdown editor that keeps writing simple.</strong>
+  <strong>A local-first academic writing editor for Markdown, LaTeX, and Typst.</strong>
 </p>
 
 > [!NOTE]
-> This repository is **the MyGo rewrite of Nomo**, not the original Nomo.
+> **Nomo Scholar** builds on the original Nomo using Go and MyGo.
 >
 > - **Original Nomo**: [nomo-md/nomo](https://github.com/nomo-md/nomo) by [LIXianSenQwQ](https://github.com/LIXianSenQwQ), built with Tauri + Svelte and rendered in a WebView. Report issues, find releases and install via Homebrew there.
 > - **MyGo rewrite (this repository)**: [ZeroDevi1/nomo-mygo](https://github.com/ZeroDevi1/nomo-mygo) keeps the original features, settings format and design, rewritten in Go with the MyGo native UI, with no WebView or Node.js.
@@ -58,8 +58,8 @@ brew install --cask zerodevi1/nomo-mygo/nomo-mygo
 
 Upgrade with `brew upgrade --cask nomo-mygo`; uninstall with `brew uninstall --cask nomo-mygo` (add `--zap` to also remove settings and drafts).
 
-- The `nomo` cask is the original (Tauri) version and installs the same `Nomo.app`; run `brew uninstall --cask nomo` first.
-- This edition is not notarized yet. If macOS says the developer cannot be verified or the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Nomo.app` and open it again.
+- The original `nomo` cask shares the settings and recovery directory, `~/Library/Application Support/com.nomo.desktop`. Quit the previous app before opening Nomo Scholar.
+- This edition is not notarized yet. If macOS says the developer cannot be verified or the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Nomo Scholar.app"` and open it again. Older releases use `/Applications/Nomo.app`.
 
 ### Scoop (Windows)
 
@@ -103,7 +103,7 @@ go tool mygo dev
 
 [Issues](https://github.com/ZeroDevi1/nomo-mygo/issues) and [pull requests](https://github.com/ZeroDevi1/nomo-mygo/pulls) are welcome; include your OS version, steps to reproduce and a sample when reporting a bug.
 
-Enjoy Nomo? Star [this project](https://github.com/ZeroDevi1/nomo-mygo) and [the original](https://github.com/nomo-md/nomo), or follow the original author [LIXianSenQwQ](https://github.com/LIXianSenQwQ). Community: [linux.do](https://linux.do/).
+Enjoy Nomo Scholar? Star [this project](https://github.com/ZeroDevi1/nomo-mygo) and [the original](https://github.com/nomo-md/nomo), or follow the original author [LIXianSenQwQ](https://github.com/LIXianSenQwQ). Community: [linux.do](https://linux.do/).
 
 Licensed under [AGPL-3.0-or-later](./LICENSE); contact the maintainers for separate commercial licensing. Third-party components retain their own licenses.
 

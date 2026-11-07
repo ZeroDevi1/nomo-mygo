@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown/parser"
 
 	"nomo/desktop/ui/typography"
 )
@@ -15,8 +14,7 @@ import (
 // 精细排版（原版 KP 排版，设置“精细排版”）：对段落、列表项与表格单元格的文字行按原版规则求解 Knuth–Plass 断行
 // （desktop/ui/typography）。
 //   - 测量：整段不换行排版一次，各字素边界的光标横坐标即连续前缀宽度（对应原版的连续前缀测量）。
-//   - 单元：字素为盒；空白与源码软换行为可伸缩的胶（软换行两侧有汉字时为零宽，否则为一个空格）；硬换行为强制断点；
-//     行内代码与行内图片为不可拆分的盒。
+//   - 单元：字素为盒，空白为可伸缩的胶。投影中保留的换行都是强制断点；行内代码在每条源文行内作为整体排版。
 //   - 绘制：每个视觉行单独排版（不换行），间距调整以字距（LetterSpacing）施加在单元的末字符上，行首压缩为整行左移，
 //     自动断词的行末补显示连字符。
 // 不适用的内容（汉字与拉丁字母以外的文字、过长段落、居中或右对齐、组字中的行）或求解无解、超出预算时返回 nil，
@@ -40,6 +38,9 @@ func (e *Editor) typeset(top Block, r *row, p *projection, spans []ui.Span, font
 		return nil // 组字期间保持原生布局，避免候选窗随断行跳动
 	}
 	text := p.text
+	if strings.HasSuffix(text, "\n") {
+		return nil // 末尾换行之后的空行交给原生布局，保留末行光标位置。
+	}
 	if !typography.SupportedText(strings.ReplaceAll(text, objChar, "")) {
 		return nil
 	}
@@ -65,8 +66,7 @@ func (e *Editor) typeset(top Block, r *row, p *projection, spans []ui.Span, font
 	}
 	base := ui.ShapeRichTextWith(mspans, font, ui.TextShape{})
 	x := func(u int) float64 { return float64(base.Caret(u).X) }
-	spaceW, hyphenW := e.kpGlyphWidths(font)
-	hard := e.hardBreaks(top, r, p)
+	hyphenW := e.kpHyphenWidth(font)
 	forced := map[int]bool{}
 	var units []typography.Item
 	natural := map[int]float64{} // 单元 From → 测量宽度（规则可能改变 Item.Width，绘制按差值调整）
@@ -81,6 +81,10 @@ func (e *Editor) typeset(top Block, r *row, p *projection, spans []ui.Span, font
 			Weight: 1, HasComfort: true}
 		var next int
 		switch {
+		case text[ub[u]] == '\n':
+			next = u + 1
+			unit.Kind, unit.Discardable, unit.Text = typography.Glue, true, "\n"
+			forced[next] = true
 		case p.runs[k].atomic && sp.ObjectWidth > 0:
 			next = u + 1
 			unit.Text, unit.Width = "￼", float64(sp.ObjectWidth)
@@ -88,6 +92,9 @@ func (e *Editor) typeset(top Block, r *row, p *projection, spans []ui.Span, font
 		case st&stCode != 0:
 			// 行内代码整段为一个盒（原版把 code 视为原子）；占段落自然宽度 35% 以上时规则改用左对齐。
 			next = starts[k+1]
+			if nl := strings.IndexByte(text[ub[u]:ub[next]], '\n'); nl >= 0 {
+				next = sort.SearchInts(ub, ub[u]+nl)
+			}
 			unit.Text, unit.Width, unit.Code = text[ub[u]:ub[next]], x(next)-x(u), true
 		default:
 			next = min(base.NextBoundary(u), starts[k+1])
@@ -98,21 +105,6 @@ func (e *Editor) typeset(top Block, r *row, p *projection, spans []ui.Span, font
 			wd := max(0, x(next)-x(u))
 			unit.Text, unit.Width = g, wd
 			switch {
-			case g == "\n":
-				unit.Kind, unit.Discardable = typography.Glue, true
-				if hard[u] {
-					unit.Text, unit.Width = "\n", 0
-					forced[next] = true
-				} else {
-					unit.Text = typography.SoftBreakText(text[:ub[u]], text[ub[next]:])
-					unit.Width = 0
-					if unit.Text != "" {
-						unit.Width = spaceW
-						unit.Stretch = spaceW * 0.5
-						unit.ComfortStretch = spaceW * 0.25
-					}
-					unit.Shrink, unit.ComfortShrink = unit.Width/3, unit.Width*0.25
-				}
 			case strings.Trim(g, " \t") == "":
 				unit.Kind, unit.Discardable, unit.SourceWhitespace = typography.Glue, true, true
 				unit.Stretch, unit.Shrink = wd*0.5, wd/3
@@ -157,22 +149,17 @@ func (e *Editor) typeset(top Block, r *row, p *projection, spans []ui.Span, font
 	return e.renderKP(in, res, units, natural, text, ub, spans, starts, font, w, base, p.u16)
 }
 
-// kpGlyphWidths 返回字体中空格与连字符的宽度（软换行投影与断词显示用），按字体缓存：超过 64 种时清空重建，换字体
-// 或缩放时清空（SetStyle、SetFonts）。
-func (e *Editor) kpGlyphWidths(font ui.Font) (space, hyphen float64) {
-	if v, ok := e.kpWidths[font]; ok {
-		return v[0], v[1]
+// kpHyphenWidth 按字体缓存断词显示用的连字符宽度，超过 64 种时清空重建，换字体或缩放时清空。
+func (e *Editor) kpHyphenWidth(font ui.Font) float64 {
+	if w, ok := e.kpHyphenWidths[font]; ok {
+		return w
 	}
-	measure := func(s string) float64 {
-		w, _ := ui.ShapeRichTextWith([]ui.Span{{Text: s}}, font, ui.TextShape{}).Size()
-		return float64(w)
+	if e.kpHyphenWidths == nil || len(e.kpHyphenWidths) > 64 {
+		e.kpHyphenWidths = map[ui.Font]float64{}
 	}
-	if e.kpWidths == nil || len(e.kpWidths) > 64 {
-		e.kpWidths = map[ui.Font][2]float64{}
-	}
-	v := [2]float64{measure(" "), measure("-")}
-	e.kpWidths[font] = v
-	return v[0], v[1]
+	w, _ := ui.ShapeRichTextWith([]ui.Span{{Text: "-"}}, font, ui.TextShape{}).Size()
+	e.kpHyphenWidths[font] = float64(w)
+	return float64(w)
 }
 
 // renderKP 按求解结果逐行排版：单元的宽度差（规则压缩）与分配到的调整加到其末字符的字距上，紧随其后的零长度胶并入
@@ -183,7 +170,7 @@ func (e *Editor) renderKP(in typography.Input, res typography.Result, units []ty
 	ll := &lineLayout{w: w}
 	y := float32(0)
 	ui0 := 0 // units 中当前行的起点
-	for li, line := range res.Lines {
+	for _, line := range res.Lines {
 		u0 := in.Items[line.Start].From
 		u1 := in.Items[line.End-1].To
 		extra := map[int]float32{}
@@ -224,10 +211,7 @@ func (e *Editor) renderKP(in typography.Input, res typography.Result, units []ty
 			sp := spans[spanAt(un.From)]
 			piece := text[ub[un.From]:ub[un.To]]
 			if piece == "\n" {
-				piece = "\u200b"
-				if un.Text == " " {
-					piece = " "
-				}
+				piece = "\u200b" // 单行布局以等长占位保留换行的 UTF-16 偏移。
 			}
 			ex := extra[un.From]
 			if ex == 0 || sp.ObjectWidth > 0 {
@@ -261,7 +245,7 @@ func (e *Editor) renderKP(in typography.Input, res typography.Result, units []ty
 		_, th := l.Size()
 		lh := max(float32(line.Height), th)
 		ll.kp = append(ll.kp, kpLine{l: l, u0: u0, u1: u1, x: -float32(line.TrimStart), y: y, h: lh, ty: y + (lh-th)/2,
-			lastInPara: li == len(res.Lines)-1})
+			endsWithBreak: u1 > u0 && text[ub[u1]-1] == '\n'})
 		y += lh
 	}
 	ll.h = y
@@ -275,22 +259,6 @@ func noExtra(m map[int]float32) bool {
 		}
 	}
 	return true
-}
-
-// hardBreaks 返回行 r 中硬换行（反斜杠或行尾两个空格）的换行符显示偏移；软换行不在其中。
-func (e *Editor) hardBreaks(top Block, r *row, p *projection) map[int]bool {
-	out := map[int]bool{}
-	src := e.Doc.Source()
-	start := top.Start + r.a
-	for _, in := range e.Doc.md.Inlines(top.Index + r.rel) {
-		if in.Kind != parser.LineBreak || in.Start < start || in.End > top.Start+r.b {
-			continue
-		}
-		if nl := strings.IndexByte(src[in.Start:in.End], '\n'); nl >= 0 {
-			out[p.toDisp(in.Start+nl-start)] = true
-		}
-	}
-	return out
 }
 
 func utf16Len(s string) int {

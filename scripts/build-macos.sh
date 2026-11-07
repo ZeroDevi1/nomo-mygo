@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS 发布构建：MyGo 产出已签名的 Nomo.app 后，嵌入 Quick Look 扩展、重新封签并生成 DMG。
+# macOS 发布构建：MyGo 产出已签名的应用后，嵌入 Quick Look 扩展、重新封签并生成 DMG。
 #
 # MyGo 只把 resources 复制到 Contents/Resources，没有写入 Contents/PlugIns 的配置项；
 # 其 `codesign --deep` 还会用主应用 entitlements 覆盖嵌套代码。因此这里让 MyGo 跳过 DMG，
@@ -21,8 +21,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLATFORM="${MACOS_PLATFORM:-darwin/universal}"
 TARGET_ARCH="${PLATFORM#darwin/}"
 IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
-APP_NAME="Nomo"
-OUT_DIR="$ROOT_DIR/target/mygo/darwin-$TARGET_ARCH"
+APP_NAME="$(plutil -extract name raw -o - "$ROOT_DIR/mygo.json")"
+APP_OUT="$(plutil -extract out raw -o - "$ROOT_DIR/mygo.json")"
+OUT_DIR="$ROOT_DIR/$APP_OUT/darwin-$TARGET_ARCH"
 APP_BUNDLE="$OUT_DIR/$APP_NAME.app"
 EXTENSION_NAME="NomoQuickLookPreview.appex"
 EXTENSION_SRC="$ROOT_DIR/target/quicklook/$EXTENSION_NAME"

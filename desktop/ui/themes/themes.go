@@ -106,7 +106,7 @@ func ParseUser(src []byte) (*Theme, error) {
 	}
 	baseID := f.BaseThemeID
 	if baseID == "" {
-		baseID = DefaultThemeID
+		baseID = legacyThemeID
 	}
 	base := Find(builtin, baseID)
 	if base.ID != baseID {

@@ -19,6 +19,10 @@ const quickLookBudget = 128 << 20
 
 // Quick Look 只读取已保存主文件对应的成功排版。PDF 是上次构建的快照，外部图片、章节可能在之后改变。
 func storeQuickLook(ctx context.Context, sourcePath, pdfPath string, compiled []byte) {
+	storeQuickLookIf(ctx, sourcePath, pdfPath, compiled, nil)
+}
+
+func storeQuickLookIf(ctx context.Context, sourcePath, pdfPath string, compiled []byte, stable func() bool) {
 	if runtime.GOOS != "darwin" || ctx.Err() != nil {
 		return
 	}
@@ -81,7 +85,7 @@ func storeQuickLook(ctx context.Context, sourcePath, pdfPath string, compiled []
 	if err != nil || closeErr != nil || ctx.Err() != nil {
 		return
 	}
-	if os.Rename(tmp.Name(), filepath.Join(dir, name)) != nil {
+	if (stable != nil && !stable()) || os.Rename(tmp.Name(), filepath.Join(dir, name)) != nil {
 		return
 	}
 	entries, _ := os.ReadDir(dir)

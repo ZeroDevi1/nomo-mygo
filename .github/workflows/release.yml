@@ -102,20 +102,22 @@ jobs:
           version='${{ github.ref_name }}'
           version="${version#v}"
           assets="$RUNNER_TEMP/assets"
+          app_name="$(node -p "require('./mygo.json').name")"
+          app_slug="$(node -p "require('./mygo.json').slug")"
           mkdir -p "$assets"
           case '${{ matrix.platform }}' in
             windows/amd64)
               out=target/mygo/windows-amd64
-              cp "$out/Nomo Setup $version amd64.exe" "$assets/Nomo_${version}_x64-setup.exe"
+              cp "$out/$app_slug-setup-$version-amd64.exe" "$assets/Nomo_${version}_x64-setup.exe"
               stage="$RUNNER_TEMP/zip/Nomo"
               mkdir -p "$stage"
-              find "$out" -mindepth 1 -maxdepth 1 ! -name 'Nomo Setup *.exe' -exec cp -R {} "$stage/" \;
+              find "$out" -mindepth 1 -maxdepth 1 ! -name "$app_slug-setup-*.exe" -exec cp -R {} "$stage/" \;
               (cd "$RUNNER_TEMP/zip" && zip -qr "$assets/Nomo_${version}_x64.zip" Nomo)
               ;;
             darwin/arm64)
               out=target/mygo/darwin-arm64
-              cp "$out/Nomo $version arm64.dmg" "$assets/Nomo_${version}_aarch64.dmg"
-              tar -C "$out" -czf "$assets/Nomo_aarch64.app.tar.gz" Nomo.app
+              cp "$out/$app_name $version arm64.dmg" "$assets/Nomo_${version}_aarch64.dmg"
+              tar -C "$out" -czf "$assets/Nomo_aarch64.app.tar.gz" "$app_name.app"
               ;;
             linux/amd64)
               out=target/mygo/linux-amd64
@@ -185,6 +187,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
+          app_name="$(jq -r .name mygo.json)"
           dmg="Nomo_${version}_aarch64.dmg"
           zip="Nomo_${version}_x64.zip"
           gh release download "$TAG" --pattern "$dmg" --pattern "$zip" --dir /tmp
@@ -193,10 +196,11 @@ jobs:
           sed -i -E \
             -e "s/version \"[^\"]+\"/version \"${version}\"/" \
             -e "s/sha256 \"[^\"]+\"/sha256 \"${dmg_sha}\"/" \
+            -e "s/^  app .*$/  app \"${app_name}.app\"/" \
             Casks/nomo-mygo.rb
-          jq --indent 4 --arg v "$version" --arg h "$zip_sha" \
+          jq --indent 4 --arg v "$version" --arg h "$zip_sha" --arg name "$app_name" \
             --arg u "https://github.com/${GH_REPO}/releases/download/${TAG}/${zip}" \
-            '.version = $v | .architecture."64bit".url = $u | .architecture."64bit".hash = $h' \
+            '.version = $v | .architecture."64bit".url = $u | .architecture."64bit".hash = $h | .shortcuts = [[$name + ".exe", $name]]' \
             bucket/nomo-mygo.json > /tmp/nomo-mygo.json
           mv /tmp/nomo-mygo.json bucket/nomo-mygo.json
           git config user.name 'github-actions[bot]'

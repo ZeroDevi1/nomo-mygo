@@ -24,6 +24,9 @@ import (
 	"nomo/desktop/internal/fsutil"
 )
 
+// AppName 与 mygo.json 的 name 一致，也用于未通过 MyGo 打包的运行。
+const AppName = "Nomo Scholar"
+
 const (
 	FileName         = "config.json"
 	DraftsDirName    = "drafts"

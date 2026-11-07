@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"nomo/desktop/internal/childproc"
 )
 
 // 保留诊断末尾（TeX 通常在那里报告出错行），长日志不随文档大小常驻内存。
@@ -48,7 +50,12 @@ func runReader(parent context.Context, dir string, input io.Reader, env []string
 	cmd.Stdout = &log
 	cmd.Stderr = &log
 	cmd.WaitDelay = time.Second
-	if err := cmd.Run(); err != nil {
+	cleanup, err := childproc.Start(cmd)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", name, err)
+	}
+	defer cleanup()
+	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		}

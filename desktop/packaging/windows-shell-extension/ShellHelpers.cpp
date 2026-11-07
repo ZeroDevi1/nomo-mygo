@@ -107,27 +107,27 @@ const wchar_t* GetNomoCommandTitle(NomoCommandKind kind, NomoLocale locale) noex
     if (kind == NomoCommandKind::Folder) {
         switch (locale) {
             case NomoLocale::SimplifiedChinese:
-                return L"在 Nomo 中打开文件夹";
+                return L"在 Nomo Scholar 中打开文件夹";
             case NomoLocale::TraditionalChinese:
-                return L"在 Nomo 中開啟資料夾";
+                return L"在 Nomo Scholar 中開啟資料夾";
             case NomoLocale::Japanese:
-                return L"Nomo でフォルダーを開く";
+                return L"Nomo Scholar でフォルダーを開く";
             case NomoLocale::English:
             default:
-                return L"Open folder in Nomo";
+                return L"Open folder in Nomo Scholar";
         }
     }
 
     switch (locale) {
         case NomoLocale::SimplifiedChinese:
-            return L"使用 Nomo 打开";
+            return L"使用 Nomo Scholar 打开";
         case NomoLocale::TraditionalChinese:
-            return L"使用 Nomo 開啟";
+            return L"使用 Nomo Scholar 開啟";
         case NomoLocale::Japanese:
-            return L"Nomo で開く";
+            return L"Nomo Scholar で開く";
         case NomoLocale::English:
         default:
-            return L"Open with Nomo";
+            return L"Open with Nomo Scholar";
     }
 }
 

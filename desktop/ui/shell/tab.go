@@ -39,8 +39,11 @@ type Tab struct {
 
 	// plain 为 true 表示纯源码标签：源码编辑器的 rope 缓冲是唯一事实源，不建 Markdown 文档（Doc 为空文档，
 	// 只为满足共用代码路径）；未保存判定、保存与外部重载都走缓冲。大文件因此只占一份原文、打开不做 Markdown 解析。
-	plain       bool
-	typesetMode int
+	plain               bool
+	typesetMode         int
+	typesetPaused       bool // 取消后保持当前预览视图，直到用户主动恢复。
+	typesetSplitPercent float32
+	scholarBound        bool
 
 	Doc *mdedit.Document
 	Ed  *mdedit.Editor
@@ -146,6 +149,8 @@ const (
 	kindMarkdown = "markdown"
 	kindText     = "text"
 	kindJSON     = "json"
+	kindBib      = "bib"
+	kindYAML     = "yaml"
 )
 
 // Kind 返回文档类型（按路径扩展名）。
@@ -160,6 +165,10 @@ func documentKind(path string) string {
 		return kindText
 	case ".json":
 		return kindJSON
+	case ".bib", ".biblatex":
+		return kindBib
+	case ".yml", ".yaml":
+		return kindYAML
 	}
 	return kindMarkdown
 }
@@ -256,7 +265,10 @@ func (t *Tab) version() uint64 {
 
 // newSource 按文档类型创建源码编辑器状态。
 func (t *Tab) newSource(text string) *editor.State {
-	buf := editor.NewBuffer(text)
+	return t.sourceWithBuffer(editor.NewBuffer(text))
+}
+
+func (t *Tab) sourceWithBuffer(buf *editor.Buffer) *editor.State {
 	label, lang, numbers := "Markdown", "document.md", editor.LineNumbersOff
 	switch t.Kind() {
 	default:
@@ -267,6 +279,10 @@ func (t *Tab) newSource(text string) *editor.State {
 		label, lang, numbers = "JSON", "document.json", editor.LineNumbersOn
 	case kindText:
 		label, lang = "Text", "document.txt"
+	case kindBib:
+		label, lang, numbers = "BibTeX", "", editor.LineNumbersOn
+	case kindYAML:
+		label, lang, numbers = "YAML", "document.yaml", editor.LineNumbersOn
 	}
 	buf.SetLanguage(editor.LanguageFor(lang))
 	st := &editor.State{Buffer: buf, SoftWrap: true, LineNumbers: numbers, Label: label}

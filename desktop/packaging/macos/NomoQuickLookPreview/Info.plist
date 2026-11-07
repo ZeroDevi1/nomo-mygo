@@ -6,11 +6,11 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>Nomo Quick Look</string>
+  <string>Nomo Scholar Quick Look</string>
   <key>CFBundleExecutable</key>
   <string>NomoQuickLookPreview</string>
   <key>CFBundleIdentifier</key>
-  <string>com.nomo.desktop.quicklook</string>
+  <string>com.nomo.scholar.quicklook</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -37,6 +37,7 @@
         <string>public.markdown</string>
         <string>public.tex</string>
         <string>org.tug.tex</string>
+        <string>org.tug.ltx</string>
         <string>org.typst.document</string>
       </array>
       <key>QLIsDataBasedPreview</key>

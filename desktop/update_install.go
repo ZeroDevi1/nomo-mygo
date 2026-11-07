@@ -216,7 +216,7 @@ func updateCacheDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取更新缓存目录失败：%w", err)
 	}
-	return filepath.Join(cache, appIdentifier, "updates"), nil
+	return filepath.Join(cache, appDataIdentifier, "updates"), nil
 }
 
 func fileMD5(path string) (string, error) {

@@ -3,6 +3,8 @@
 
 package themes
 
+import "maps"
+
 // ColorTokenNames 与 src/lib/theme/types.ts 的 THEME_COLOR_TOKEN_NAMES 一致。
 var ColorTokenNames = []string{"background", "surface", "rail", "chrome", "documentBackground", "sidebarActive", "foreground", "mutedForeground", "border", "selection", "hoverBackground", "heading", "link", "accent", "accentStrong", "accentFill", "onAccent", "success", "warning", "danger", "blockquoteBorder", "blockquoteForeground", "blockquoteBackground", "blockquoteClassicBackground", "calloutNoteBorder", "calloutNoteBackground", "calloutNoteClassicBackground", "calloutNoteForeground", "calloutTipBorder", "calloutTipBackground", "calloutTipClassicBackground", "calloutTipForeground", "calloutImportantBorder", "calloutImportantBackground", "calloutImportantClassicBackground", "calloutImportantForeground", "calloutWarningBorder", "calloutWarningBackground", "calloutWarningClassicBackground", "calloutWarningForeground", "calloutCautionBorder", "calloutCautionBackground", "calloutCautionClassicBackground", "calloutCautionForeground", "codeBackground", "codeForeground", "codeBorder", "codeKeyword", "codeBoolean", "codeNumber", "codeString", "codeOperator", "codePunctuation", "tableBorder", "tableHeaderBackground", "titlebarBackground", "titlebarBorder", "titlebarForeground", "dropdownBackground", "dropdownBorder", "scrollbarTrack", "scrollbarThumbIdle", "scrollbarThumb", "scrollbarThumbHover", "scrollbarThumbActive"}
 
@@ -14,9 +16,28 @@ var StyleTokenNames = []string{"radiusXs", "radiusSm", "radiusMd", "radiusLg", "
 var CSSVariables = map[string]string{"accent": "--md-editor-accent", "accentFill": "--md-editor-accent-fill", "accentStrong": "--md-editor-accent-strong", "background": "--md-editor-bg", "blockquoteBackground": "--md-editor-blockquote-bg", "blockquoteBorder": "--md-editor-blockquote-border", "blockquoteClassicBackground": "--md-editor-blockquote-bg-classic", "blockquoteForeground": "--md-editor-blockquote-fg", "border": "--md-editor-border", "borderWidth": "--md-editor-border-width", "calloutCautionBackground": "--md-editor-callout-caution-bg", "calloutCautionBorder": "--md-editor-callout-caution-border", "calloutCautionClassicBackground": "--md-editor-callout-caution-bg-classic", "calloutCautionForeground": "--md-editor-callout-caution-fg", "calloutImportantBackground": "--md-editor-callout-important-bg", "calloutImportantBorder": "--md-editor-callout-important-border", "calloutImportantClassicBackground": "--md-editor-callout-important-bg-classic", "calloutImportantForeground": "--md-editor-callout-important-fg", "calloutNoteBackground": "--md-editor-callout-note-bg", "calloutNoteBorder": "--md-editor-callout-note-border", "calloutNoteClassicBackground": "--md-editor-callout-note-bg-classic", "calloutNoteForeground": "--md-editor-callout-note-fg", "calloutTipBackground": "--md-editor-callout-tip-bg", "calloutTipBorder": "--md-editor-callout-tip-border", "calloutTipClassicBackground": "--md-editor-callout-tip-bg-classic", "calloutTipForeground": "--md-editor-callout-tip-fg", "calloutWarningBackground": "--md-editor-callout-warning-bg", "calloutWarningBorder": "--md-editor-callout-warning-border", "calloutWarningClassicBackground": "--md-editor-callout-warning-bg-classic", "calloutWarningForeground": "--md-editor-callout-warning-fg", "chrome": "--md-editor-chrome", "codeBackground": "--md-editor-code-bg", "codeBoolean": "--md-editor-code-boolean", "codeBorder": "--md-editor-code-border", "codeForeground": "--md-editor-code-fg", "codeKeyword": "--md-editor-code-keyword", "codeNumber": "--md-editor-code-number", "codeOperator": "--md-editor-code-operator", "codePunctuation": "--md-editor-code-punctuation", "codeString": "--md-editor-code-string", "controlHeightLg": "--md-editor-control-height-lg", "controlHeightMd": "--md-editor-control-height-md", "controlHeightSm": "--md-editor-control-height-sm", "danger": "--md-editor-danger", "documentBackground": "--md-editor-document-bg", "dropdownBackground": "--md-dropdown-bg", "dropdownBorder": "--md-dropdown-border", "fontDocument": "--md-editor-font-document", "fontMono": "--md-editor-font-mono", "fontUi": "--md-editor-font-body", "foreground": "--md-editor-fg", "heading": "--md-editor-heading-fg", "hoverBackground": "--md-editor-hover-bg", "link": "--md-editor-link-fg", "mutedForeground": "--md-editor-muted-fg", "onAccent": "--md-editor-on-accent", "radiusLg": "--md-editor-radius-lg", "radiusMd": "--md-editor-radius-md", "radiusPill": "--md-editor-radius-pill", "radiusSm": "--md-editor-radius-sm", "radiusXs": "--md-editor-radius-xs", "rail": "--md-editor-rail", "scrollbarThumb": "--md-scrollbar-thumb", "scrollbarThumbActive": "--md-scrollbar-thumb-active", "scrollbarThumbHover": "--md-scrollbar-thumb-hover", "scrollbarThumbIdle": "--md-scrollbar-thumb-idle", "scrollbarTrack": "--md-scrollbar-track", "selection": "--md-editor-selection-bg", "shadowDialog": "--md-editor-shadow-dialog", "shadowFloating": "--md-editor-shadow", "shadowRaised": "--md-editor-shadow-raised", "sidebarActive": "--md-editor-sidebar-active", "spaceLg": "--md-editor-space-lg", "spaceMd": "--md-editor-space-md", "spaceSm": "--md-editor-space-sm", "spaceXl": "--md-editor-space-xl", "spaceXs": "--md-editor-space-xs", "success": "--md-editor-success", "surface": "--md-editor-surface", "tableBorder": "--md-editor-table-border", "tableHeaderBackground": "--md-editor-table-header-bg", "titlebarBackground": "--md-titlebar-bg", "titlebarBorder": "--md-titlebar-border", "titlebarForeground": "--md-titlebar-fg", "warning": "--md-editor-warning"}
 
 // DefaultThemeID 与 DEFAULT_COLOR_THEME_ID 一致。
-const DefaultThemeID = "nomo-default"
+const DefaultThemeID = "nomo-ios-blue"
 
-var builtin = []*Theme{
+const legacyThemeID = "nomo-default"
+
+func iosBlueTheme(base *Theme) *Theme {
+	theme := *base
+	theme.ID = DefaultThemeID
+	theme.Names = map[string]string{"en-US": "iOS System Blue", "zh-CN": "iOS 系统蓝", "zh-TW": "iOS 系統藍", "ja-JP": "iOS システムブルー"}
+	// Apple HIG system blue, normal contrast, light and dark appearances.
+	for i, overrides := range [2]map[string]string{
+		{"accent": "#0088ff", "accentStrong": "#005ebf", "accentFill": "#0088ff", "onAccent": "#000000",
+			"link": "#005ebf", "selection": "rgba(0, 136, 255, 0.18)", "sidebarActive": "#e6f2ff"},
+		{"accent": "#0091ff", "accentStrong": "#76bcff", "accentFill": "#0091ff", "onAccent": "#000000",
+			"link": "#76bcff", "selection": "rgba(0, 145, 255, 0.28)", "sidebarActive": "#192e48"},
+	} {
+		theme.Variants[i].Tokens = maps.Clone(base.Variants[i].Tokens)
+		maps.Copy(theme.Variants[i].Tokens, overrides)
+	}
+	return &theme
+}
+
+var legacyBuiltin = []*Theme{
 	{ID: "nomo-default", Version: "1.0.0", Author: "Nomo", StyleProfile: "modern", Builtin: true,
 		Names: map[string]string{"en-US": "Nomo Default", "ja-JP": "Nomo デフォルト", "zh-CN": "Nomo 默认", "zh-TW": "Nomo 預設"},
 		Variants: [2]Variant{
@@ -58,3 +79,5 @@ var builtin = []*Theme{
 				Shiki: "github-dark", Mermaid: "base"},
 		}},
 }
+
+var builtin = append([]*Theme{iosBlueTheme(legacyBuiltin[0])}, legacyBuiltin...)
