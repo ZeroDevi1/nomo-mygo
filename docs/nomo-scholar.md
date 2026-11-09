@@ -107,13 +107,13 @@ macOS 的常规项目预览仅在本次编译完全使用磁盘输入、发布�
 
 ## 设计覆盖与验收
 
-“源码已完成”表示存在执行路径并完成本轮源码复核。实机行为和性能数据仍需用户验收。
+“源码已完成”表示存在执行路径并完成源码复核。当前实机结果和后续事项见 [Go Native 重写计划 · Nomo Scholar 后续开发](go-native-rewrite-plan.md#10-nomo-scholar-后续开发)。
 
 | 设计条目 | 源码状态与证据 | 硬限制及实机项 |
 | --- | --- | --- |
-| P0 平台工作区 | 源码已完成。`scholar.go`、`scholar_toolbar.go`、`view.go` 和 `compile.go` 提供标题／标签行工具、项目树主文件标记、独立检查器与写作助手、PDF 跳页和编译状态栏。Windows 的应用导航、文件区和主窗口设置由 `scholar_win_layout.go` 管理。`scholar_navigation.go`、`scholar_files.go` 提供键盘混搜和对象大纲。 | 待实机验证 macOS／Windows 深浅主题、DPI、窗口贴靠、焦点和中文输入。用同一份稿件比较全宽、半屏和紧凑布局门槛，覆盖排版失败回源、试排切换和文献精读返回。公式图表大纲采用可识别的静态源码语法。 |
+| P0 平台工作区 | 源码已完成。`scholar.go`、`scholar_toolbar.go`、`view.go` 和 `compile.go` 提供标题／标签行工具、项目树主文件标记、独立检查器与写作助手、PDF 跳页和编译状态栏。Windows 的应用导航、文件区和主窗口设置由 `scholar_win_layout.go` 管理。`scholar_navigation.go`、`scholar_files.go` 提供键盘混搜和对象大纲。 | macOS 已用 `math.tex` 验证侧栏、宽窗与半屏的稿件和文献 PDF 切换。Windows 实机及两平台的主题、DPI、输入法和异常路径按开发计划补验。公式图表大纲采用可识别的静态源码语法。 |
 | P1 自动引用与索引 | 源码已完成。`scholar_citation_card.go` 提供自动多选浮层，`scholar_query.go` 提供取消与缓存，`library_disk.go` 提供完整临时索引和字节 LRU，`scholar_watch.go` 处理外部变化。 | 未使用功能保持按需。大文件与记录预算超出时明确报错。待实机验证中文输入、关闭浮层及大馆藏响应。 |
-| P2 文献工作流 | 源码已完成。`zotero.go`、`zotero_search.go`、`local_search.go`、`scholar_pdf.go` 及平台 Quick Look 适配提供库选择、分类、续查、附件、批注和文献上下文。`scholar_catalog.go` 管理文献表格和笔记详情，`scholar_reference_tabs.go` 管理 PDF 标签和并排阅读。 | 全文范围与未检索数量在界面显示。离线 PDF 依赖书目附件路径和本机 pdftotext。待用户在自己的 Zotero 版本上验证。 |
+| P2 文献工作流 | 源码已完成。`zotero.go`、`zotero_search.go`、`local_search.go`、`scholar_pdf.go` 及平台 Quick Look 适配提供库选择、分类、续查、附件、批注和文献上下文。`scholar_catalog.go` 管理文献表格和笔记详情，`scholar_reference_tabs.go` 管理 PDF 标签和并排阅读。 | 全文范围与未检索数量在界面显示。离线 PDF 依赖书目附件路径和本机 pdftotext。已验证真实个人库的二级分类、子笔记和本地 PDF 并排。群组库、附件异常路径和大馆藏待验证。 |
 | P3 编辑 Diff | 源码已完成。`scholar_changes.go`、`scholar_diff.go`、`scholar_peek.go` 提供输入合批、历史预算、多 hunk 跳转、长段落词／数学 token 高亮和快览。 | 大改动按片段预算展示，超预算有提示。编辑前后 PDF 快照仅保留最近适用批次。Undo 不受历史缓存淘汰影响。 |
 | P4 Codex | 核心提议流程源码已完成。`patch.go`、`codex_conversation.go`、`scholar_context.go`、`scholar_patchset.go` 提供显式上下文、临时会话延续、多文件多 hunk 审阅和跨文件回退。 | 真正挤入编辑器行布局的审阅区存在框架硬阻塞，当前使用源码附近浮层和抽屉。待实机验证 CLI 就绪、取消、审批拒绝和 Undo 交互。 |
 | P5 排版联动 | `compile.go`、`scholar_preview.go`、`project_mirror.go` 提供常规主稿／子章节联动、覆盖未保存缓冲和增量同步。`project_location.go` 提供跨文件定位。`project_trial.go`、`scholar_trial.go` 提供同一冻结基准和双栏纸面对照。`scholar_budget.go` 绑定正文边界，`diagnostics.go` 识别文件位置。 | Typst 的源码定位依赖可用的编译输入清单和唯一文本匹配。正文边界需要按编译版本确认。待实机验证编译器、外部输入变化、Finder 缓存发布和会话释放。 |
@@ -132,4 +132,4 @@ macOS 的常规项目预览仅在本次编译完全使用磁盘输入、发布�
 - Go 1.27.3（macOS arm64）下，`go test -count=1 -json ./...` 和 `go vet ./...` 通过。189 个顶层测试和 14 个子测试通过，13 个可选顶层测试因缺少样本或未设置运行开关而跳过。另有 13 个包没有测试文件。
 - Typst 与 XeLaTeX 的预览测试覆盖 2× 栅格化、PDF 点击回源、书签跳页和编译错误。BibTeX 与 Biber 的测试均验证了生成 PDF 中的参考文献文本。测试通过临时 `PATH` 使用从本机 TeX Live 通用二进制提取的 arm64 Biber，绕开了该通用二进制与系统 `lipo` 的参数兼容问题。
 - Xcode 27.0 下完成 `darwin/arm64` ad-hoc 构建。构建脚本校验了内嵌的 Quick Look 扩展与签名。重新生成 WebAssembly 后，`desktop/ui/kpexport` 的 `TestScript` 复跑通过。
-- Scholar 核心包目前没有独立自动化测试。实际 Zotero 和 Codex 集成、Finder Quick Look、GUI 交互及性能仍待实机验收。详细结果见本地 `target/verification/summary.txt`。
+- Scholar 核心包目前没有独立自动化测试。改版前的验证未覆盖实际 Zotero 和 Codex 集成、Finder Quick Look、GUI 交互及性能。详细结果见本地 `target/verification/summary.txt`。
