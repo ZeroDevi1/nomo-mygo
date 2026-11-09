@@ -135,7 +135,10 @@ func ExportPDF(ctx context.Context, path string, source io.Reader, target string
 	return e
 }
 func renderPage(ctx context.Context, pdf string, page, edge int) (image.Image, error) {
-	dir := filepath.Dir(pdf)
+	return renderPageIn(ctx, filepath.Dir(pdf), pdf, page, edge)
+}
+
+func renderPageIn(ctx context.Context, dir, pdf string, page, edge int) (image.Image, error) {
 	n := strconv.Itoa(page)
 	if _, err := run(ctx, dir, "", nil, "pdftoppm", "-png", "-scale-to", strconv.Itoa(edge), "-f", n, "-l", n, "-singlefile", pdf, "page"); err != nil {
 		return nil, err
@@ -153,6 +156,39 @@ func renderPage(ctx context.Context, pdf string, page, edge int) (image.Image, e
 		return nil, ctx.Err()
 	}
 	return img, nil
+}
+
+// ReadPDFPage renders a local attachment without writing beside the original.
+func ReadPDFPage(ctx context.Context, path string, page, edge int) (image.Image, error) {
+	if !filepath.IsAbs(path) || page < 1 || edge < 1 || edge > MaxPageEdge {
+		return nil, errors.New("invalid PDF page request")
+	}
+	dir, err := os.MkdirTemp("", "nomo-pdf-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	return renderPageIn(ctx, dir, path, page, edge)
+}
+
+// PDFPages reads the page count of an existing local PDF.
+func PDFPages(ctx context.Context, path string) (int, error) {
+	return pdfPages(ctx, "", path)
+}
+
+func pdfPages(ctx context.Context, dir, path string) (int, error) {
+	info, err := run(ctx, dir, "", []string{"LC_ALL=C"}, "pdfinfo", path)
+	if err != nil {
+		return 0, err
+	}
+	for line := range strings.Lines(info) {
+		if v, ok := strings.CutPrefix(line, "Pages:"); ok {
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+				return n, nil
+			}
+		}
+	}
+	return 0, errors.New("pdfinfo: missing page count")
 }
 
 func (s *Session) build(ctx context.Context, source io.Reader, export, projectSource bool) error {
@@ -286,33 +322,25 @@ func (s *Session) compile(ctx context.Context, source io.Reader, publish, projec
 	if err := s.build(ctx, source, false, projectSource); err != nil {
 		return 0, err
 	}
-	dir, pdf := s.dir, s.pdf
-	info, err := run(ctx, dir, "", []string{"LC_ALL=C"}, "pdfinfo", pdf)
+	n, err := pdfPages(ctx, s.dir, s.pdf)
 	if err != nil {
 		return 0, err
 	}
-	for line := range strings.Lines(info) {
-		if v, ok := strings.CutPrefix(line, "Pages:"); ok {
-			n, e := strconv.Atoi(strings.TrimSpace(v))
-			if e == nil && n > 0 {
-				store := filepath.Join(s.dir, "pages")
-				if err = os.MkdirAll(store, 0700); err != nil {
-					return 0, err
-				}
-				if err = fsutil.ReplaceFile(pdf, filepath.Join(store, "current.pdf")); err != nil {
-					return 0, err
-				}
-				if publish {
-					storeQuickLook(ctx, s.path, filepath.Join(store, "current.pdf"), digest.Sum(nil))
-				}
-				s.indexed = false
-				s.anchors = nil
-				s.pages = n
-				return n, nil
-			}
-		}
+	store := filepath.Join(s.dir, "pages")
+	if err = os.MkdirAll(store, 0700); err != nil {
+		return 0, err
 	}
-	return 0, fmt.Errorf("pdfinfo: missing page count")
+	current := filepath.Join(store, "current.pdf")
+	if err = fsutil.ReplaceFile(s.pdf, current); err != nil {
+		return 0, err
+	}
+	if publish {
+		storeQuickLook(ctx, s.path, current, digest.Sum(nil))
+	}
+	s.indexed = false
+	s.anchors = nil
+	s.pages = n
+	return n, nil
 }
 
 func (s *Session) projectRoot(fallback string) string {

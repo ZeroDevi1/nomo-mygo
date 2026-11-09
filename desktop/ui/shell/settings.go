@@ -62,8 +62,16 @@ func newSettingsWindow(s *Shell) *settingsWindow {
 		focused: map[string]bool{}, invalid: map[string]bool{}}
 }
 
-// openSettings 打开设置窗口；已打开时前置。
+// openSettings 在 Windows Scholar 中打开设置页，其他窗口使用独立的设置窗口。
 func (s *Shell) openSettings() {
+	if p := s.scholarForTab(s.activeTab()); s.pf.windows && p != nil {
+		p.accountOpen, p.winRailPopup, p.winCompactProject = false, false, false
+		if p.winSettings == nil {
+			p.winSettings = newSettingsWindow(s)
+			p.winSettings.win = s.win
+		}
+		return
+	}
 	if s.settings != nil {
 		s.settings.win.Show()
 		s.settings.win.Focus()

@@ -12,6 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+
+	"golang.org/x/net/html"
 )
 
 const zoteroBase = "http://127.0.0.1:23119"
@@ -88,6 +91,10 @@ type zoteroItem struct {
 		Key, ItemType, Title, Date, PublicationTitle, DOI, CitationKey, AbstractNote, ContentType string
 		AnnotationText, AnnotationComment, AnnotationPageLabel                                    string
 		AnnotationPosition                                                                        string
+		Note                                                                                      string
+		Tags                                                                                      []struct{ Tag string }
+		Collections                                                                               []string
+		Relations                                                                                 map[string]json.RawMessage
 		Creators                                                                                  []struct{ FirstName, LastName, Name, CreatorType string }
 	}
 }
@@ -153,6 +160,43 @@ func (z Zotero) CollectionsIn(ctx context.Context, parent string, start int) (Zo
 }
 
 func (z Zotero) Search(ctx context.Context, query, collection string, start int) (ZoteroPage, error) {
+	return z.search(ctx, query, collection, "", ZoteroAll, false, start)
+}
+
+func (z Zotero) Tags(ctx context.Context, query string, start int) ([]string, bool, error) {
+	params := url.Values{"limit": {strconv.Itoa(ZoteroPageSize)}, "start": {strconv.Itoa(start)}, "q": {query}}
+	h, raw, err := z.request(ctx, "GET", "/api/users/0/tags?"+params.Encode(), nil, "")
+	if err != nil {
+		return nil, false, err
+	}
+	var items []struct{ Tag string }
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, false, err
+	}
+	tags := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Tag != "" && len(item.Tag) <= 512 {
+			tags = append(tags, item.Tag)
+		}
+	}
+	return tags, hasNext(h, start, len(items)), nil
+}
+
+type ZoteroScope int
+
+const (
+	ZoteroAll ZoteroScope = iota
+	ZoteroUnfiled
+	ZoteroPublications
+	ZoteroTrash
+)
+
+// Browse searches the catalog by Zotero quick search, including notes and tags.
+func (z Zotero) Browse(ctx context.Context, query, collection, tag string, scope ZoteroScope, start int) (ZoteroPage, error) {
+	return z.search(ctx, query, collection, tag, scope, true, start)
+}
+
+func (z Zotero) search(ctx context.Context, query, collection, tag string, scope ZoteroScope, everything bool, start int) (ZoteroPage, error) {
 	var page ZoteroPage
 	path := "/api/users/0"
 	if collection != "" {
@@ -161,7 +205,25 @@ func (z Zotero) Search(ctx context.Context, query, collection string, start int)
 		}
 		path += "/collections/" + collection
 	}
-	h, raw, err := z.request(ctx, "GET", paged(path+"/items/top", start, query), nil, "")
+	switch scope {
+	case ZoteroPublications:
+		path += "/publications/items"
+	case ZoteroTrash:
+		path += "/items/trash"
+	default:
+		path += "/items/top"
+	}
+	endpoint := paged(path, start, query)
+	if everything && query != "" {
+		endpoint = strings.Replace(endpoint, "qmode=titleCreatorYear", "qmode=everything", 1)
+	}
+	if tag != "" {
+		if strings.HasPrefix(tag, "-") {
+			tag = "\\" + tag
+		}
+		endpoint += "&tag=" + url.QueryEscape(tag)
+	}
+	h, raw, err := z.request(ctx, "GET", endpoint, nil, "")
 	if err != nil {
 		return page, err
 	}
@@ -182,34 +244,69 @@ func (z Zotero) Search(ctx context.Context, query, collection string, start int)
 		cancel()
 	}
 	for itemIndex, item := range list {
-		d := item.Data
-		if !zoteroKey.MatchString(item.Key) || d.Title == "" {
+		entry, ok := z.entry(item)
+		if !ok || entry.ZoteroNote && !everything || scope == ZoteroUnfiled && len(item.Data.Collections) != 0 {
 			continue
 		}
-		key := d.CitationKey
 		if candidate := citekeys[item.Key]; keyPattern.MatchString(candidate) {
-			key = candidate
+			entry.Key = candidate
 		}
-		var creators []string
-		for _, c := range d.Creators {
-			if c.CreatorType != "author" && c.CreatorType != "editor" {
-				continue
-			}
-			if c.Name != "" {
-				creators = append(creators, c.Name)
-			} else {
-				creators = append(creators, strings.TrimSpace(c.FirstName+" "+c.LastName))
-			}
-		}
-		page.Entries = append(page.Entries, Entry{Key: cleanField(key, 256), Title: cleanField(d.Title, 1024),
-			Author: cleanField(strings.Join(creators, " and "), 512), Year: yearOf(d.Date),
-			Venue: cleanField(d.PublicationTitle, 256), DOI: cleanField(d.DOI, 256), Source: "Zotero", RemoteID: item.Key, Abstract: cleanField(d.AbstractNote, 4096), Library: z.Group, Ordinal: start + itemIndex})
+		entry.Ordinal = start + itemIndex
+		page.Entries = append(page.Entries, entry)
 	}
 	page.Next = start + len(list)
 	page.Version = h.Get("Last-Modified-Version")
 	page.Total, _ = strconv.Atoi(h.Get("Total-Results"))
 	page.More = hasNext(h, start, len(list))
 	return page, nil
+}
+
+func (z Zotero) entry(item zoteroItem) (Entry, bool) {
+	d := item.Data
+	if !zoteroKey.MatchString(item.Key) {
+		return Entry{}, false
+	}
+	title := d.Title
+	if d.ItemType == "note" && title == "" {
+		title, _, _ = strings.Cut(zoteroNoteText(d.Note), "\n")
+	}
+	if title == "" {
+		return Entry{}, false
+	}
+	var creators []string
+	for _, c := range d.Creators {
+		if c.CreatorType != "author" && c.CreatorType != "editor" {
+			continue
+		}
+		name := c.Name
+		if name == "" {
+			name = strings.TrimSpace(c.FirstName + " " + c.LastName)
+		}
+		creators = append(creators, name)
+	}
+	return Entry{Key: cleanField(d.CitationKey, 256), Title: cleanField(title, 1024),
+		Author: cleanField(strings.Join(creators, " and "), 512), Year: yearOf(d.Date),
+		Venue: cleanField(d.PublicationTitle, 256), DOI: cleanField(d.DOI, 256), Source: "Zotero", RemoteID: item.Key,
+		Abstract: cleanField(d.AbstractNote, 4096), Library: z.Group, ZoteroNote: d.ItemType == "note"}, true
+}
+
+func (z Zotero) Entry(ctx context.Context, key string) (Entry, error) {
+	if !zoteroKey.MatchString(key) {
+		return Entry{}, fmt.Errorf("invalid Zotero item key")
+	}
+	_, raw, err := z.request(ctx, "GET", "/api/users/0/items/"+key, nil, "")
+	if err != nil {
+		return Entry{}, err
+	}
+	var item zoteroItem
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return Entry{}, err
+	}
+	entry, ok := z.entry(item)
+	if !ok || entry.RemoteID != key {
+		return Entry{}, fmt.Errorf("invalid Zotero item")
+	}
+	return entry, nil
 }
 
 func (z Zotero) bbt(ctx context.Context, method string, params []any, target any) error {
@@ -272,7 +369,15 @@ func (z Zotero) ExportFor(ctx context.Context, entry Entry, target string) ([]by
 type ZoteroDetail struct {
 	Abstract string
 	PDFs     []Attachment
+	Notes    []ZoteroNote
+	Tags     []string
+	Related  []string
 	More     bool
+}
+
+type ZoteroNote struct {
+	Key, Title, Text string
+	Tags, Related    []string
 }
 
 type Attachment struct{ Key, Title string }
@@ -296,6 +401,11 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 		return detail, err
 	}
 	detail.Abstract = cleanField(item.Data.AbstractNote, 16<<10)
+	detail.Tags, detail.Related = z.itemMetadata(item)
+	if item.Data.ItemType == "note" {
+		detail.Notes = []ZoteroNote{z.note(item)}
+		return detail, nil
+	}
 	h, raw, err := z.request(ctx, "GET", paged(path+"/children", start, ""), nil, "")
 	if err != nil {
 		return detail, err
@@ -307,10 +417,85 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 	for _, item := range children {
 		if item.Data.ContentType == "application/pdf" && zoteroKey.MatchString(item.Key) {
 			detail.PDFs = append(detail.PDFs, Attachment{item.Key, cleanField(item.Data.Title, 256)})
+		} else if item.Data.ItemType == "note" && zoteroKey.MatchString(item.Key) {
+			detail.Notes = append(detail.Notes, z.note(item))
 		}
 	}
 	detail.More = hasNext(h, start, len(children))
 	return detail, nil
+}
+
+func (z Zotero) note(item zoteroItem) ZoteroNote {
+	body := zoteroNoteText(item.Data.Note)
+	title, _, _ := strings.Cut(body, "\n")
+	tags, related := z.itemMetadata(item)
+	return ZoteroNote{Key: item.Key, Title: cleanField(title, 256), Text: body, Tags: tags, Related: related}
+}
+
+func (z Zotero) itemMetadata(item zoteroItem) (tags, related []string) {
+	for _, tag := range item.Data.Tags[:min(len(item.Data.Tags), 32)] {
+		if v := cleanField(tag.Tag, 256); v != "" {
+			tags = append(tags, v)
+		}
+	}
+	var links []string
+	raw := item.Data.Relations["dc:relation"]
+	if json.Unmarshal(raw, &links) != nil {
+		var single string
+		if json.Unmarshal(raw, &single) == nil {
+			links = []string{single}
+		}
+	}
+	for _, link := range links[:min(len(links), 32)] {
+		u, err := url.Parse(link)
+		if err != nil || u.Hostname() != "zotero.org" && u.Hostname() != "www.zotero.org" {
+			continue
+		}
+		parent, key, found := strings.Cut(u.Path, "/items/")
+		own := z.Group == 0 && strings.HasPrefix(parent, "/users/") || z.Group > 0 && parent == "/groups/"+strconv.Itoa(z.Group)
+		if found && own && zoteroKey.MatchString(key) {
+			related = append(related, key)
+		}
+	}
+	return tags, related
+}
+
+// zoteroNoteText reads text only. The UI never loads embedded resources or HTML.
+func zoteroNoteText(source string) string {
+	tokenizer := html.NewTokenizer(strings.NewReader(source))
+	var out strings.Builder
+	var suppressed string
+	for out.Len() < 16<<10 {
+		token := tokenizer.Next()
+		switch token {
+		case html.ErrorToken:
+			return cleanField(out.String(), 16<<10)
+		case html.StartTagToken, html.EndTagToken, html.SelfClosingTagToken:
+			name, _ := tokenizer.TagName()
+			tag := string(name)
+			if suppressed != "" {
+				if token == html.EndTagToken && tag == suppressed {
+					suppressed = ""
+				}
+				continue
+			}
+			switch tag {
+			case "script", "style":
+				if token == html.StartTagToken {
+					suppressed = tag
+				}
+			case "br", "p", "div", "li", "h1", "h2", "h3", "blockquote", "pre":
+				if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") {
+					out.WriteByte('\n')
+				}
+			}
+		case html.TextToken:
+			if suppressed == "" {
+				out.WriteString(strings.TrimLeftFunc(string(tokenizer.Text()), func(r rune) bool { return r != ' ' && unicode.IsSpace(r) }))
+			}
+		}
+	}
+	return cleanField(out.String(), 16<<10)
 }
 
 func (z Zotero) Annotations(ctx context.Context, key string, start int) ([]Annotation, bool, error) {

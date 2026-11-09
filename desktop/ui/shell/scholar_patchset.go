@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,21 +28,11 @@ type scholarAppliedFile struct {
 }
 
 type scholarContextFile struct {
-	target  scholarTarget
-	include bool
+	target scholarTarget
 }
 
 func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 	a := &p.agent
-	mode := ui.Checkbox(c, &a.multi, s.tr("scholarMultiFile")).Disabled(a.running)
-	if mode.Changed() {
-		p.err = ""
-		a.resetSession()
-	}
-	if !a.multi {
-		return
-	}
-	ui.Text(c, s.tr("scholarFileContextHelp")).FontSize(11).Wrap()
 	for _, t := range s.tabs {
 		if !isManuscript(t) {
 			continue
@@ -56,7 +47,12 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 				break
 			}
 		}
-		if !exists && ui.Button(c.Key(t.ID), "+ "+t.Name(s.untitledName)).Disabled(a.running).Clicked() {
+		if (!exists || !a.multi) && ui.Button(c.Key(t.ID), "+ "+t.Name(s.untitledName)).Disabled(p.busy).Clicked() {
+			if exists {
+				a.multi, a.attachments = true, false
+				a.resetSession()
+				continue
+			}
 			snap := t.Source().Buffer.Snapshot()
 			total := snap.Len()
 			for _, f := range a.files {
@@ -67,8 +63,18 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 				continue
 			}
 			text := snap.String()
-			a.files = append(a.files, scholarContextFile{target: scholarTarget{tabID: t.ID, path: t.Path, start: 0, end: snap.Len(), version: snap.Version(), before: text, digest: sha256.Sum256([]byte(text))}, include: true})
+			a.files = append(a.files, scholarContextFile{target: scholarTarget{tabID: t.ID, path: t.Path, start: 0, end: snap.Len(), version: snap.Version(), before: text, digest: sha256.Sum256([]byte(text))}})
+			a.multi, a.attachments = true, false
+			p.err = ""
+			a.resetSession()
 		}
+	}
+}
+
+func (s *Shell) scholarAttachedFiles(c *ui.Context, p *scholarState) {
+	a := &p.agent
+	if !a.multi {
+		return
 	}
 	remove := -1
 	for i := range a.files {
@@ -76,17 +82,15 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 		ck := c.Key("context-" + fmt.Sprint(f.target.tabID))
 		ui.Row(ck).FillWidth().Gap(4).Children(func() {
 			name, _ := scholar.Relative(p.project.Root, f.target.path)
-			if ui.Checkbox(ck, &f.include, fmt.Sprintf("%s · %d B", name, len(f.target.before))).Disabled(a.running).Changed() {
-				a.resetSession()
-			}
-			if ui.Button(ck, "×").Disabled(a.running).Clicked() {
+			ui.Text(ck, fmt.Sprintf("%s · %d B", name, len(f.target.before))).SingleLine().MinWidth(0).Shrink(1).FontSize(12)
+			if s.toolButton(ck.Key("remove"), "x", s.tr("scholarRemoveAttachment"), false).Disabled(p.busy).Clicked() {
 				remove = i
 			}
 		})
 	}
 	if remove >= 0 {
 		a.resetSession()
-		a.files = append(a.files[:remove], a.files[remove+1:]...)
+		a.files = slices.Delete(a.files, remove, remove+1)
 	}
 }
 
@@ -95,9 +99,6 @@ func (s *Shell) sendScholarPatchSet(p *scholarState) {
 	files := make(map[string]string)
 	bases := make(map[string]scholarTarget)
 	for _, f := range a.files {
-		if !f.include {
-			continue
-		}
 		if !s.scholarTargetValid(f.target) {
 			p.err = s.tr("scholarStaleBaseline")
 			return

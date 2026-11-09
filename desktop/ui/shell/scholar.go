@@ -62,19 +62,22 @@ func scholarSelectIndex(c *ui.Context, selected *int, labels []string, disabled 
 }
 
 type scholarState struct {
-	project      scholar.Project
-	activeTabID  int
-	mainSelected bool
-	previewDisk  uint64
-	previewStamp string
-	nav, drawer  int
-	compactNav   bool
-	drawerNav    bool // 紧凑导航让出空间前的展开状态。
-	files        *folderNode
-	diagnostics  scholarCompileReport
-	budgetOpen   bool
-	drawerSize   float32
-	drawerSave   time.Time
+	project                                                                        scholar.Project
+	activeTabID                                                                    int
+	mainSelected                                                                   bool
+	previewDisk                                                                    uint64
+	previewStamp                                                                   string
+	nav, drawer, lastProjectNav                                                    int
+	lastInspector                                                                  int
+	compactNav                                                                     bool
+	drawerNav                                                                      bool // 紧凑导航让出空间前的展开状态。
+	files                                                                          *folderNode
+	diagnostics                                                                    scholarCompileReport
+	budgetOpen                                                                     bool
+	drawerSize                                                                     float32
+	drawerSave                                                                     time.Time
+	winRailCollapsed, winRailPopup, winProjectOpen, winCompactProject, accountOpen bool
+	winSettings                                                                    *settingsWindow
 
 	ctx               context.Context
 	cancel, cancelJob context.CancelFunc
@@ -92,6 +95,7 @@ type scholarState struct {
 	reloadAt            time.Time
 	citations           scholarCitations
 	literature          scholarLiteratureState
+	references          scholarReferenceTabs
 	changes             scholarChangeState
 	navigation          scholarNavigation
 	agent               scholarAgentState
@@ -128,6 +132,8 @@ func isManuscript(tab *Tab) bool {
 func (s *Shell) closeScholar() {
 	if p := s.scholar; p != nil {
 		p.cancel()
+		p.closeWindowsSettings()
+		p.references.visible(false, true)
 		s.persistScholarDrawer(p)
 		s.clearScholarEditor(p)
 		go p.library.Close()
@@ -203,6 +209,8 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 	if p == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		p = &scholarState{project: scholar.Project{Root: root, Main: tab.Path}, ctx: ctx, cancel: cancel}
+		width, _ := c.Size()
+		p.winProjectOpen = s.pf.windows && width >= scholarWindowsExpanded
 		pref := s.prefs.ScholarProjects[root]
 		if filepath.IsLocal(pref.Main) {
 			main := filepath.Join(root, pref.Main)
@@ -264,14 +272,14 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 		}
 	}
 	s.observeScholarSources(c, p)
-	if !p.busy && p.literature.refreshPending && p.nav == scholarLiterature && p.literature.mode == 1 {
+	if !p.busy && p.literature.refreshPending && p.references.catalog && p.literature.mode == 1 && !p.literature.recentOpen {
 		l := &p.literature
 		l.refreshPending = false
 		start := l.page
 		if l.fulltext {
 			start = 0
 		}
-		s.loadZotero(p, false, l.collections, l.collection, l.sentQuery, start)
+		s.loadZotero(p, false, l.collection, l.sentQuery, start)
 	}
 	s.observeScholarChanges(c, p, tab)
 	s.scholarCitationDiagnostics(c, p, tab)
@@ -495,6 +503,9 @@ func (s *Shell) scholarSidebarHidden(c *ui.Context) bool {
 }
 
 func (s *Shell) scholarSidebarHiddenAt(width float32) bool {
+	if p := s.scholarForTab(s.activeTab()); p != nil && s.pf.windows {
+		return p.windowsRailWidth(width) == 0
+	}
 	if p := s.scholarForTab(s.activeTab()); p != nil && width < scholarCompactWidth {
 		return !p.compactNav
 	}
@@ -507,6 +518,14 @@ func (s *Shell) scholarToggleSidebar(c *ui.Context) {
 }
 
 func (s *Shell) scholarToggleSidebarAt(width float32) {
+	if p := s.scholarForTab(s.activeTab()); p != nil && s.pf.windows {
+		if width >= scholarWindowsExpanded {
+			p.winRailCollapsed = !p.winRailCollapsed
+		} else {
+			p.winRailPopup = !p.winRailPopup
+		}
+		return
+	}
 	if p := s.scholarForTab(s.activeTab()); p != nil && width < scholarCompactWidth {
 		p.compactNav = !p.compactNav
 		if !p.compactNav {
@@ -570,7 +589,25 @@ var scholarDestinations = [...]struct{ icon, label string }{
 }
 
 func (s *Shell) showScholarNavigation(p *scholarState, destination int, width float32) {
+	p.closeWindowsSettings()
+	p.accountOpen, p.winRailPopup = false, false
+	if destination == scholarLiterature {
+		s.showScholarCatalog(p)
+		if p.literature.connected && p.literature.mode == 1 && p.literature.pageData.Version == "" && !p.busy {
+			s.loadZotero(p, false, "", "", 0)
+		}
+		return
+	}
 	p.nav = destination
+	p.references.catalog = false
+	if s.pf.windows {
+		if width >= scholarWindowsExpanded {
+			p.winProjectOpen = true
+		} else {
+			p.winCompactProject = true
+		}
+		return
+	}
 	if width < scholarCompactWidth {
 		p.compactNav = true
 	} else if s.prefs.SidebarHidden {
@@ -587,6 +624,24 @@ func (s *Shell) scholarNavigationMenu(m *ui.Menu, p *scholarState, width float32
 }
 
 func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
+	width, _ := c.Size()
+	ui.Column(c.Key("project-nav")).FillWidth().Padding(3, 6).Gap(2).Children(func() {
+		for i, destination := range scholarDestinations {
+			selected := p.nav == i
+			if s.scholarTabButton(c.Key(i), destination.icon, s.tr(destination.label), selected).Clicked() {
+				s.showScholarNavigation(p, i, width)
+			}
+		}
+		if s.scholarTabButton(c.Key("assistant"), "message-square-text", s.tr("scholarWritingAssistant"), p.drawer == scholarCodex).Clicked() {
+			s.openScholarAgent(p)
+		}
+	})
+	if p.nav != scholarLiterature {
+		s.scholarProjectPane(c, p)
+	}
+}
+
+func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 	section := p.nav
 	var files *folderNode
 	if section == scholarFiles {
@@ -601,13 +656,12 @@ func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
 			files = p.files
 		}
 	}
-	width, _ := c.Size()
-	destination := scholarDestinations[section]
 	ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 6).Gap(4).AlignItems(ui.Center).Children(func() {
-		s.scholarMenuButton(c.Key("destination"), destination.icon, s.tr(destination.label), s.sidebarW >= 145).Menu(func(m *ui.Menu) {
-			s.scholarNavigationMenu(m, p, width, true)
-		})
-		ui.Text(c, filepath.Base(p.project.Root)).FontSize(11).TextColor(s.ch.muted).
+		title := s.tr(scholarDestinations[section].label)
+		if section == scholarFiles {
+			title = filepath.Base(p.project.Root)
+		}
+		ui.Text(c, title).FontSize(11).Bold().TextColor(s.ch.muted).
 			SingleLine().Grow(1).MinWidth(0).Tooltip(p.project.Root)
 		if files != nil {
 			label := s.tr("scholarProjectActions")
@@ -626,11 +680,21 @@ func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
 				}
 			})
 		}
+		if s.pf.windows && s.toolButton(c.Key("close-project"), "x", s.tr("scholarClose"), false).Clicked() {
+			width, _ := c.Size()
+			if width >= scholarWindowsExpanded {
+				p.winProjectOpen = false
+			} else {
+				p.winCompactProject = false
+			}
+		}
 	})
 	ui.Box(c).FillWidth().Height(1).Background(s.ch.separator)
 	switch section {
 	case scholarLiterature:
-		s.scholarLibraryView(c, p)
+		if !p.references.catalog && ui.Button(c, s.tr("scholarOpenLibrary")).Clicked() {
+			s.showScholarCatalog(p)
+		}
 	case scholarChanges:
 		s.scholarChangesView(c, p)
 	case scholarOutline:
@@ -702,6 +766,9 @@ func (s *Shell) showScholarInspector(p *scholarState, drawer int) {
 		p.drawerNav = p.compactNav
 	}
 	p.drawer, p.compactNav = drawer, false
+	if drawer == scholarReader || drawer == scholarDiagnostics {
+		p.lastInspector = drawer
+	}
 }
 
 func (s *Shell) closeScholarInspector(p *scholarState) {
@@ -774,9 +841,16 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 	}
 	ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.content).Children(func() {
 		ui.Row(c).Height(s.pf.scholarNavHeight()).FillWidth().Padding(0, 8).Gap(4).AlignItems(ui.Center).Children(func() {
-			label := [...]string{"", "scholarLiterature", "scholarAgentName", "scholarDiagnostics"}[p.drawer]
+			label := [...]string{"", "scholarLiterature", "scholarWritingAssistant", "scholarDiagnostics"}[p.drawer]
 			ui.Text(c, s.tr(label)).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
 			label = s.tr("scholarCloseDrawer")
+			if singlePane && p.drawer == scholarCodex {
+				label = s.tr("scholarReturnManuscript")
+				if ui.Button(c, label).Clicked() {
+					s.closeScholarInspector(p)
+				}
+				return
+			}
 			if s.toolButton(c, "x", label, false).Label(label).FocusRing(true).Clicked() {
 				s.closeScholarInspector(p)
 			}
@@ -1033,8 +1107,13 @@ func (s *Shell) scholarWorkspaceWidth(c *ui.Context) float32 {
 }
 
 func (s *Shell) scholarWorkspaceWidthAt(width float32) float32 {
-	if s.scholarForTab(s.activeTab()) != nil && !s.scholarSidebarHiddenAt(width) {
-		return width - s.sidebarW
+	if p := s.scholarForTab(s.activeTab()); p != nil {
+		if s.pf.windows {
+			return width - p.windowsRailWidth(width) - p.windowsProjectWidth(width)
+		}
+		if !s.scholarSidebarHiddenAt(width) {
+			return width - s.sidebarW
+		}
 	}
 	return width
 }

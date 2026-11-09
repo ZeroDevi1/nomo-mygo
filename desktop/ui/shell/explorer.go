@@ -136,6 +136,10 @@ func (s *Shell) treeRow(c *ui.Context, n *folderNode, depth int, active, main st
 		} else {
 			if p := s.scholarForTab(s.activeTab()); p != nil {
 				width, _ := c.Size()
+				p.winCompactProject = false
+				if p.references.catalog || p.references.focused != nil {
+					s.selectScholarPDF(p, nil)
+				}
 				if width < scholarCompactWidth {
 					p.compactNav = false
 					s.focusEditor = true

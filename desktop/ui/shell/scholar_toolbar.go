@@ -1,6 +1,9 @@
 package shell
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo/ui"
+	"nomo/desktop/internal/scholar"
+)
 
 var scholarViewLabels = [...]string{"scholarSource", "scholarPreview", "scholarSplit"}
 
@@ -23,6 +26,8 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 		return
 	}
 	p.changes.compare = false
+	p.references.right = nil
+	p.references.selectTab(nil)
 	s.closeScholarInspector(p)
 	if tab.typesetMode != mode {
 		tab.typesetPaused = false
@@ -32,10 +37,13 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 }
 
 func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int {
-	if p.drawer != scholarClosed {
+	width, _ := c.Size()
+	if p.references.right != nil && !p.references.catalog && !s.scholarSinglePane(width) {
+		return typesetPreview
+	}
+	if p.drawer != scholarClosed && (p.drawer != scholarCodex || s.scholarWorkspaceWidthAt(width) < 930) {
 		return typesetSource
 	}
-	width, _ := c.Size()
 	if tab.typesetMode == typesetSplit && s.scholarSinglePane(width) {
 		if tab.typesetCompactPDF {
 			return typesetPreview
@@ -52,6 +60,8 @@ func (s *Shell) scholarPDFOnly(c *ui.Context, p *scholarState, tab *Tab) bool {
 
 func (s *Shell) revealScholarSource(tab *Tab) {
 	if p := s.scholar; p != nil {
+		p.references.catalog = false
+		p.references.focused, p.references.left, p.references.right = nil, nil, nil
 		if s.win != nil {
 			width, _ := s.win.ContentSize()
 			if p.activeTabID != tab.ID || s.scholarSinglePane(float32(width)) {
@@ -96,7 +106,9 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 		label := s.tr(scholarViewLabels[mode])
 		icon := [...]string{"code-xml", "book-open-text", "columns-2"}[mode]
 		compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
-		if compact && mode == typesetSplit && p.drawer == scholarClosed {
+		if p.references.catalog || p.references.focused != nil || p.references.right != nil && !compact {
+			label = s.tr("scholarManuscriptLayout")
+		} else if compact && mode == typesetSplit && p.drawer == scholarClosed {
 			label = s.tr(compactLabels[shown])
 			if shown == typesetPreview {
 				icon = "book-open-text"
@@ -115,36 +127,34 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 				for _, side := range []int{typesetSource, typesetPreview} {
 					if m.Item(s.tr(compactLabels[side])).Radio(side == shown && p.drawer == scholarClosed).Chosen() {
 						tab.typesetCompactPDF = side == typesetPreview
-						s.setTypesetView(p, tab, typesetSplit)
+						p.changes.compare = false
+						s.selectScholarPDF(p, nil)
+						s.focusEditor = side == typesetSource
 					}
 				}
 			}
 		})
 	}
-	tip := s.tr("scholarMoreCommands")
-	s.toolButton(c.Key("more"), "ellipsis", tip, false).Label(tip).FocusRing(true).Menu(func(m *ui.Menu) {
-		if m.Item(s.tr("searchReplace")).Shortcut(ui.Cmd, ui.KeyF).Chosen() {
-			s.toggleDocumentSearch()
+	label := s.tr("scholarToggleInspector")
+	width, _ := c.Size()
+	visible := (p.drawer == scholarReader || p.drawer == scholarDiagnostics) && s.scholarInspectorVisible(p, width)
+	if s.toolButton(c.Key("inspector"), "panel-right", label, visible).Label(label).FocusRing(true).Clicked() {
+		if visible {
+			s.closeScholarInspector(p)
+		} else if reading := p.references.focused; reading != nil && !p.references.catalog && !p.busy {
+			s.selectScholarEntry(p, reading.entry)
+			p.literature.pendingAnnotation = reading.key
+		} else {
+			drawer := p.lastInspector
+			if drawer == scholarClosed || p.references.catalog && p.literature.selected != (scholar.Entry{}) {
+				drawer = scholarDiagnostics
+				if p.references.catalog && p.literature.selected != (scholar.Entry{}) {
+					drawer = scholarReader
+				}
+			}
+			s.showScholarInspector(p, drawer)
 		}
-		if isManuscript(tab) && m.Item(s.tr("scholarInsertLocalCitations")).Shortcut(scholarCiteMods, ui.KeyK).Chosen() {
-			s.openScholarCitations()
-		}
-		m.Separator()
-		if m.Item(s.tr("scholarAgentName")).Checked(p.drawer == scholarCodex).Shortcut(scholarAgentMods, ui.KeyL).Chosen() {
-			s.openScholarAgent(p)
-		}
-		if m.Item(s.tr("scholarDiagnostics")).Checked(p.drawer == scholarDiagnostics).Chosen() {
-			s.scholarToggleDrawer(p, scholarDiagnostics)
-		}
-		m.Separator()
-		if m.Item(s.tr("scholarCommandPalette")).Shortcut(ui.Cmd, ui.KeyP).Chosen() {
-			s.openScholarPalette(p)
-		}
-		m.Submenu(s.tr("scholarWorkspace"), func(nav *ui.Menu) {
-			width, _ := c.Size()
-			s.scholarNavigationMenu(nav, p, width, !s.scholarSidebarHidden(c))
-		})
-	})
+	}
 }
 
 func (s *Shell) scholarMenuButton(c *ui.Context, icon, label string, showText bool) ui.Element {

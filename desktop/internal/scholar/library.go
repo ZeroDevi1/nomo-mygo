@@ -28,6 +28,7 @@ type Entry struct {
 	Raw                                          string
 	RemoteID                                     string
 	Record                                       *cslItem
+	ZoteroNote                                   bool
 }
 
 type Library struct {

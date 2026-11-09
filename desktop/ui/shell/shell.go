@@ -411,6 +411,9 @@ func (s *Shell) activate(i int) {
 		}
 	}
 	s.active = i
+	if p := s.scholar; p != nil && (p.references.catalog || p.references.focused != nil) {
+		s.selectScholarPDF(p, nil)
+	}
 	if s.mode() == modeSource {
 		s.tabs[i].syncToSource()
 	}

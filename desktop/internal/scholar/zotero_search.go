@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -175,7 +176,14 @@ func (z Zotero) AttachmentPath(ctx context.Context, key string) (string, error) 
 	if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") {
 		return "", fmt.Errorf("attachment has no local file")
 	}
-	path := filepath.FromSlash(u.Path)
+	rawPath := u.Path
+	if runtime.GOOS == "windows" && len(rawPath) >= 4 && rawPath[0] == '/' && rawPath[2] == ':' && rawPath[3] == '/' {
+		rawPath = rawPath[1:]
+	}
+	path := filepath.FromSlash(rawPath)
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("attachment has no absolute local path")
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err

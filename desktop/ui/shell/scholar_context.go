@@ -14,6 +14,12 @@ import (
 
 func (s *Shell) scholarContextActions(c *ui.Context, p *scholarState) {
 	a := &p.agent
+	tab, report := s.activeTab(), p.diagnostics
+	if pane := s.compile; pane != nil && pane.tab == tab && !pane.busy {
+		report = pane.report()
+	}
+	hasDiagnostics := tab != nil && report.tabID == tab.ID && samePath(report.source, tab.Path) &&
+		(report.message != "" || len(report.warnings) > 0)
 	ui.Row(c).Gap(4).Children(func() {
 		if ui.Button(c, "+ @preamble").Disabled(p.busy).Clicked() {
 			s.loadScholarPreamble(p)
@@ -21,15 +27,16 @@ func (s *Shell) scholarContextActions(c *ui.Context, p *scholarState) {
 		if ui.Button(c, "+ @zotero").Disabled(p.busy || p.library == nil).Clicked() {
 			s.loadScholarReferenceContext(p)
 		}
-		if pane := s.compile; pane != nil && ui.Button(c, "+ @diag").Disabled(p.busy).Clicked() {
-			text := pane.err
-			for _, note := range pane.warnings {
+		if ui.Button(c, "+ @diag").Disabled(p.busy || !hasDiagnostics).Clicked() {
+			text := report.message
+			for _, note := range report.warnings {
 				if len(text)+len(note.Text) > 8<<10 {
 					break
 				}
 				text += "\n" + note.Text
 			}
 			a.parts[3], a.include[3] = text, true
+			a.attachments = false
 			a.resetSession()
 		}
 	})

@@ -167,7 +167,11 @@ func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
 	if p == nil {
 		return
 	}
-	if workspace == nil || workspace.drawer != scholarDiagnostics || workspace.agent.trial.show ||
+	covered := workspace != nil && (workspace.drawer != scholarClosed || workspace.references.catalog ||
+		workspace.references.focused != nil || workspace.accountOpen || workspace.winSettings != nil ||
+		workspace.winCompactProject || tab != nil && tab.typesetMode == typesetSplit && !tab.typesetCompactPDF)
+	if !covered ||
+		workspace.agent.trial.show ||
 		p.tab != tab || tab.typesetMode == typesetSource || tab.typesetPaused || p.reuseChecks == nil ||
 		p.project != s.typesetProject(tab) || s.previewProvider(&Tab{Path: p.path}) != p.provider ||
 		p.busy || p.stopped || p.err != "" || p.image == nil || p.fullVersion != p.version || !s.previewBuffersCurrent(p) {
@@ -210,7 +214,7 @@ func (s *Shell) restoreTypesetPreview(p *compilePane) {
 				s.closeCompile()
 				return
 			}
-			if workspace := s.scholarForTab(p.tab); workspace != nil && workspace.drawer == scholarClosed {
+			if s.scholarForTab(p.tab) != nil && p.parkedPage != 0 {
 				p.list.ScrollTo(p.parkedPage-1, ui.Start)
 				p.parkedPage = 0
 			}

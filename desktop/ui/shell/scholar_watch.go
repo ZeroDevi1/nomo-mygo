@@ -104,8 +104,8 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 						p.literature.refreshPending = true
 					}
 				}
-				if !was && err == nil && p.literature.mode == 1 && !p.busy {
-					s.loadZotero(p, false, false, "", "", 0)
+				if !was && err == nil && p.references.catalog && p.literature.mode == 1 && !p.literature.recentOpen && !p.busy {
+					s.loadZotero(p, false, p.literature.collection, p.literature.sentQuery, 0)
 				}
 			}
 		})

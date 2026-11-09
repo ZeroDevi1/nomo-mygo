@@ -154,6 +154,8 @@ func (s *Shell) macLayout(c *ui.Context) {
 
 func (s *Shell) macContent(c *ui.Context) {
 	bar := c.TitleBar()
+	p := s.scholarForTab(s.activeTab())
+	showTabs := len(s.tabs) > 1 || p != nil && p.references.hasTabs()
 	ui.Column(c).Grow(1).Fill().Background(s.ch.content).Children(func() {
 		left := float32(12)
 		if s.scholarSidebarHidden(c) {
@@ -163,22 +165,21 @@ func (s *Shell) macContent(c *ui.Context) {
 			if s.scholarSidebarHidden(c) && s.toolButton(c, "panel-left", s.tr("showExplorerSidebar"), false).Clicked() {
 				s.scholarToggleSidebar(c)
 			}
-			p := s.scholarForTab(s.activeTab())
-			if p != nil && len(s.tabs) > 1 {
+			if p != nil && showTabs {
 				ui.Text(c, filepath.Base(p.project.Root)).FontSize(13).Bold().SingleLine().MinWidth(0).Shrink(1)
 			} else {
 				s.titleText(c)
 			}
 			ui.Spacer(c)
-			if p == nil || len(s.tabs) == 1 {
+			if p == nil || !showTabs {
 				s.documentTools(c)
 			}
-			if s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
+			if p == nil && s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
 				s.openSettings()
 			}
 		})
 		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-		if len(s.tabs) > 1 {
+		if showTabs {
 			s.macTabs(c)
 		}
 		s.document(c)
@@ -187,6 +188,8 @@ func (s *Shell) macContent(c *ui.Context) {
 
 // macTabs 是 Safari / Finder 风格的标签栏：等宽标签，悬停显示关闭按钮。
 func (s *Shell) macTabs(c *ui.Context) {
+	p := s.scholarForTab(s.activeTab())
+	width, _ := c.Size()
 	ui.Row(c).Height(tabBarH - 4).FillWidth().Background(s.ch.tabBar).AlignItems(ui.Stretch).Children(func() {
 		tabs := func() {
 			for _, tab := range s.barTabs() {
@@ -195,8 +198,12 @@ func (s *Shell) macTabs(c *ui.Context) {
 					continue
 				}
 				ck := c.Key(tab.ID)
-				selected := s.tabSelected(tab)
+				active := s.tabSelected(tab)
+				selected := active && (p == nil || !p.references.catalog && p.references.focused == nil)
 				cell := ui.Row(ck).Grow(1).Width(0).Padding(0, 6).AlignItems(ui.Center).Gap(4)
+				if p != nil && p.references.hasTabs() {
+					cell.Basis(132).Grow(0).Shrink(1).MinWidth(94)
+				}
 				if selected {
 					cell.Background(s.ch.tabActive)
 				} else if cell.Hovered() {
@@ -225,18 +232,25 @@ func (s *Shell) macTabs(c *ui.Context) {
 						tab.preview = false // 双击标题固定预览标签
 					}
 					if label.Clicked() && !selected {
-						s.activate(i)
+						if active && p != nil {
+							s.selectScholarPDF(p, nil)
+						} else {
+							s.activate(i)
+						}
 					}
 					ui.Box(ck).Size(18, 18)
 				})
 				s.tabMenu(cell, tab)
 			}
 		}
-		if s.scholarForTab(s.activeTab()) == nil {
+		if p == nil {
 			tabs()
 			return
 		}
-		ui.Row(c).Grow(1).MinWidth(0).Clip().AlignItems(ui.Stretch).Children(tabs)
+		ui.Row(c).Grow(1).MinWidth(0).Clip().AlignItems(ui.Center).Children(func() {
+			tabs()
+			s.scholarReferenceTabItems(c.Key("reader-tabs"), p, !s.scholarSinglePane(width))
+		})
 		ui.Row(c).Padding(0, 8, 0, 4).Gap(4).AlignItems(ui.Center).Children(func() {
 			s.documentTools(c)
 		})
@@ -247,6 +261,10 @@ func (s *Shell) macTabs(c *ui.Context) {
 // ---- Windows / Linux：标题栏菜单 + 内容卡片 ----
 
 func (s *Shell) desktopLayout(c *ui.Context) {
+	if p := s.scholarForTab(s.activeTab()); p != nil && s.pf.windows {
+		s.desktopScholarLayout(c, p)
+		return
+	}
 	bar := c.TitleBar()
 	ui.Column(c).Fill().Background(s.ch.paint(s.ch.titlebar, true)).Children(func() {
 		// 标题栏同原版 AppTitleBar（Windows）：侧栏开关、应用名与菜单，右侧小窗、主题与设置；文档名在标签上，
@@ -308,6 +326,8 @@ func (s *Shell) desktopLayout(c *ui.Context) {
 // desktopTabs 是 Windows 11 / Fluent 风格的标签：选中标签与内容区同色，其余透明。
 func (s *Shell) desktopTabs(c *ui.Context) {
 	t := c.Theme()
+	p := s.scholarForTab(s.activeTab())
+	width, _ := c.Size()
 	height := float32(tabBarH)
 	if s.scholar != nil && s.pf.windows {
 		height = 28
@@ -320,7 +340,8 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 					continue
 				}
 				ck := c.Key(tab.ID)
-				selected := s.tabSelected(tab)
+				active := s.tabSelected(tab)
+				selected := active && (p == nil || !p.references.catalog && p.references.focused == nil)
 				box := ui.Row(ck).Height(height).Padding(0, 4, 0, 12).Gap(6).AlignItems(ui.Center).Radius(t.Radius*2, t.Radius*2, 0, 0).MaxWidth(240)
 				switch {
 				case selected:
@@ -348,11 +369,18 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 						tab.preview = false // 双击标题固定预览标签
 					}
 					if label.Clicked() && !selected {
-						s.activate(i)
+						if active && p != nil {
+							s.selectScholarPDF(p, nil)
+						} else {
+							s.activate(i)
+						}
 					}
 					s.closeButton(ck, tab, hovered || selected)
 				})
 				s.tabMenu(box, tab)
+			}
+			if p != nil {
+				s.scholarReferenceTabItems(c.Key("reader-tabs"), p, !s.scholarSinglePane(width))
 			}
 		})
 		if tab := s.activeTab(); s.scholarForTab(tab) != nil {
@@ -625,6 +653,7 @@ func (s *Shell) document(c *ui.Context) {
 	total, _ := c.Size()
 	inspector := p != nil && s.scholarInspectorVisible(p, total)
 	singlePane := p != nil && s.scholarSinglePane(total)
+	inspectorPrimary := inspector && (singlePane || p.drawer == scholarCodex && width < 930)
 	if p == nil && !s.prefs.ToolbarHidden {
 		s.toolbar(c)
 	}
@@ -633,9 +662,35 @@ func (s *Shell) document(c *ui.Context) {
 	}
 	// MinHeight(0) 让这一行可以比内容矮：否则大纲的滚动内容会撑高整行，编辑区压到状态栏下面。
 	ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-		if inspector && singlePane {
+		var leftPDF, rightPDF *scholarPDFTab
+		if p != nil {
+			leftPDF, rightPDF = p.references.visible(!singlePane, inspectorPrimary)
+		}
+		if inspectorPrimary {
 			s.hideTypesetPreview(p, tab)
 			s.scholarInspector(c, p, width, true)
+			return
+		}
+		if p != nil && p.references.catalog {
+			s.hideTypesetPreview(p, tab)
+			ui.Column(c.Key("library")).Grow(1).Fill().MinWidth(0).MinHeight(0).Children(func() {
+				s.scholarLibraryView(c, p)
+			})
+			if inspector {
+				s.scholarInspector(c, p, width, false)
+			}
+			return
+		}
+		if leftPDF != nil {
+			s.hideTypesetPreview(p, tab)
+			s.scholarReferencePage(c, p, leftPDF, false)
+			if rightPDF != nil {
+				ui.Box(c).Width(1).FillHeight().Background(s.ch.separator)
+				s.scholarReferencePage(c, p, rightPDF, true)
+			}
+			if inspector {
+				s.scholarInspector(c, p, width, false)
+			}
 			return
 		}
 		// 组合标签以左侧成员为键：在两篇之间切换活动文档时不重建编辑区（保留焦点与滚动位置）。
@@ -697,6 +752,10 @@ func (s *Shell) document(c *ui.Context) {
 				s.focusEditor = false
 			}
 		})
+		if rightPDF != nil {
+			ui.Box(c).Width(1).FillHeight().Background(s.ch.separator)
+			s.scholarReferencePage(c, p, rightPDF, true)
+		}
 		if inspector {
 			s.scholarInspector(c, p, width, false)
 		} else if p == nil && s.prefs.OutlineVisible {

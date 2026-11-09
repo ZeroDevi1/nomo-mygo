@@ -45,7 +45,8 @@ type scholarAgentState struct {
 	instruction, stream string
 	parts               [4]string
 	include             [4]bool
-	showParts           bool
+	showParts           int
+	attachments         bool
 	info                scholar.CodexInfo
 	probed, running     bool
 	model               int
@@ -65,13 +66,6 @@ func (s *Shell) openScholarAgent(p *scholarState) {
 		s.focusEditor = true
 		return
 	}
-	if p.agent.patch == nil && p.agent.batch == nil && !p.agent.running {
-		s.captureScholarTarget(p)
-		if p.agent.target.tabID == 0 {
-			p.agent.multi = true
-			p.err = ""
-		}
-	}
 }
 
 func (s *Shell) openScholarInlinePrompt(p *scholarState) {
@@ -86,6 +80,7 @@ func (s *Shell) openScholarInlinePrompt(p *scholarState) {
 		return
 	}
 	s.revealScholarSource(s.activeTab())
+	a.multi = false
 	a.inline, a.focusInline = true, true
 }
 
@@ -134,6 +129,8 @@ func (s *Shell) captureScholarTarget(p *scholarState) {
 	a := &p.agent
 	tab := s.activeTab()
 	if !isManuscript(tab) {
+		a.target = scholarTarget{}
+		a.parts[0], a.include[0] = "", false
 		p.err = s.tr("scholarSelectSource")
 		return
 	}
@@ -145,62 +142,23 @@ func (s *Shell) captureScholarTarget(p *scholarState) {
 		p.err = s.tr("scholarSelectionLimit")
 		a.resetSession()
 		a.target = scholarTarget{}
-		a.parts = [4]string{}
+		a.parts[0], a.include[0] = "", false
 		return
 	}
 	before := snap.Slice(start, end)
 	a.target = scholarTarget{tabID: tab.ID, start: start, end: end, line: snap.LineOf(start), path: tab.Path,
 		version: snap.Version(), digest: sha256.Sum256([]byte(before)), before: before}
 	p.err = ""
-	parts := [4]string{before}
-	var main string
-	if mt := s.scholarTab(p.project.Main); mt != nil {
-		ms := mt.Source().Buffer.Snapshot()
-		main = ms.Slice(0, min(ms.Len(), 8<<10))
-	}
-	if typeset.IsLaTeXPath(p.project.Main) {
-		if end := strings.Index(main, `\begin{document}`); end >= 0 {
-			parts[1] = main[:end]
-		}
-	} else {
-		var declarations strings.Builder
-		for line := range strings.SplitSeq(main, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "#let ") {
-				declarations.WriteString(line)
-				declarations.WriteByte('\n')
-			}
-		}
-		parts[1] = declarations.String()
-	}
-	var refs strings.Builder
-	if p.library != nil {
-		for _, e := range p.library.Entries {
-			if p.citations.counts[e.Key] == 0 && !strings.Contains(before, e.Key) {
-				continue
-			}
-			row := e.Key + " — " + e.Title + "\n"
-			if refs.Len()+len(row) > 8<<10 {
-				break
-			}
-			refs.WriteString(row)
-		}
-	}
-	parts[2] = refs.String()
-	if pane := s.compile; pane != nil && pane.tab == tab && pane.sourceVersion == snap.Version() {
-		parts[3] = pane.err
-		if parts[3] == "" {
-			var diagnostics strings.Builder
-			for _, warning := range pane.warnings {
-				diagnostics.WriteString(warning.Text)
-				diagnostics.WriteByte('\n')
-			}
-			parts[3] = diagnostics.String()
-		}
-	}
-	a.parts, a.include = parts, [4]bool{true, false, false, false}
+	a.parts[0], a.include[0] = before, true
+	a.resetSession()
 }
 
 var scholarContextNames = [4]string{"@selection", "@preamble", "@zotero", "@diag"}
+
+var scholarAgentPrompts = [...]struct{ name, prompt string }{
+	{"/shorten", "scholarAgentShorten"}, {"/translate", "scholarAgentTranslate"},
+	{"/formula", "scholarAgentFixFormula"}, {"/convert", "scholarAgentConvert"},
+}
 
 func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
 	a := &p.agent
@@ -225,8 +183,6 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
 			}
 		}
 	}
-	s.scholarFileContexts(c, p)
-	s.scholarContextActions(c, p)
 	if a.patch != nil {
 		s.scholarPatchView(c, p, a.patch)
 		return
@@ -239,48 +195,13 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
 				return func() { a.probed, a.info = err == nil, info }, err
 			})
 		}
-	} else {
-		labels := []string{s.tr("scholarAgentDefaultModel")}
-		for _, model := range a.info.Models {
-			label := model.DisplayName
-			if label == "" {
-				label = model.Model
-			}
-			labels = append(labels, label)
-		}
-		scholarSelectIndex(c, &a.model, labels, a.running)
-		if a.info.More {
-			ui.Text(c, s.tr("scholarFirstModels")).FontSize(11)
-		}
 	}
-	if ui.Button(c, s.tr("scholarAgentUseSelection")).Disabled(p.busy).Clicked() {
-		s.captureScholarTarget(p)
+	s.scholarAgentAttachments(c.Key("attachments"), p)
+	input := ui.TextInput(c, &a.instruction).FillWidth().Placeholder(s.tr("scholarAgentInput")).Disabled(a.running)
+	command := strings.HasPrefix(strings.TrimSpace(a.instruction), "/")
+	if command && !a.running {
+		s.scholarAgentCommands(c.Key("prompts"), a, input.Submitted())
 	}
-	if a.target.tabID == 0 && !a.multi {
-		return
-	}
-	if a.target.tabID != 0 {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarLineLabel"), filepath.Base(a.target.path), a.target.line+1)).FontSize(12).Wrap()
-	}
-	for i, name := range scholarContextNames {
-		if a.parts[i] == "" {
-			continue
-		}
-		if ui.Checkbox(c.Key(i), &a.include[i], fmt.Sprintf("%s · %d B", name, len(a.parts[i]))).Disabled(a.running).Changed() {
-			a.resetSession()
-		}
-	}
-	if ui.Button(c, s.tr("scholarAgentViewContext")).Clicked() {
-		a.showParts = !a.showParts
-	}
-	if a.showParts {
-		for i, part := range a.parts {
-			if a.include[i] && part != "" {
-				ui.Text(c.Key(i), scholarContextNames[i]+"\n"+part).FontSize(11).Wrap()
-			}
-		}
-	}
-	ui.TextInput(c, &a.instruction).FillWidth().Placeholder(s.tr("scholarAgentInput")).Disabled(a.running)
 	if a.running {
 		ui.Text(c, s.tr("scholarGenerating")).FontSize(11)
 		if ui.Button(c, s.tr("scholarAgentCancel")).Clicked() {
@@ -299,15 +220,110 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
 		}
 		return
 	}
-	ui.Text(c, s.tr("scholarAgentDisclosure")).FontSize(11).Wrap()
-	if ui.Button(c, s.tr("scholarAgentSend")).Disabled(p.busy || !a.probed || strings.TrimSpace(a.instruction) == "" ||
-		(!a.multi && !a.include[0])).Clicked() {
+	ready := a.probed && !p.busy && !command && strings.TrimSpace(a.instruction) != "" &&
+		(a.multi && len(a.files) > 0 || !a.multi && a.target.tabID != 0 && a.include[0])
+	if a.probed && !a.include[0] && len(a.files) == 0 {
+		ui.Text(c, s.tr("scholarAgentChooseTarget")).FontSize(11).Wrap()
+	}
+	send := false
+	ui.Row(c.Key("controls")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+		label := s.tr("scholarCommandPalette")
+		s.toolButton(c.Key("prompt-menu"), "slash", label, false).Disabled(p.busy).Label(label).Menu(func(m *ui.Menu) {
+			for _, command := range scholarAgentPrompts {
+				if m.Item(command.name + "  " + s.tr(command.prompt)).Chosen() {
+					a.instruction = s.tr(command.prompt)
+				}
+			}
+		})
+		if a.probed {
+			labels := []string{s.tr("scholarAgentDefaultModel")}
+			for _, model := range a.info.Models {
+				label := model.DisplayName
+				if label == "" {
+					label = model.Model
+				}
+				labels = append(labels, label)
+			}
+			if scholarSelectIndex(c.Key("model"), &a.model, labels, p.busy) {
+				a.resetSession()
+			}
+		}
+		ui.Box(c).Grow(1)
+		send = ui.Button(c, s.tr("scholarAgentSend")).Disabled(!ready).Clicked()
+	})
+	if ready && (send || input.Submitted()) {
 		if a.multi {
 			s.sendScholarPatchSet(p)
 		} else {
 			s.sendScholarAgent(p)
 		}
 	}
+}
+
+func (s *Shell) scholarAgentCommands(c *ui.Context, a *scholarAgentState, submitted bool) {
+	query := strings.TrimSpace(a.instruction)
+	for i, command := range scholarAgentPrompts {
+		if strings.HasPrefix(command.name, query) {
+			label := command.name + "  " + s.tr(command.prompt)
+			if ui.Button(c.Key(i), label).Clicked() || submitted && command.name == query {
+				a.instruction = s.tr(command.prompt)
+			}
+		}
+	}
+}
+
+func (s *Shell) scholarAgentAttachments(c *ui.Context, p *scholarState) {
+	a := &p.agent
+	add := s.toolButton(c.Key("add"), "plus", s.tr("scholarAgentAttach"), a.attachments).Disabled(p.busy)
+	if add.Clicked() {
+		a.attachments = !a.attachments
+	}
+	ui.Popover(c, add, &a.attachments, func() {
+		ui.Scroll(c).Width(250).MaxHeight(360).Children(func() {
+			ui.Column(c).FillWidth().Padding(8).Gap(4).Children(func() {
+				if ui.Button(c.Key("selection"), s.tr("scholarAgentUseSelection")).Disabled(p.busy).Clicked() {
+					s.captureScholarTarget(p)
+					if a.target.tabID != 0 {
+						a.multi, a.attachments = false, false
+						a.resetSession()
+					}
+				}
+				s.scholarContextActions(c, p)
+				s.scholarFileContexts(c, p)
+				ui.Text(c, s.tr("scholarAgentDisclosure")).FontSize(11).Wrap()
+			})
+		})
+	})
+	for i, part := range a.parts {
+		if part == "" || !a.include[i] || i == 0 && a.multi {
+			continue
+		}
+		ck := c.Key(i)
+		label := scholarContextNames[i]
+		if i == 0 {
+			label = fmt.Sprintf(s.tr("scholarLineLabel"), filepath.Base(a.target.path), a.target.line+1)
+		}
+		ui.Row(ck).Gap(4).AlignItems(ui.Center).Children(func() {
+			if ui.Button(ck.Key("view"), label).Clicked() {
+				if a.showParts == i+1 {
+					a.showParts = 0
+				} else {
+					a.showParts = i + 1
+				}
+			}
+			if s.toolButton(ck.Key("remove"), "x", s.tr("scholarRemoveAttachment"), false).Disabled(p.busy).Clicked() {
+				a.parts[i], a.include[i] = "", false
+				if a.showParts == i+1 {
+					a.showParts = 0
+				}
+				a.resetSession()
+			}
+		})
+		if a.showParts == i+1 && a.include[i] {
+			ui.Text(ck.Key("text"), part).FontSize(11).Wrap()
+		}
+	}
+	s.scholarAttachedFiles(c.Key("files"), p)
 }
 
 func (s *Shell) scholarTargetCurrent(target scholarTarget) bool {

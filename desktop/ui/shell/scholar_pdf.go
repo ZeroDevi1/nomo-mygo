@@ -2,8 +2,6 @@ package shell
 
 import (
 	"context"
-	"fmt"
-	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,13 +27,13 @@ func (s *Shell) scholarLinkedEntry(p *scholarState, e scholar.Entry) scholar.Ent
 	return e
 }
 
-func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, svc ui.Services) {
+func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, _ ui.Services) {
 	e := s.scholarLinkedEntry(p, entry)
 	if e.RemoteID == "" {
 		file := e.File
 		if strings.EqualFold(filepath.Ext(file), ".pdf") && !filepath.IsAbs(file) {
 			if path, err := p.project.Path(file); err == nil {
-				svc.OpenURL((&url.URL{Scheme: "file", Path: path}).String())
+				s.openScholarAttachment(p, e, "", path, e.Title, 0)
 				return
 			}
 		}
@@ -51,14 +49,14 @@ func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, svc ui.Serv
 	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		key := ""
+		var attachment scholar.Attachment
 		for start := 0; start < 500; start += scholar.ZoteroPageSize {
 			detail, err := z.Detail(ctx, e.RemoteID, start)
 			if err != nil {
 				return nil, err
 			}
 			if len(detail.PDFs) > 0 {
-				key = detail.PDFs[0].Key
+				attachment = detail.PDFs[0]
 				break
 			}
 			if !detail.More {
@@ -66,10 +64,10 @@ func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, svc ui.Serv
 			}
 		}
 		return func() {
-			if key == "" {
+			if attachment.Key == "" {
 				p.err = s.tr("scholarNoPDF")
 			} else {
-				svc.OpenURL(z.PDFLink(key, 0))
+				s.openScholarAttachment(p, e, attachment.Key, "", attachment.Title, 0)
 			}
 		}, nil
 	})
@@ -97,20 +95,6 @@ func (s *Shell) showScholarReferenceAt(st *editor.State, p *scholarState, ref sc
 			}
 		})
 	}()
-}
-
-func (s *Shell) scholarCollectionRows(c *ui.Context, p *scholarState) {
-	l := &p.literature
-	// Breadcrumbs retain hierarchy across paginated child collections.
-	ui.Text(c, strings.Join(l.collectionTrail, " / ")).FontSize(11).Wrap()
-	for _, collection := range l.pageData.Collections {
-		ck := c.Key(collection.Key)
-		if ui.Button(ck, collection.Name).Tooltip(fmt.Sprintf("%s / %s", collection.Parent, collection.Name)).Disabled(p.busy).Clicked() {
-			l.collectionTrail = append(l.collectionTrail, collection.Name)
-			l.collection = collection.Key
-			s.loadZotero(p, false, false, collection.Key, l.remoteQuery, 0)
-		}
-	}
 }
 
 func (s *Shell) quickLookScholarAttachment(p *scholarState, key string) {
