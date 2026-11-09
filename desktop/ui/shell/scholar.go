@@ -625,20 +625,43 @@ func (s *Shell) scholarNavigationMenu(m *ui.Menu, p *scholarState, width float32
 
 func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
 	width, _ := c.Size()
-	ui.Column(c.Key("project-nav")).FillWidth().Padding(3, 6).Gap(2).Children(func() {
+	ui.Column(c.Key("project-nav")).FillWidth().Padding(4, 8).Gap(2).Children(func() {
 		for i, destination := range scholarDestinations {
-			selected := p.nav == i
-			if s.scholarTabButton(c.Key(i), destination.icon, s.tr(destination.label), selected).Clicked() {
+			if s.scholarSidebarItem(c.Key(i), destination.icon, s.tr(destination.label), p.nav == i).Clicked() {
 				s.showScholarNavigation(p, i, width)
 			}
 		}
-		if s.scholarTabButton(c.Key("assistant"), "message-square-text", s.tr("scholarWritingAssistant"), p.drawer == scholarCodex).Clicked() {
+	})
+	ui.Column(c.Key("project-content")).Grow(1).MinHeight(0).FillWidth().Children(func() {
+		if p.nav != scholarLiterature {
+			s.scholarProjectPane(c, p)
+		}
+	})
+	ui.Column(c.Key("writing-assistant")).FillWidth().Padding(0, 8, 8, 8).Gap(5).Children(func() {
+		ui.Box(c).FillWidth().Height(1).Background(s.ch.separator)
+		if s.scholarSidebarItem(c, "message-square-text", s.tr("scholarWritingAssistant"), p.drawer == scholarCodex).Clicked() {
 			s.openScholarAgent(p)
 		}
 	})
-	if p.nav != scholarLiterature {
-		s.scholarProjectPane(c, p)
+}
+
+func (s *Shell) scholarSidebarItem(c *ui.Context, glyph, label string, selected bool) ui.Element {
+	row := ui.ButtonBase(c).FillWidth().Height(28).Padding(0, 8).Gap(7).Radius(6).
+		Justify(ui.Start).AlignItems(ui.Center).Label(label).FocusRing(true).Selected(selected)
+	ink := s.ch.muted
+	if selected {
+		row.Background(s.ch.pressed)
+		ink = s.ch.accent
+	} else if row.Hovered() {
+		row.Background(s.ch.hover)
 	}
+	row.Children(func() {
+		ui.Box(c).Size(16, 16).Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+			ui.Icon(c, s.icon(glyph)).FontSize(14).TextColor(ink)
+		})
+		ui.Text(c, label).FontSize(12).SingleLine().MinWidth(0).Shrink(1)
+	})
+	return row
 }
 
 func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
@@ -656,7 +679,11 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 			files = p.files
 		}
 	}
-	ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 6).Gap(4).AlignItems(ui.Center).Children(func() {
+	header := ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 6).Gap(4).AlignItems(ui.Center)
+	if s.pf.mac {
+		header.Padding(0, 8, 0, 16)
+	}
+	header.Children(func() {
 		title := s.tr(scholarDestinations[section].label)
 		if section == scholarFiles {
 			title = filepath.Base(p.project.Root)
