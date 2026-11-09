@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/scholar"
@@ -153,6 +154,67 @@ func (s *Shell) updateProjectPreview(p *compilePane) {
 	buf := p.tab.Source().Buffer
 	if inputs != p.projectInput || buf.Version() != p.sourceVersion {
 		s.queuePreview(p, previewRevision{snap: buf.Snapshot(), version: p.version + 1, project: inputs})
+	}
+}
+
+func (s *Shell) previewBuffersCurrent(p *compilePane) bool {
+	return p.tab.Source().Buffer.Version() == p.sourceVersion &&
+		(p.projectInput == nil || s.projectPreviewRevision(p) == p.projectInput)
+}
+
+func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
+	p := s.compile
+	if p == nil {
+		return
+	}
+	if workspace == nil || workspace.drawer != scholarDiagnostics || workspace.agent.trial.show ||
+		p.tab != tab || tab.typesetMode == typesetSource || tab.typesetPaused || p.reuseChecks == nil ||
+		p.project != s.typesetProject(tab) || s.previewProvider(&Tab{Path: p.path}) != p.provider ||
+		p.busy || p.stopped || p.err != "" || p.image == nil || p.fullVersion != p.version || !s.previewBuffersCurrent(p) {
+		s.closeCompile()
+		return
+	}
+	if p.parkedPage == 0 {
+		first, last := p.list.Visible()
+		p.parkedPage = p.page
+		if first <= last {
+			p.parkedPage = first + 1
+		}
+		tab.typesetPage, tab.typesetPagePath = p.parkedPage, p.path
+		workspace.budgetOpen, p.pageJumpOpen = false, false
+		p.reuseChecks <- nil
+	}
+}
+
+func (s *Shell) restoreTypesetPreview(p *compilePane) {
+	if p.stopped {
+		s.closeCompile()
+		return
+	}
+	if p.checkingPreview {
+		return
+	}
+	s.checkExternalChanges()
+	if !s.previewBuffersCurrent(p) {
+		s.closeCompile()
+		return
+	}
+	p.checkingPreview = true
+	p.reuseChecks <- func(current bool) {
+		s.post(func() {
+			if s.compile != p {
+				return
+			}
+			p.checkingPreview = false
+			if !current || s.activeTab() != p.tab || p.tab.Path != p.sourcePath || !s.previewBuffersCurrent(p) {
+				s.closeCompile()
+				return
+			}
+			if workspace := s.scholarForTab(p.tab); workspace != nil && workspace.drawer == scholarClosed {
+				p.list.ScrollTo(p.parkedPage-1, ui.Start)
+				p.parkedPage = 0
+			}
+		})
 	}
 }
 

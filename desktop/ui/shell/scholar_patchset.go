@@ -446,9 +446,6 @@ func (s *Shell) rollbackScholarFiles(p *scholarState) {
 }
 
 func (s *Shell) scholarInlineReview(c *ui.Context, p *scholarState, t *Tab, el ui.Element) {
-	if p.agent.trial.show && p.agent.trial.compare || t.typesetMode == typesetPreview || s.scholarCanvasWidth(c) < 620 && p.compactPDF {
-		return
-	}
 	var patch *scholarPatch
 	if set := p.agent.batch; set != nil && len(set.hunks) > 0 {
 		patch = set.hunks[min(set.selected, len(set.hunks)-1)]
@@ -506,7 +503,7 @@ func (s *Shell) scholarInlineReview(c *ui.Context, p *scholarState, t *Tab, el u
 				}
 				if ui.Button(c, s.tr("scholarHideReview")).Clicked() {
 					p.agent.reviewHidden = true
-					p.drawer = scholarCodex
+					s.showScholarInspector(p, scholarCodex)
 				}
 			})
 		})

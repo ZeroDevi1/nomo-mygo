@@ -38,9 +38,7 @@ func (s *Shell) newFileIn(dir string) {
 		return
 	}
 	f.Close()
-	if s.folder != nil {
-		s.folder.refresh()
-	}
+	s.refreshFileTrees()
 	s.OpenFiles([]string{path})
 	s.beginRename(path)
 }
@@ -91,10 +89,17 @@ func (s *Shell) applyRename() {
 			t.Path = to
 		}
 	}
+	s.refreshFileTrees()
+	s.updateTitle()
+}
+
+func (s *Shell) refreshFileTrees() {
 	if s.folder != nil {
 		s.folder.refresh()
 	}
-	s.updateTitle()
+	if s.scholar != nil && s.scholar.files != nil {
+		s.scholar.files.refresh()
+	}
 }
 
 // nodeMenu 是资源管理器条目的右键菜单。
@@ -110,7 +115,7 @@ func (s *Shell) nodeMenu(el ui.Element, n *folderNode) {
 		if m.Item(s.tr("newFile")).Chosen() {
 			s.newFileIn(dir)
 		}
-		if n.path != s.folder.path && m.Item(s.tr("rename")).Chosen() {
+		if n.path != n.root && m.Item(s.tr("rename")).Chosen() {
 			s.beginRename(n.path)
 		}
 		m.Separator()

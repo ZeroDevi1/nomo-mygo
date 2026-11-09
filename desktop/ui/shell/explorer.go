@@ -67,7 +67,7 @@ func (n *folderNode) refresh() {
 // tree 画目录树，行样式对应原版 ExplorerSidebar：按层级缩进、可旋转的展开箭头、文件夹与
 // 文件类型图标（Markdown / JSON / TXT / 图片）、当前文档高亮、右键菜单。
 // 每帧只构建已展开目录中的行；目录子项在第一次展开时读取。
-func (s *Shell) tree(c *ui.Context, root *folderNode) {
+func (s *Shell) tree(c *ui.Context, root *folderNode, main string) {
 	active := ""
 	if t := s.activeTab(); t != nil {
 		active = t.Path
@@ -75,7 +75,7 @@ func (s *Shell) tree(c *ui.Context, root *folderNode) {
 	var walk func(n *folderNode, depth int)
 	walk = func(n *folderNode, depth int) {
 		for _, ch := range n.children {
-			s.treeRow(c, ch, depth, active)
+			s.treeRow(c, ch, depth, active, main)
 			if ch.dir && ch.open {
 				if !ch.loaded {
 					_ = ch.load()
@@ -87,11 +87,19 @@ func (s *Shell) tree(c *ui.Context, root *folderNode) {
 	ui.Column(c).FillWidth().Gap(1).Children(func() { walk(root, 0) })
 }
 
-func (s *Shell) treeRow(c *ui.Context, n *folderNode, depth int, active string) {
+func (s *Shell) treeRow(c *ui.Context, n *folderNode, depth int, active, main string) {
 	ck := c.Key(n.path)
 	selected := !n.dir && active != "" && samePath(active, n.path)
 	row := ui.ButtonBase(ck).FillWidth().Height(26).Padding(0, 8, 0, 6+float32(depth)*14).Gap(4).
 		Radius(c.Theme().Radius).Justify(ui.Start).Label(n.name)
+	isMain := !n.dir && main != "" && samePath(main, n.path)
+	if main != "" {
+		row.FocusRing(true).Selected(selected)
+	}
+	if isMain {
+		label := s.tr("scholarMainBadge") + " · " + n.name
+		row.Label(label).Tooltip(label + "\n" + n.path)
+	}
 	switch {
 	case selected:
 		row.Background(s.ch.pressed)
@@ -116,13 +124,23 @@ func (s *Shell) treeRow(c *ui.Context, n *folderNode, depth int, active string) 
 			ui.Box(ck).Width(12)
 			ui.Icon(ck, icons.ForFile(n.name)).FontSize(15).TextColor(s.ch.muted)
 		}
-		ui.Text(ck, n.name).FontSize(13).SingleLine().Shrink(1)
+		ui.Text(ck, n.name).FontSize(13).SingleLine().MinWidth(0).Shrink(1)
+		if isMain {
+			ui.Text(ck, s.tr("scholarMainBadge")).FontSize(10).TextColor(s.ch.muted).SingleLine()
+		}
 	})
 	s.nodeMenu(row, n)
 	if row.Clicked() {
 		if n.dir {
 			n.open = !n.open && n.hasChildren
 		} else {
+			if p := s.scholarForTab(s.activeTab()); p != nil {
+				width, _ := c.Size()
+				if width < scholarCompactWidth {
+					p.compactNav = false
+					s.focusEditor = true
+				}
+			}
 			s.openPreview(n.path)
 		}
 	}

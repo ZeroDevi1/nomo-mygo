@@ -3,7 +3,9 @@ package shell
 import (
 	"context"
 	"math"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +24,10 @@ const (
 	typesetSplit
 )
 
-type pageRequest struct{ number, edge int }
+type pageRequest struct {
+	number, edge int
+	dark         bool
+}
 
 type sourcePageRequest struct {
 	line    int
@@ -57,12 +62,14 @@ type compilePane struct {
 	tab                     *Tab
 	path, sourcePath        string
 	project                 scholar.Project
+	previewRoot             string
 	projectInput            *scholarPreviewRevision
 	sourceVersion           uint64
 	version                 uint64
 	cancel                  context.CancelFunc
 	list                    ui.ListState
 	cached                  map[int]*ui.Bitmap
+	cacheDark               bool
 	loading                 int
 	bookmarks               []mdedit.Heading
 	cacheSlots              int
@@ -71,8 +78,13 @@ type compilePane struct {
 	clicks                  chan pageClick
 	jump                    func(int)
 	jumpProject             func(typeset.ProjectLocation)
-	page, pages             int
+	page, pages, resumePage int
+	parkedPage              int
+	checkingPreview         bool
+	reuseChecks             chan func(bool) // nil 请求释放段落快览，有回调的请求校验当前 PDF。
 	busy                    bool
+	pageJumpOpen            bool
+	pageJumpInput           string
 	elapsed                 time.Duration
 	warnings                []typeset.Diagnostic
 	err                     string
@@ -82,6 +94,18 @@ type compilePane struct {
 func (s *Shell) closeCompile() {
 	if p := s.compile; p != nil {
 		p.cancel()
+		if isManuscript(p.tab) && samePath(p.sourcePath, p.tab.Path) {
+			first, last := p.list.Visible()
+			if first <= last && p.parkedPage == 0 {
+				p.tab.typesetPage, p.tab.typesetPagePath = first+1, p.path
+			}
+			if workspace := s.scholar; workspace != nil {
+				workspace.budgetOpen = false
+				if !p.busy && (p.err != "" || p.pages > 0) {
+					workspace.diagnostics = p.report()
+				}
+			}
+		}
 		if s.scholar != nil && s.scholar.bodyConfirmed != nil && s.scholar.bodyConfirmed.pane == p {
 			s.scholar.bodyConfirmed = nil
 		}
@@ -93,30 +117,44 @@ func (s *Shell) closeCompile() {
 func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	st := t.Source()
 	workspace := s.scholarForTab(t)
-	trial := workspace != nil && s.canPreviewTypeset(t) && workspace.agent.trial.show
-	if trial && t.typesetMode != typesetSource && workspace.agent.trial.compare {
+	mode := t.typesetMode
+	if workspace != nil {
+		mode = s.scholarPreviewMode(c, workspace, t)
+	}
+	wantPreview := s.canPreviewTypeset(t) && mode != typesetSource && (s.scholar == nil || workspace != nil)
+	trial := wantPreview && workspace != nil && workspace.agent.trial.show
+	if workspace != nil && (!wantPreview || trial) {
+		workspace.budgetOpen = false
+	}
+	if trial && workspace.agent.trial.compare {
 		s.closeCompile()
-		el = ui.Column(c).Fill()
+		el = ui.Column(c).Fill().Focusable().Label(s.tr("scholarComparePDFs"))
 		el.Children(func() { s.scholarTrialPaper(c, workspace) })
 		return
 	}
 	if st.OnCompletion == nil && t.Kind() == kindMarkdown {
 		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(t, req) }
 	}
-	compact := workspace != nil && s.scholarCanvasWidth(c) < 620 && t.typesetMode == typesetSplit
-	wantPreview := s.canPreviewTypeset(t) && t.typesetMode != typesetSource &&
-		(!compact || workspace.compactPDF) && (s.scholar == nil || workspace != nil)
 	var project scholar.Project
 	if wantPreview && !trial {
 		project = s.typesetProject(t)
 	}
-	if p := s.compile; p != nil && (p.tab != t || !wantPreview || t.typesetPaused || trial || p.project != project) {
-		s.closeCompile()
+	if p := s.compile; p != nil {
+		switch {
+		case p.tab != t || t.typesetPaused || trial:
+			s.closeCompile()
+		case !wantPreview:
+			s.hideTypesetPreview(workspace, t)
+		case p.project != project:
+			s.closeCompile()
+		case p.parkedPage != 0:
+			s.restoreTypesetPreview(p)
+		}
 	}
 	if wantPreview && !t.typesetPaused && !trial && s.compile == nil {
 		s.openTypeset(t, true)
 	}
-	if p := s.compile; p != nil {
+	if p := s.compile; p != nil && p.parkedPage == 0 {
 		if p.project.Root != "" {
 			s.updateProjectPreview(p)
 		} else if p.liveUpdates != nil && !p.stopped && p.version != st.Buffer.Version() {
@@ -124,17 +162,30 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 		}
 	}
 
+	var paper ui.Element
 	source := func() {
 		ui.Row(c).Grow(1).Fill().Justify(ui.Center).Padding(16, 0, 0, 0).Children(func() {
 			el = s.sourceEditor(c, t)
 		})
 	}
-	if p := s.compile; p != nil || wantPreview && (trial || t.typesetPaused) {
+	p := s.compile
+	if p != nil && p.parkedPage != 0 {
+		p = nil
+	}
+	if p != nil || wantPreview && (workspace != nil || t.typesetPaused) {
 		preview := func() {
-			if trial && s.scholarTrialPaper(c, workspace) {
-				return
+			canvas := c.Theme().SurfaceHover
+			if c.Theme().Dark || t.typesetDarkReading {
+				canvas = ui.Hex("#1a1b1e")
 			}
-			ui.Column(c).Fill().MinWidth(0).Clip().Background(c.Theme().SurfaceHover).Padding(8).Gap(6).Children(func() {
+			paper = ui.Column(c).Fill().MinWidth(0).Clip().Focusable().Label("PDF").Background(canvas)
+			paper.Children(func() {
+				if trial && s.scholarTrialPaper(c, workspace) {
+					return
+				}
+				if workspace != nil {
+					s.scholarPDFHeader(c, workspace, t, p)
+				}
 				if p == nil {
 					return
 				}
@@ -150,7 +201,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				if p.image == nil {
 					return
 				}
-				s.previewPages(c, p)
+				ui.Column(c).Fill().Grow(1).MinHeight(0).Padding(8).Children(func() {
+					s.previewPages(c, p)
+				})
 				if p.paragraph != nil && p.anchor.Page == 0 {
 					ui.Column(c).Absolute().Bottom(12).Left(12).Right(12).Background(c.Theme().Surface).Padding(6).Gap(3).Children(func() {
 						ui.Text(c, s.tr("liveParagraph")).FontSize(12)
@@ -160,9 +213,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				}
 			})
 		}
-		if t.typesetMode == typesetPreview || compact {
-			el = ui.Column(c).Fill()
-			el.Children(preview)
+		if mode == typesetPreview {
+			preview()
+			el = paper
 		} else if !trial {
 			if t.typesetSplitPercent == 0 {
 				t.typesetSplitPercent = 50
@@ -178,11 +231,83 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	} else {
 		source()
 	}
+	if workspace != nil && paper.Valid() {
+		if s.focusEditor && (mode == typesetPreview || t.typesetFocusPDF) {
+			paper.Focus()
+			s.focusEditor = false
+		} else if paper.FocusWithin() {
+			t.typesetFocusPDF = true
+		} else if el.FocusWithin() {
+			t.typesetFocusPDF = false
+		}
+	}
 	return
+}
+
+func (s *Shell) scholarPDFHeader(c *ui.Context, workspace *scholarState, tab *Tab, pane *compilePane) {
+	path := tab.Path
+	if pane != nil {
+		path = pane.path
+	} else if project := s.typesetProject(tab); project.Root != "" {
+		path = project.Main
+	}
+	ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 6, 0, 10).Gap(6).AlignItems(ui.Center).Background(s.ch.content).Children(func() {
+		ui.Icon(c, s.icon("file-text")).FontSize(14).TextColor(s.ch.muted)
+		ui.Text(c, "PDF · "+filepath.Base(path)).FontSize(11).SingleLine().Grow(1).MinWidth(0).Tooltip(path)
+		if pane != nil && pane.pages > 0 {
+			s.scholarPDFPageControl(c, pane)
+		}
+		reading := s.tr("scholarPDFDarkReading")
+		if s.toolButton(c.Key("pdf-dark-reading"), "moon", reading, tab.typesetDarkReading).
+			Label(reading).Role(ui.RoleToggleButton).Checked(tab.typesetDarkReading).FocusRing(true).
+			Disabled(pane != nil && pane.err != "" && pane.image != nil).Clicked() {
+			tab.typesetDarkReading = !tab.typesetDarkReading
+			c.Invalidate()
+		}
+		label := s.tr("scholarPageBudgetSettings")
+		b := s.toolButton(c.Key("pdf-budget"), "sliders-horizontal", label, workspace.budgetOpen).Label(label).FocusRing(true)
+		if b.Clicked() {
+			workspace.budgetOpen = !workspace.budgetOpen
+		}
+		ui.Popover(c, b, &workspace.budgetOpen, func() {
+			ui.Column(c).Width(270).Padding(12).Gap(6).Role(ui.RoleDialog).Label(label).Children(func() {
+				s.scholarBudgetControls(c, workspace)
+			})
+		})
+	})
+	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+}
+
+func (s *Shell) scholarPDFPageControl(c *ui.Context, pane *compilePane) {
+	first, _ := pane.list.Visible()
+	current := first + 1
+	label := strconv.Itoa(current) + " / " + strconv.Itoa(pane.pages)
+	b := s.scholarMenuButton(c.Key("pdf-page"), "list-tree", label, true)
+	if b.Clicked() {
+		pane.pageJumpOpen = !pane.pageJumpOpen
+		pane.pageJumpInput = strconv.Itoa(current)
+	}
+	ui.Popover(c, b, &pane.pageJumpOpen, func() {
+		label := s.tr("scholarGoToPage")
+		ui.Row(c).Padding(8).Gap(6).AlignItems(ui.Center).Children(func() {
+			in := ui.TextInput(c, &pane.pageJumpInput).Width(60).Label(label).AutoFocus()
+			page, err := strconv.Atoi(strings.TrimSpace(pane.pageJumpInput))
+			valid := err == nil && page >= 1 && page <= pane.pages
+			if (ui.Button(c, label).Disabled(!valid).Clicked() || in.Submitted()) && valid {
+				pane.list.ScrollTo(page-1, ui.Start)
+				pane.pageJumpOpen = false
+			}
+		})
+	})
 }
 
 // 整页缓存的原始 RGBA 像素预算为 128 MiB；拖宽窗口时保留现有位图，待后台从 PDF 补绘。
 func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
+	dark := p.tab.typesetDarkReading
+	if p.cacheDark != dark {
+		p.cached = nil
+		p.cacheDark = dark
+	}
 	first, last := p.list.Visible()
 	slots := max(2, last-first+1)
 	if slots != p.cacheSlots && p.loading == 0 {
@@ -192,7 +317,7 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 	ui.List(c, &p.list, p.pages, func(row int) {
 		number := row + 1
 		bmp := p.cached[number]
-		if bmp == nil && number == p.page {
+		if bmp == nil && number == p.page && !dark {
 			bmp = p.image
 		}
 		w, h := p.image.Size()
@@ -201,6 +326,9 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 		}
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(0, 0, 8, 0).Children(func() {
 			frame := ui.Box(c).WidthPercent(float32(s.prefs.ContentWidthPercent)).AspectRatio(float32(w) / float32(h)).Clip()
+			if dark {
+				frame.Background(ui.Hex("#202020"))
+			}
 			frame.Draw(func(painter *ui.Painter, rect ui.Rect) {
 				if p.busy || p.err != "" || p.loading != 0 || row < first || row > last {
 					return
@@ -219,7 +347,7 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 					}
 				}
 				select {
-				case p.requests <- pageRequest{number, edge}:
+				case p.requests <- pageRequest{number, edge, dark}:
 					p.loading = number
 				default:
 				}
@@ -244,11 +372,15 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 					box := frame.Bounds()
 					pw, ph := box.W, box.H
 					x, y := pw*float32(a.X/a.PageW), ph*float32(a.Y/a.PageH)
-					patch := ui.Box(c).Absolute().Left(x).Top(y).Size(pw*float32(a.W/a.PageW), ph*float32(a.H/a.PageH)).Background(ui.Hex("#ffffff")).Clip().Label(s.tr("inlineDraft"))
+					bg, fg := ui.Hex("#ffffff"), ui.Hex("#111111")
+					if dark && p.inlineText != "" {
+						bg, fg = ui.Hex("#202020"), ui.Hex("#e0e0e0")
+					}
+					patch := ui.Box(c).Absolute().Left(x).Top(y).Size(pw*float32(a.W/a.PageW), ph*float32(a.H/a.PageH)).Background(bg).Clip().Label(s.tr("inlineDraft"))
 					patch.Children(func() {
 						if p.inlineText != "" {
 							scale := ph / float32(a.PageH)
-							ui.Text(c, p.inlineText).Font("serif").FontSize(float32(a.FontPt) * scale).FixedLineHeight(float32(a.LinePt) * scale).TextColor(ui.Hex("#111111")).FillWidth().Wrap()
+							ui.Text(c, p.inlineText).Font("serif").FontSize(float32(a.FontPt) * scale).FixedLineHeight(float32(a.LinePt) * scale).TextColor(fg).FillWidth().Wrap()
 						} else {
 							ui.Image(c, p.paragraph).Fill()
 						}
@@ -298,6 +430,13 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	initial := t.Source().Buffer.Snapshot()
 	p := &compilePane{provider: pr, tab: t, path: path, sourcePath: t.Path, project: project, version: initial.Version(), sourceVersion: initial.Version(), cancel: cancel, cacheSlots: 2, requests: make(chan pageRequest, 1), sections: make(chan sourcePageRequest, 1), clicks: make(chan pageClick, 1), busy: true}
+	if workspace := s.scholarForTab(t); workspace != nil && live {
+		p.previewRoot = workspace.project.Root
+		p.reuseChecks = make(chan func(bool), 2)
+	}
+	if t.typesetPagePath != "" && samePath(t.typesetPagePath, path) {
+		p.resumePage = t.typesetPage
+	}
 	buildCtx, cancelBuild := context.WithCancel(ctx)
 	p.lifetime = ctx
 	p.cancelBuild = cancelBuild
@@ -323,7 +462,9 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 					return
 				}
 				if project.Root != "" {
-					s.updateProjectPreview(p)
+					if p.parkedPage == 0 {
+						s.updateProjectPreview(p)
+					}
 					if v != p.version {
 						return
 					}
@@ -370,6 +511,7 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 	var base editor.Snapshot
 	var baseVersion uint64
 	var baseProject *scholarPreviewRevision
+	var standaloneStamp string
 	fragment := func(input editor.Snapshot, offset int) (string, string, int, bool) {
 		if projectSession == nil || samePath(p.sourcePath, p.path) {
 			return p.provider.Fragment(input, offset)
@@ -383,7 +525,7 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 	var pageBitmap *ui.Bitmap
 	var follow string
 	var settled typeset.PageAnchor
-	page, pages := 1, 0
+	page, pages := max(1, p.resumePage), 0
 	draw := func(heads []mdedit.Heading) error {
 		img, e := session.Page(buildCtx, page)
 		if e != nil {
@@ -397,11 +539,13 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 			p.tab.outRows = nil
 			p.cached = nil
 			first, last := p.list.Visible()
-			if placement.Page > 0 && (n-1 < first || n-1 > last) {
+			if (p.image == nil && p.resumePage > 0) || (placement.Page > 0 && (n-1 < first || n-1 > last)) {
 				p.list.ScrollTo(n-1, ui.Start)
 			}
 			p.loading = 0
-			p.keepPage(n, bmp)
+			if !p.cacheDark {
+				p.keepPage(n, bmp)
+			}
 			p.inlineText = ""
 			p.anchor = placement
 			p.page, p.pages, p.image, p.busy, p.err, p.paragraph = n, total, bmp, false, "", nil
@@ -429,6 +573,9 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 				}
 			}
 		} else {
+			if p.previewRoot != "" {
+				standaloneStamp, _ = (scholar.Project{Root: p.previewRoot}).InputStamp(buildCtx)
+			}
 			n, e = session.Compile(buildCtx, strings.NewReader(snap.String()))
 		}
 		version := revision.version
@@ -489,6 +636,22 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case check := <-p.reuseChecks:
+			reusable, ok := session.(*typeset.Session)
+			if check == nil {
+				if ok {
+					reusable.StopParagraphPreview()
+				}
+				continue
+			}
+			current := ok && pages > 0 && buildCtx.Err() == nil
+			if current && baseProject != nil {
+				current = reusable.PreviewInputsCurrent(ctx, baseProject.readers())
+			} else if current {
+				stamp, err := (scholar.Project{Root: p.previewRoot}).InputStamp(ctx)
+				current = err == nil && stamp == standaloneStamp && reusable.PreviewInputsCurrent(ctx, nil)
+			}
+			check(current)
 		case click := <-p.clicks:
 			if click.page < 1 || click.page > pages || click.version != baseVersion || buildCtx.Err() != nil {
 				continue
@@ -542,8 +705,16 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 					}
 					continue
 				}
+				if request.dark {
+					img = darkPDFPage(img)
+				}
 				bmp := ui.NewBitmap(img)
-				publish(baseVersion, false, func() { p.keepPage(n, bmp); p.loading = 0 })
+				publish(baseVersion, false, func() {
+					if p.cacheDark == request.dark {
+						p.keepPage(n, bmp)
+					}
+					p.loading = 0
+				})
 			}
 		case next := <-p.liveUpdates:
 			revision = next

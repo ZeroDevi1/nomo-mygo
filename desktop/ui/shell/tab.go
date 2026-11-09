@@ -43,6 +43,11 @@ type Tab struct {
 	typesetMode         int
 	typesetPaused       bool // 取消后保持当前预览视图，直到用户主动恢复。
 	typesetSplitPercent float32
+	typesetCompactPDF   bool
+	typesetFocusPDF     bool
+	typesetDarkReading  bool
+	typesetPage         int
+	typesetPagePath     string
 	scholarBound        bool
 
 	Doc *mdedit.Document
@@ -84,6 +89,9 @@ type Tab struct {
 
 func newTab(id int, path, text string, enc docfs.Encoding) *Tab {
 	t := &Tab{ID: id, Path: path, Encoding: enc, plain: documentKind(path) != kindMarkdown}
+	if isManuscript(t) {
+		t.typesetMode = typesetSplit
+	}
 	text = t.adoptLineEndings(text)
 	if t.plain {
 		t.Doc = mdedit.NewDocument("")

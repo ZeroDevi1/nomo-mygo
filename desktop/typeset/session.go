@@ -25,6 +25,8 @@ type Session struct {
 	mirror                       *projectMirror
 	liveProject, depsUnsupported bool
 	sourceDeps                   []string
+	previewFiles                 map[string]os.FileInfo
+	previewPathBytes             int
 	indexed                      bool
 	anchors                      map[[32]byte]PageAnchor
 	path, dir, pdf               string
@@ -63,9 +65,7 @@ func Open(path string) (*Session, error) {
 	return &Session{path: abs, dir: dir, pdf: filepath.Join(dir, name+".pdf")}, nil
 }
 func (s *Session) Close() {
-	if s.fast != nil {
-		s.fast.close()
-	}
+	s.StopParagraphPreview()
 	os.RemoveAll(s.dir)
 	if s.trialRoot != "" {
 		os.RemoveAll(s.trialRoot)
@@ -157,6 +157,7 @@ func renderPage(ctx context.Context, pdf string, page, edge int) (image.Image, e
 
 func (s *Session) build(ctx context.Context, source io.Reader, export, projectSource bool) error {
 	s.warnings = nil
+	s.previewFiles = nil
 	path, pdf := s.path, s.pdf
 	dir := filepath.Dir(pdf)
 	project, err := filepath.Abs(filepath.Dir(path))
@@ -201,10 +202,17 @@ func (s *Session) build(ctx context.Context, source io.Reader, export, projectSo
 		}()
 		latex := func() (string, error) {
 			syncFlag := "-synctex=0"
+			args := []string{"-file-line-error", "-no-shell-escape", "-no-parse-first-line", "-interaction=nonstopmode", "-halt-on-error", "-jobname=" + job}
 			if !export {
 				syncFlag = "-synctex=1"
 			}
-			return run(ctx, dir, "", env, "xelatex", syncFlag, "-file-line-error", "-no-shell-escape", "-no-parse-first-line", "-interaction=nonstopmode", "-halt-on-error", "-jobname="+job, "./preview.tex")
+			if s.previewFiles != nil {
+				args = append(args, "-recorder")
+			}
+			return run(ctx, dir, "", env, "xelatex", append(args, syncFlag, "./preview.tex")...)
+		}
+		if !export && (!projectSource || s.liveProject) {
+			s.trackPreviewFiles("xelatex")
 		}
 		if e := os.Remove(filepath.Join(dir, job+".bcf")); e != nil && !os.IsNotExist(e) {
 			return e
@@ -216,6 +224,9 @@ func (s *Session) build(ctx context.Context, source io.Reader, export, projectSo
 			if err != nil {
 				break
 			}
+			if s.previewFiles != nil && !s.recordTeXInputs(ctx, dir, job) {
+				s.previewFiles = nil
+			}
 			if pass == 0 {
 				backend := ""
 				if stat, e := os.Stat(filepath.Join(dir, job+".bcf")); e == nil && stat.Size() > 0 {
@@ -224,6 +235,8 @@ func (s *Session) build(ctx context.Context, source io.Reader, export, projectSo
 					backend = "bibtex"
 				}
 				if backend != "" {
+					// The TeX recorder cannot account for files opened by the bibliography process.
+					s.previewFiles = nil
 					backendLog, err = run(ctx, dir, "", env, backend, job)
 					if err != nil {
 						break

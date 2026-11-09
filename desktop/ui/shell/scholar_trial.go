@@ -226,14 +226,14 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 			}
 			p.agent.trial = scholarTrialView{before: ui.NewBitmap(b), after: ui.NewBitmap(a), pagesBefore: nBefore, pagesAfter: nAfter, page: page, pageBefore: min(page, nBefore), elapsed: elapsed, show: true, versions: versions, identities: identities, paths: paths, pending: revision == nil, ownerPatch: ownerPatch, ownerBatch: ownerBatch, compare: revision != nil, paragraph: paragraph, anchor: anchor}
 			p.changes.compare = false
-			p.compactPDF = true
+			s.closeScholarInspector(p)
 			if !isManuscript(s.activeTab()) {
 				if t := s.scholarTab(project.Main); t != nil {
 					s.activate(s.findTabIndex(t.ID))
 				}
 			}
 			if t := s.activeTab(); t != nil {
-				t.typesetMode = typesetSplit
+				t.typesetMode, t.typesetCompactPDF = typesetSplit, true
 			}
 		}, nil
 	})

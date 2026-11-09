@@ -101,7 +101,7 @@ func (s *Shell) scholarPalette(c *ui.Context, p *scholarState) {
 						}
 					}},
 					{s.tr("scholarViewRecentEdit"), func() { s.openScholarChange(p, 0) }},
-					{s.tr("scholarOpenDiagnostics"), func() { s.showScholarDiagnostics(p) }},
+					{s.tr("scholarOpenDiagnostics"), func() { s.showScholarInspector(p, scholarDiagnostics) }},
 					{s.tr("scholarOpenAgent"), func() { s.openScholarAgent(p) }},
 				} {
 					if contains(cmd.title) {
@@ -159,14 +159,7 @@ func (s *Shell) jumpScholarOutline(tab *Tab, offset int) {
 	st := tab.Source()
 	st.Select(offset, offset)
 	st.ScrollTo(st.Buffer.Snapshot().LineOf(offset))
-	if tab.typesetMode == typesetPreview {
-		tab.typesetMode = typesetSplit
-	}
-	if p := s.scholar; p != nil {
-		p.changes.compare = false
-		p.compactPDF = false
-	}
-	s.focusEditor = true
+	s.revealScholarSource(tab)
 }
 
 func (s *Shell) scholarOutlineView(c *ui.Context, p *scholarState, tab *Tab) {

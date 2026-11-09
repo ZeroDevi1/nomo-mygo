@@ -77,14 +77,15 @@ func (s *Shell) openScholarAgent(p *scholarState) {
 func (s *Shell) openScholarInlinePrompt(p *scholarState) {
 	a := &p.agent
 	if a.patch != nil || a.running {
-		p.drawer, p.compactNav = scholarCodex, false
+		s.showScholarInspector(p, scholarCodex)
 		return
 	}
 	s.captureScholarTarget(p)
 	if a.target.tabID == 0 {
-		p.drawer, p.compactNav = scholarCodex, false
+		s.showScholarInspector(p, scholarCodex)
 		return
 	}
+	s.revealScholarSource(s.activeTab())
 	a.inline, a.focusInline = true, true
 }
 
@@ -120,7 +121,7 @@ func (s *Shell) scholarInlinePrompt(c *ui.Context, p *scholarState) {
 			})
 			if ui.Button(c, s.tr("scholarAgentReviewContext")).Clicked() || input.Submitted() {
 				a.inline = false
-				p.drawer, p.compactNav = scholarCodex, false
+				s.showScholarInspector(p, scholarCodex)
 			}
 		})
 		if panel.OverlayShortcut(0, ui.KeyEscape) || panel.PressedOutside() {
@@ -520,64 +521,65 @@ func validateScholarPatchReferences(ctx context.Context, library *scholar.Librar
 	return ctx.Err()
 }
 
+// 编译会话释放后仅保留一份轻量报告，诊断仍可查看或发送给 Codex。
+type scholarCompileReport struct {
+	tabID        int
+	source, path string
+	message      string
+	warnings     []typeset.Diagnostic
+}
+
+func (p *compilePane) report() scholarCompileReport {
+	return scholarCompileReport{p.tab.ID, p.sourcePath, p.path, p.err, p.warnings}
+}
+
 func (s *Shell) scholarDiagnosticsView(c *ui.Context, p *scholarState) {
-	if pane := s.compile; pane != nil && pane.tab == s.activeTab() {
-		switch {
-		case pane.busy:
-			ui.Text(c, s.tr("scholarTypesetting"))
-		case pane.err == "":
+	tab := s.activeTab()
+	report := p.diagnostics
+	if pane := s.compile; pane != nil && pane.tab == tab && !pane.busy {
+		report = pane.report()
+	}
+	switch {
+	case report.tabID == tab.ID && samePath(report.source, tab.Path):
+		ui.Text(c, s.tr("scholarLastTypeset")).FontSize(11).TextColor(s.ch.muted)
+		if report.message == "" {
 			ui.Text(c, s.tr("scholarTypesetSuccess"))
-			for i, note := range pane.warnings {
+			for i, note := range report.warnings {
 				ck := c.Key(i)
 				ui.Text(ck, note.Text).FontSize(11).Wrap().TextColor(scholarInk(c, "warning"))
 				if note.Line > 0 && note.File != "" && ui.Button(ck, fmt.Sprintf(s.tr("scholarJumpLine"), note.Line)).Clicked() {
-					s.jumpScholarDiagnostic(p, pane.path, note)
+					s.jumpScholarDiagnostic(p, report.path, note)
 				}
 			}
-		default:
-			if ui.Button(c, s.tr("scholarRebuildPreview")).Clicked() {
-				pane.tab.typesetPaused = false
-				s.closeCompile()
-			}
-			ui.Text(c, pane.err).FontSize(12).Wrap()
-			if location := typeset.DiagnosticLocation(pane.err); location.Line > 0 {
+		} else {
+			ui.Text(c, report.message).FontSize(12).Wrap()
+			if location := typeset.DiagnosticLocation(report.message); location.Line > 0 {
 				if ui.Button(c, fmt.Sprintf(s.tr("scholarJumpLine"), location.Line)).Clicked() {
-					s.jumpScholarDiagnostic(p, pane.path, location)
+					s.jumpScholarDiagnostic(p, report.path, location)
 				}
 			}
 			if ui.Button(c, s.tr("scholarAttachDiagnostics")).Disabled(p.busy || p.agent.patch != nil).Clicked() {
-				p.drawer, p.compactNav = scholarCodex, false
+				s.showScholarInspector(p, scholarCodex)
 				s.captureScholarTarget(p)
 				if p.agent.target.tabID != 0 {
-					p.agent.parts[3], p.agent.include[3] = pane.err, true
+					p.agent.parts[3], p.agent.include[3] = report.message, true
 				}
 			}
 		}
-	} else if tab := s.activeTab(); tab != nil && tab.typesetPaused {
+	case tab.typesetPaused:
 		ui.Text(c, s.tr("scholarTypesetPaused")).Wrap()
-		if ui.Button(c, s.tr("scholarRebuildPreview")).Clicked() {
-			tab.typesetPaused = false
-		}
-	} else {
+	default:
 		ui.Text(c, s.tr("scholarOpenPreview")).Wrap()
 	}
-	ui.Text(c, s.tr("scholarDrawerWidth")).FontSize(12)
-	width := p.drawerWidth(s.prefs)
-	ui.Row(c).Gap(4).Children(func() {
-		for _, px := range []int{320, 360, 420} {
-			if ui.Button(c.Key(px), fmt.Sprint(px)).Disabled(px == width).Clicked() {
-				if s.prefs.ScholarProjects == nil {
-					s.prefs.ScholarProjects = make(map[string]scholarProjectPrefs)
-				}
-				pref := s.prefs.ScholarProjects[p.project.Root]
-				pref.DrawerWidth = px
-				p.drawerSize = float32(px)
-				p.drawerSave = time.Time{}
-				s.prefs.ScholarProjects[p.project.Root] = pref
-				s.setPref("scholarProjects")
-			}
-		}
-	})
+	if ui.Button(c, s.tr("scholarRebuildPreview")).Disabled(!s.canPreviewTypeset(tab)).Clicked() {
+		s.rebuildScholarPreview(p, tab)
+	}
+	if p.err != "" {
+		ui.Text(c, p.err).Wrap().FontSize(11)
+	}
+}
+
+func (s *Shell) scholarBudgetControls(c *ui.Context, p *scholarState) {
 	ui.Checkbox(c, &p.excludeBibliography, s.tr("scholarExcludeBibliography"))
 	if p.excludeBibliography {
 		if p.bodyConfirmed == nil {

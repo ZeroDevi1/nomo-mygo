@@ -12,6 +12,7 @@ import (
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 
 	"nomo/desktop/internal/config"
 	"nomo/desktop/ui/icons"
@@ -162,9 +163,19 @@ func (s *Shell) macContent(c *ui.Context) {
 			if s.scholarSidebarHidden(c) && s.toolButton(c, "panel-left", s.tr("showExplorerSidebar"), false).Clicked() {
 				s.scholarToggleSidebar(c)
 			}
-			s.titleText(c)
+			p := s.scholarForTab(s.activeTab())
+			if p != nil && len(s.tabs) > 1 {
+				ui.Text(c, filepath.Base(p.project.Root)).FontSize(13).Bold().SingleLine().MinWidth(0).Shrink(1)
+			} else {
+				s.titleText(c)
+			}
 			ui.Spacer(c)
-			s.trailingTools(c)
+			if p == nil || len(s.tabs) == 1 {
+				s.documentTools(c)
+			}
+			if s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
+				s.openSettings()
+			}
 		})
 		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 		if len(s.tabs) > 1 {
@@ -177,48 +188,58 @@ func (s *Shell) macContent(c *ui.Context) {
 // macTabs 是 Safari / Finder 风格的标签栏：等宽标签，悬停显示关闭按钮。
 func (s *Shell) macTabs(c *ui.Context) {
 	ui.Row(c).Height(tabBarH - 4).FillWidth().Background(s.ch.tabBar).AlignItems(ui.Stretch).Children(func() {
-		for _, tab := range s.barTabs() {
-			i := s.findTabIndex(tab.ID)
-			if i < 0 || s.tabHidden(tab) {
-				continue
-			}
-			ck := c.Key(tab.ID)
-			selected := s.tabSelected(tab)
-			cell := ui.Row(ck).Grow(1).Width(0).Padding(0, 6).AlignItems(ui.Center).Gap(4)
-			if selected {
-				cell.Background(s.ch.tabActive)
-			} else if cell.Hovered() {
-				cell.Background(s.ch.hover)
-			}
-			if i > 0 {
-				cell.Border(1, s.ch.separator).BorderWidth(0, 0, 0, 1)
-			}
-			s.tabDragTarget(cell, tab)
-			hovered := cell.Hovered()
-			cell.Children(func() {
-				s.closeButton(ck, tab, hovered || selected)
-				label := ui.ButtonBase(ck).Grow(1).Children(func() {
-					txt := ui.Text(ck, s.tabLabel(tab)).FontSize(12).SingleLine()
-					if !selected {
-						txt.TextColor(s.ch.muted)
+		tabs := func() {
+			for _, tab := range s.barTabs() {
+				i := s.findTabIndex(tab.ID)
+				if i < 0 || s.tabHidden(tab) {
+					continue
+				}
+				ck := c.Key(tab.ID)
+				selected := s.tabSelected(tab)
+				cell := ui.Row(ck).Grow(1).Width(0).Padding(0, 6).AlignItems(ui.Center).Gap(4)
+				if selected {
+					cell.Background(s.ch.tabActive)
+				} else if cell.Hovered() {
+					cell.Background(s.ch.hover)
+				}
+				if i > 0 {
+					cell.Border(1, s.ch.separator).BorderWidth(0, 0, 0, 1)
+				}
+				s.tabDragTarget(cell, tab)
+				hovered := cell.Hovered()
+				cell.Children(func() {
+					s.closeButton(ck, tab, hovered || selected)
+					label := ui.ButtonBase(ck).Grow(1).Children(func() {
+						txt := ui.Text(ck, s.tabLabel(tab)).FontSize(12).SingleLine()
+						if !selected {
+							txt.TextColor(s.ch.muted)
+						}
+						if tab.preview {
+							txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
+						}
+					})
+					if tab.Path != "" {
+						label.Tooltip(tab.Path)
 					}
-					if tab.preview {
-						txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
+					if label.DoubleClicked() {
+						tab.preview = false // 双击标题固定预览标签
 					}
+					if label.Clicked() && !selected {
+						s.activate(i)
+					}
+					ui.Box(ck).Size(18, 18)
 				})
-				if tab.Path != "" {
-					label.Tooltip(tab.Path)
-				}
-				if label.DoubleClicked() {
-					tab.preview = false // 双击标题固定预览标签
-				}
-				if label.Clicked() && !selected {
-					s.activate(i)
-				}
-				ui.Box(ck).Size(18, 18)
-			})
-			s.tabMenu(cell, tab)
+				s.tabMenu(cell, tab)
+			}
 		}
+		if s.scholarForTab(s.activeTab()) == nil {
+			tabs()
+			return
+		}
+		ui.Row(c).Grow(1).MinWidth(0).Clip().AlignItems(ui.Stretch).Children(tabs)
+		ui.Row(c).Padding(0, 8, 0, 4).Gap(4).AlignItems(ui.Center).Children(func() {
+			s.documentTools(c)
+		})
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 }
@@ -239,7 +260,11 @@ func (s *Shell) desktopLayout(c *ui.Context) {
 			if s.toolButton(c, "panel-left", s.tr(hide), false).Clicked() {
 				s.scholarToggleSidebar(c)
 			}
-			ui.Text(c, config.AppName).FontSize(12).Bold().Padding(0, 6, 0, 4)
+			if p := s.scholarForTab(s.activeTab()); p != nil {
+				ui.Text(c, filepath.Base(p.project.Root)).FontSize(12).Bold().SingleLine().MaxWidth(160).Shrink(1).Padding(0, 6, 0, 4)
+			} else {
+				ui.Text(c, config.AppName).FontSize(12).Bold().Padding(0, 6, 0, 4)
+			}
 			s.menus(c)
 			ui.Spacer(c)
 			if t := s.activeTab(); t != nil && t.Kind() == kindMarkdown && s.toolButton(c, "picture-in-picture-2", s.tr("markdownMiniShortcut"), false).Clicked() {
@@ -258,9 +283,6 @@ func (s *Shell) desktopLayout(c *ui.Context) {
 			}
 		})
 		ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
-			if s.pf.windows && s.scholarForTab(s.activeTab()) != nil && s.scholarSidebarHidden(c) {
-				ui.Column(c).Width(scholarRailWidth).FillHeight().Padding(4, 0).Children(func() { s.scholarNav(c, true) })
-			}
 			card := func() {
 				box := ui.Column(c).Grow(1).Fill().Background(s.ch.content)
 				if s.pf.windows {
@@ -333,7 +355,11 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 				s.tabMenu(box, tab)
 			}
 		})
-		if s.toolButton(c, "plus", s.tr("newMarkdown"), false).Clicked() {
+		if tab := s.activeTab(); s.scholarForTab(tab) != nil {
+			ui.Row(c).Height(height).Gap(4).AlignItems(ui.Center).Children(func() {
+				s.documentTools(c)
+			})
+		} else if s.toolButton(c, "plus", s.tr("newMarkdown"), false).Clicked() {
 			s.NewDocument()
 		}
 	})
@@ -492,15 +518,7 @@ func (s *Shell) titleText(c *ui.Context) {
 	ui.Text(c, title).FontSize(13).Bold().SingleLine().Shrink(1)
 }
 
-// trailingTools 是 macOS 统一标题栏右侧：文档工具与设置。
-func (s *Shell) trailingTools(c *ui.Context) {
-	s.documentTools(c)
-	if s.toolButton(c, "settings", s.tr("settings"), s.settings != nil).Clicked() {
-		s.openSettings()
-	}
-}
-
-// documentTools 是模式切换、查找与大纲开关：macOS 在统一标题栏，Windows / Linux 在格式工具栏右侧（同原版 EditorToolbar）。
+// documentTools 将 Scholar 稿件工具放在当前文档的标题或标签行。
 func (s *Shell) documentTools(c *ui.Context) {
 	t := s.activeTab()
 	if t == nil {
@@ -552,7 +570,8 @@ func (s *Shell) sidebar(c *ui.Context, mac bool) {
 				}
 			})
 		}
-		if p := s.scholarForTab(s.activeTab()); p != nil && s.scholarSidebar(c, p) {
+		if p := s.scholarForTab(s.activeTab()); p != nil {
+			s.scholarSidebar(c, p)
 			return
 		}
 		ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 6, 0, 14).AlignItems(ui.Center).Children(func() {
@@ -571,7 +590,7 @@ func (s *Shell) sidebar(c *ui.Context, mac bool) {
 		ui.Scroll(c).Grow(1).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Padding(0, 6, 8, 6).Children(func() {
 				if s.folder != nil {
-					s.tree(c, s.folder)
+					s.tree(c, s.folder, "")
 					if s.folder.loaded && len(s.folder.children) == 0 {
 						ui.Text(c, s.tr("folderHasNoDocuments")).FontSize(12).TextColor(s.ch.muted).Wrap().Padding(8, 10)
 					}
@@ -602,13 +621,11 @@ func (s *Shell) document(c *ui.Context) {
 		return
 	}
 	p := s.scholarForTab(tab)
-	if p != nil {
-		if !s.pf.mac {
-			ui.Row(c).Height(s.pf.scholarNavHeight()+4).FillWidth().Padding(0, 10).Gap(2).
-				AlignItems(ui.Center).Justify(ui.End).Children(func() { s.documentTools(c) })
-			ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-		}
-	} else if !s.prefs.ToolbarHidden {
+	width := s.scholarWorkspaceWidth(c)
+	total, _ := c.Size()
+	inspector := p != nil && s.scholarInspectorVisible(p, total)
+	singlePane := p != nil && s.scholarSinglePane(total)
+	if p == nil && !s.prefs.ToolbarHidden {
 		s.toolbar(c)
 	}
 	if s.mode() == modeSemantic {
@@ -616,6 +633,11 @@ func (s *Shell) document(c *ui.Context) {
 	}
 	// MinHeight(0) 让这一行可以比内容矮：否则大纲的滚动内容会撑高整行，编辑区压到状态栏下面。
 	ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
+		if inspector && singlePane {
+			s.hideTypesetPreview(p, tab)
+			s.scholarInspector(c, p, width, true)
+			return
+		}
 		// 组合标签以左侧成员为键：在两篇之间切换活动文档时不重建编辑区（保留焦点与滚动位置）。
 		keyID := tab.ID
 		if left, _, ok := s.comparisonOf(tab); ok {
@@ -628,7 +650,7 @@ func (s *Shell) document(c *ui.Context) {
 		}
 		ck := c.Key(fmt.Sprint(keyMode, s.split(), keyID))
 		ui.Column(ck).Grow(1).Fill().Children(func() {
-			if p != nil && s.scholarCompare(c, p, tab) {
+			if p != nil && p.drawer == scholarClosed && s.scholarCompare(c, p, tab) {
 				return
 			}
 			var el ui.Element
@@ -661,7 +683,7 @@ func (s *Shell) document(c *ui.Context) {
 				s.linkPopover(c, tab, el)
 				s.emojiSuggest(c, tab, el)
 			}
-			if p != nil {
+			if p != nil && !s.scholarPDFOnly(c, p, tab) {
 				p.agent.anchor = el.Bounds()
 				s.scholarInlineCitations(c, p, tab, el)
 				s.scholarInlineReview(c, p, tab, el)
@@ -675,9 +697,9 @@ func (s *Shell) document(c *ui.Context) {
 				s.focusEditor = false
 			}
 		})
-		if p != nil {
-			s.scholarInspector(c, p)
-		} else if s.prefs.OutlineVisible {
+		if inspector {
+			s.scholarInspector(c, p, width, false)
+		} else if p == nil && s.prefs.OutlineVisible {
 			s.outline(c, tab)
 		}
 	})
@@ -729,6 +751,15 @@ func (s *Shell) findBar(c *ui.Context, tab *Tab) {
 }
 
 func (s *Shell) openFind(replace bool) {
+	if tab := s.activeTab(); s.scholarForTab(tab) != nil {
+		s.revealScholarSource(tab)
+		action := editor.Find
+		if replace {
+			action = editor.FindReplace
+		}
+		tab.Source().Run(action)
+		return
+	}
 	if s.mode() != modeSemantic {
 		return
 	}

@@ -131,8 +131,9 @@ func (ch chrome) paint(c ui.Color, materialArea bool) ui.Color {
 }
 
 const (
-	scholarCompactWidth = 1060
-	scholarRailWidth    = 40
+	scholarCompactWidth    = 1060
+	scholarSinglePaneWidth = 1000 // 窗口最小宽度为 920，侧栏收起后也能进入单栏。
+	scholarSplitWidth      = 620
 )
 
 func (pf platform) scholarNavHeight() float32 {
@@ -140,11 +141,4 @@ func (pf platform) scholarNavHeight() float32 {
 		return 32
 	}
 	return 27
-}
-
-func (pf platform) scholarCommandThreshold() float32 {
-	if pf.mac {
-		return 640 // 为标题、交通灯与窗口按钮预留空间。
-	}
-	return 510
 }

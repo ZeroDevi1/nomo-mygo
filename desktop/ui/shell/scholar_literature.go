@@ -425,7 +425,7 @@ func (s *Shell) loadZotero(p *scholarState, connect, collections bool, collectio
 
 func (s *Shell) selectScholarEntry(p *scholarState, entry scholar.Entry) {
 	l := &p.literature
-	p.drawer, p.compactNav = scholarReader, false
+	s.showScholarInspector(p, scholarReader)
 	entry = s.scholarLinkedEntry(p, entry)
 	l.selected, l.detail, l.attachmentPage = entry, scholar.ZoteroDetail{}, 0
 	l.attachment, l.annotations, l.moreAnnotations = "", nil, false
@@ -539,7 +539,7 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 	}
 	if isManuscript(s.activeTab()) && ui.Button(c, s.tr("scholarDiscussPaper")).Disabled(p.busy || p.agent.patch != nil || p.agent.batch != nil).Clicked() {
 		s.captureScholarTarget(p)
-		p.drawer, p.compactNav = scholarCodex, false
+		s.showScholarInspector(p, scholarCodex)
 		if p.agent.target.tabID == 0 {
 			p.agent.multi = true
 			p.err = ""

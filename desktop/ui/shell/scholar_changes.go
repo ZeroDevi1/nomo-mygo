@@ -322,8 +322,8 @@ func (s *Shell) scholarChangesView(c *ui.Context, p *scholarState) {
 				if ui.Button(c.Key("pending-"+fmt.Sprint(i)), fmt.Sprintf("%s · L%d", filepath.Base(h.target.path), h.target.line+1)).FillWidth().Clicked() {
 					set.selected = i
 					p.agent.reviewHidden = false
-					p.drawer, p.compactNav = scholarCodex, false
 					s.jumpScholarPatch(h)
+					s.showScholarInspector(p, scholarCodex)
 				}
 			}
 		}
@@ -453,14 +453,14 @@ func (s *Shell) scholarGutter(c *ui.Context, tab *Tab) {
 				if h.target.tabID == tab.ID && h.target.line == line && h.target.version == st.Buffer.Version() {
 					set.selected = i
 					p.agent.reviewHidden = false
-					p.drawer, p.compactNav = scholarCodex, false
+					s.showScholarInspector(p, scholarCodex)
 					return
 				}
 			}
 		}
 		if patch := p.agent.patch; patch != nil && patch.target.tabID == tab.ID && patch.target.line == line &&
 			patch.target.version == st.Buffer.Version() {
-			p.drawer, p.compactNav = scholarCodex, false
+			s.showScholarInspector(p, scholarCodex)
 			return
 		}
 		if latest := p.changes.latest(tab.ID); latest != nil && slices.Contains(latest.lines, line) {

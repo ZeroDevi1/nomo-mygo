@@ -31,7 +31,7 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 	priorZ := p.literature.zotero
 	body := p.bodyConfirmed
 	preview := s.compile
-	if preview != nil && preview.project.Root == "" {
+	if preview != nil && (preview.project.Root == "" || preview.parkedPage != 0) {
 		preview = nil
 	}
 	project := p.project

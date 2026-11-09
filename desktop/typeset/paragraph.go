@@ -177,6 +177,15 @@ func startParagraph(ctx context.Context, dir, doc string) (*paragraphEngine, err
 }
 func (p *paragraphEngine) close() { p.cancel(); <-p.done }
 
+// StopParagraphPreview releases the Typst watcher while keeping the compiled PDF.
+func (s *Session) StopParagraphPreview() {
+	if s.fast != nil {
+		s.fast.close()
+		s.fast = nil
+	}
+	s.lastDoc, s.lastParagraph = "", nil
+}
+
 // Paragraph 用常驻 Typst 试排 LaTeX 正文片段，返回临时预览而非最终分页。
 // 仅在首次可试排编辑时启动进程；ctx 应贯穿会话。不可转换、编译失败或超时时返回 nil，交给整页编译。
 func (s *Session) Paragraph(ctx context.Context, header, body string) image.Image {

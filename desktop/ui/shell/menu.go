@@ -94,14 +94,11 @@ func (s *Shell) menuGroups() []menuGroup {
 				}
 			}}, "toggle-source"),
 			{id: "sidebar", label: "showHideExplorer", sep: true, run: func(s *Shell) {
-				if p := s.scholarForTab(s.activeTab()); p != nil && s.win != nil {
-					width, _ := s.win.ContentSize()
-					if width < scholarCompactWidth {
-						p.compactNav = !p.compactNav
-						return
-					}
+				width := scholarCompactWidth
+				if s.win != nil {
+					width, _ = s.win.ContentSize()
 				}
-				s.toggleSidebar()
+				s.scholarToggleSidebarAt(float32(width))
 			}},
 			{id: "outline", label: "showOutline", run: func(s *Shell) {
 				if p := s.scholarForTab(s.activeTab()); p != nil && s.win != nil {

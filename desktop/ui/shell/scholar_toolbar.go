@@ -22,131 +22,146 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 	if s.activeTab() != tab || s.scholarForTab(tab) != p || mode != typesetSource && !s.canPreviewTypeset(tab) {
 		return
 	}
-	if p != nil {
+	p.changes.compare = false
+	s.closeScholarInspector(p)
+	if tab.typesetMode != mode {
+		tab.typesetPaused = false
+	}
+	tab.typesetMode, tab.typesetFocusPDF = mode, mode == typesetPreview
+	s.focusEditor = true
+}
+
+func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int {
+	if p.drawer != scholarClosed {
+		return typesetSource
+	}
+	width, _ := c.Size()
+	if tab.typesetMode == typesetSplit && s.scholarSinglePane(width) {
+		if tab.typesetCompactPDF {
+			return typesetPreview
+		}
+		return typesetSource
+	}
+	return tab.typesetMode
+}
+
+func (s *Shell) scholarPDFOnly(c *ui.Context, p *scholarState, tab *Tab) bool {
+	mode := s.scholarPreviewMode(c, p, tab)
+	return s.canPreviewTypeset(tab) && (mode == typesetPreview || mode != typesetSource && p.agent.trial.show && p.agent.trial.compare)
+}
+
+func (s *Shell) revealScholarSource(tab *Tab) {
+	if p := s.scholar; p != nil {
+		if s.win != nil {
+			width, _ := s.win.ContentSize()
+			if p.activeTabID != tab.ID || s.scholarSinglePane(float32(width)) {
+				s.closeScholarInspector(p)
+			}
+		}
 		p.changes.compare = false
+		if p.agent.trial.show {
+			p.agent.trial.compare = false
+		}
 	}
-	tab.typesetMode, tab.typesetPaused = mode, false
+	if tab.typesetMode == typesetPreview {
+		tab.typesetMode = typesetSplit
+	}
+	tab.typesetCompactPDF, tab.typesetFocusPDF = false, false
+	s.focusEditor = true
+}
+
+func (s *Shell) rebuildScholarPreview(p *scholarState, tab *Tab) {
+	mode := tab.typesetMode
 	if mode == typesetSource {
-		s.closeCompile()
-		s.focusEditor = true
+		mode = typesetSplit
 	}
+	s.setTypesetView(p, tab, mode)
+	p.agent.trial = scholarTrialView{}
+	tab.typesetCompactPDF, tab.typesetPaused = true, false
+	s.closeCompile()
 }
 
 func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 	c = c.Key(tab.ID)
-	total, _ := c.Size()
-	inspectorVisible := s.scholarInspectorVisible(p, total)
-	w := s.scholarWorkspaceWidth(c)
-	compact := w < s.pf.scholarCommandThreshold()
-	preview := s.canPreviewTypeset(tab)
-	manuscript := isManuscript(tab)
-	mode := tab.typesetMode
-	if !preview {
-		mode = typesetSource
-	}
-	labels := [len(scholarViewLabels)]string{}
-	for i, key := range scholarViewLabels {
-		labels[i] = s.tr(key)
-	}
-	if manuscript {
-		if compact {
-			b := ui.ButtonBase(c).Padding(4, 6).Radius(c.Theme().Radius).FocusRing(true).
-				Label(labels[mode]).Tooltip(labels[mode])
-			if b.Hovered() {
-				b.Background(s.ch.hover)
+	if isManuscript(tab) {
+		total, _ := c.Size()
+		width := s.scholarWorkspaceWidthAt(total)
+		preview := s.canPreviewTypeset(tab)
+		mode := tab.typesetMode
+		if !preview {
+			mode = typesetSource
+		}
+		shown := s.scholarPreviewMode(c, p, tab)
+		compact := s.scholarSinglePane(total)
+		label := s.tr(scholarViewLabels[mode])
+		icon := [...]string{"code-xml", "book-open-text", "columns-2"}[mode]
+		compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
+		if compact && mode == typesetSplit && p.drawer == scholarClosed {
+			label = s.tr(compactLabels[shown])
+			if shown == typesetPreview {
+				icon = "book-open-text"
+			} else {
+				icon = "code-xml"
 			}
-			b.Children(func() {
-				ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-					if w >= 340 {
-						ui.Text(c, labels[mode]).FontSize(12).SingleLine()
-					} else {
-						icon := [...]string{"code-xml", "book-open-text", "columns-2"}[mode]
-						ui.Icon(c, s.icon(icon)).FontSize(14).TextColor(s.ch.accent)
-					}
-					ui.Icon(c, s.icon("chevron-down")).FontSize(12).TextColor(s.ch.muted)
-				})
-			})
-			b.Menu(func(m *ui.Menu) {
-				for i, label := range labels {
-					if m.Item(label).Radio(mode == i).Disabled(!preview && i != typesetSource).Chosen() {
-						s.setTypesetView(p, tab, i)
+		}
+		s.scholarMenuButton(c.Key("layout"), icon, label, width >= 400).Menu(func(m *ui.Menu) {
+			for i, key := range scholarViewLabels {
+				if m.Item(s.tr(key)).Radio(i == mode).Disabled(!preview && i != typesetSource).Chosen() {
+					s.setTypesetView(p, tab, i)
+				}
+			}
+			if compact && mode == typesetSplit {
+				m.Separator()
+				for _, side := range []int{typesetSource, typesetPreview} {
+					if m.Item(s.tr(compactLabels[side])).Radio(side == shown && p.drawer == scholarClosed).Chosen() {
+						tab.typesetCompactPDF = side == typesetPreview
+						s.setTypesetView(p, tab, typesetSplit)
 					}
 				}
-			})
-		} else if ui.Segmented(c, &mode, labels[:]...).FontSize(12).Disabled(!preview).Changed() {
-			s.setTypesetView(p, tab, mode)
-		}
-	}
-
-	if !compact {
-		s.documentSearchButton(c)
-		if manuscript {
-			ui.Box(c).Size(1, 16).Margin(0, 3).Background(s.ch.separator)
-			if s.toolButton(c, "quote", s.scholarCommandTip("scholarInsertLocalCitations", scholarCiteMods, ui.KeyK), false).Label(s.tr("scholarInsertLocalCitations")).FocusRing(true).Clicked() {
-				s.openScholarCitations()
 			}
+		})
+	}
+	tip := s.tr("scholarMoreCommands")
+	s.toolButton(c.Key("more"), "ellipsis", tip, false).Label(tip).FocusRing(true).Menu(func(m *ui.Menu) {
+		if m.Item(s.tr("searchReplace")).Shortcut(ui.Cmd, ui.KeyF).Chosen() {
+			s.toggleDocumentSearch()
 		}
-		ui.Box(c).Size(1, 16).Margin(0, 3).Background(s.ch.separator)
-		if s.toolButton(c, "message-square-text", s.scholarCommandTip("scholarAgentName", scholarAgentMods, ui.KeyL), inspectorVisible && p.drawer == scholarCodex).Label(s.tr("scholarAgentName")).FocusRing(true).Clicked() {
+		if isManuscript(tab) && m.Item(s.tr("scholarInsertLocalCitations")).Shortcut(scholarCiteMods, ui.KeyK).Chosen() {
+			s.openScholarCitations()
+		}
+		m.Separator()
+		if m.Item(s.tr("scholarAgentName")).Checked(p.drawer == scholarCodex).Shortcut(scholarAgentMods, ui.KeyL).Chosen() {
 			s.openScholarAgent(p)
 		}
-		if s.toolButton(c, "triangle-alert", s.tr("scholarDiagnostics"), inspectorVisible && p.drawer == scholarDiagnostics).Label(s.tr("scholarDiagnostics")).FocusRing(true).Clicked() {
+		if m.Item(s.tr("scholarDiagnostics")).Checked(p.drawer == scholarDiagnostics).Chosen() {
 			s.scholarToggleDrawer(p, scholarDiagnostics)
 		}
-	}
-
-	// 紧凑双栏保留独立视图选择器；更多菜单收纳低频操作。
-	tip := s.tr("scholarMoreCommands")
-	compactSplit := preview && tab.typesetMode == typesetSplit && s.scholarCanvasWidth(c) < 620
-	showingPDF := compactSplit && p.compactPDF
-	if compactSplit {
-		icon, label := "book-open-text", labels[typesetPreview]
-		if showingPDF {
-			icon, label = "code-xml", labels[typesetSource]
-		}
-		tip := s.tr("scholarCompactShow") + " · " + label
-		if s.toolButton(c, icon, tip, false).Label(tip).FocusRing(true).Clicked() {
-			p.compactPDF = !showingPDF
-			if !p.compactPDF {
-				s.closeCompile()
-				s.focusEditor = true
-			}
-		}
-	}
-	s.toolButton(c, "ellipsis", tip, compact && inspectorVisible && (p.drawer == scholarCodex || p.drawer == scholarDiagnostics)).
-		Label(tip).FocusRing(true).Menu(func(m *ui.Menu) {
-		if compact {
-			if m.Item(s.tr("searchReplace")).Shortcut(ui.Cmd, ui.KeyF).Chosen() {
-				s.toggleDocumentSearch()
-			}
-			if manuscript && m.Item(s.tr("scholarInsertLocalCitations")).Shortcut(scholarCiteMods, ui.KeyK).Chosen() {
-				s.openScholarCitations()
-			}
-			m.Separator()
-			if m.Item(s.tr("scholarAgentName")).Checked(inspectorVisible && p.drawer == scholarCodex).Shortcut(scholarAgentMods, ui.KeyL).Chosen() {
-				s.openScholarAgent(p)
-			}
-			if m.Item(s.tr("scholarDiagnostics")).Checked(inspectorVisible && p.drawer == scholarDiagnostics).Chosen() {
-				s.scholarToggleDrawer(p, scholarDiagnostics)
-			}
-			m.Separator()
-		}
+		m.Separator()
 		if m.Item(s.tr("scholarCommandPalette")).Shortcut(ui.Cmd, ui.KeyP).Chosen() {
 			s.openScholarPalette(p)
 		}
 		m.Submenu(s.tr("scholarWorkspace"), func(nav *ui.Menu) {
 			width, _ := c.Size()
-			for i, destination := range scholarDestinations {
-				if nav.Item(s.tr(destination.label)).Radio(p.nav == i && !s.scholarSidebarHidden(c)).Chosen() {
-					s.showScholarNavigation(p, i, width)
-				}
-			}
+			s.scholarNavigationMenu(nav, p, width, !s.scholarSidebarHidden(c))
 		})
-		if preview && !p.agent.trial.show && !p.changes.compare && tab.typesetMode != typesetSource && (!compactSplit || showingPDF) {
-			m.Separator()
-			s.scholarCompileActions(m, tab)
-		}
 	})
+}
+
+func (s *Shell) scholarMenuButton(c *ui.Context, icon, label string, showText bool) ui.Element {
+	b := ui.ButtonBase(c).Padding(4, 6).Radius(c.Theme().Radius).FocusRing(true).Label(label).Tooltip(label)
+	if b.Hovered() {
+		b.Background(s.ch.hover)
+	}
+	b.Children(func() {
+		ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, s.icon(icon)).FontSize(14).TextColor(s.ch.muted)
+			if showText {
+				ui.Text(c, label).FontSize(12).SingleLine()
+			}
+			ui.Icon(c, s.icon("chevron-down")).FontSize(12).TextColor(s.ch.muted)
+		})
+	})
+	return b
 }
 
 func (s *Shell) scholarCompileActions(m *ui.Menu, tab *Tab) {
@@ -155,20 +170,22 @@ func (s *Shell) scholarCompileActions(m *ui.Menu, tab *Tab) {
 	busy := pane != nil && pane.tab == tab && pane.busy
 	if m.Item(s.tr("scholarStopTypeset")).Disabled(!current || !busy).Chosen() {
 		tab.typesetPaused = true
-		if p := s.scholarForTab(tab); p != nil && tab.typesetMode == typesetSplit {
-			p.compactPDF = true
+		if tab.typesetMode == typesetSplit {
+			tab.typesetCompactPDF = true
 		}
 		s.closeCompile()
 	}
 	if m.Item(s.tr("scholarRebuildPreview")).Disabled(!current || busy).Chosen() {
-		tab.typesetPaused = false
-		s.closeCompile()
+		if p := s.scholarForTab(tab); p != nil {
+			s.rebuildScholarPreview(p, tab)
+		}
 	}
 }
 
 func (s *Shell) openScholarCitations() {
 	tab := s.activeTab()
 	if p := s.scholarForTab(tab); p != nil && isManuscript(tab) && !p.literature.picker && !p.navigation.open {
+		s.revealScholarSource(tab)
 		p.literature.picker, p.literature.focusPicker = true, true
 	}
 }
