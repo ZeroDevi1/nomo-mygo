@@ -34,13 +34,4 @@ func (s *Session) CompileProjectTrial(ctx context.Context) (int, error) {
 	return s.compile(ctx, f, false, true)
 }
 
-// BodyPages uses an explicitly configured last page containing manuscript body.
-// A page shared with references is included. Zero means no reliable boundary.
-func BodyPages(total, bodyEndPage int) (int, bool) {
-	if bodyEndPage < 1 || bodyEndPage > total {
-		return 0, false
-	}
-	return bodyEndPage, true
-}
-
 func (s *Session) TrialRoot() string { return strings.Clone(s.trialRoot) }

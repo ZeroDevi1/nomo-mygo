@@ -16,6 +16,7 @@ type scholarNavigation struct {
 	files       scholarFileSearch
 	search      scholarQueryState
 	open, focus bool
+	outlineOpen bool
 	selected    int
 	query       string
 	figures     bool
@@ -173,7 +174,7 @@ func (s *Shell) scholarOutlineView(c *ui.Context, p *scholarState, tab *Tab) {
 		}
 	})
 	if !n.figures {
-		s.outlineContent(c, tab)
+		s.outlineContent(c, tab, func() { n.outlineOpen = false })
 		return
 	}
 	snap := tab.Source().Buffer.Snapshot()
@@ -204,6 +205,10 @@ func (s *Shell) scholarOutlineView(c *ui.Context, p *scholarState, tab *Tab) {
 		item := n.index.items[i]
 		if ui.Button(c.Key(i), item.Text).FillWidth().Clicked() {
 			s.jumpScholarOutline(tab, item.Pos)
+			if pane := s.compile; pane != nil && pane.tab == tab {
+				pane.requestSourcePosition(tab.Source().Buffer.Snapshot().LineOf(item.Pos))
+			}
+			n.outlineOpen = false
 		}
 	}).FillWidth().Grow(1).MinHeight(0)
 }

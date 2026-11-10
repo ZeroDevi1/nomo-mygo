@@ -29,6 +29,7 @@ type Session struct {
 	previewPathBytes             int
 	indexed                      bool
 	anchors                      map[[32]byte]PageAnchor
+	sourcePage                   *pdfSourcePage
 	path, dir, pdf               string
 	pages                        int
 	warnings                     []Diagnostic
@@ -339,6 +340,7 @@ func (s *Session) compile(ctx context.Context, source io.Reader, publish, projec
 	}
 	s.indexed = false
 	s.anchors = nil
+	s.sourcePage = nil
 	s.pages = n
 	return n, nil
 }

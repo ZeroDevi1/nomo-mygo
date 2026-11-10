@@ -46,6 +46,7 @@ type Tab struct {
 	typesetCompactPDF   bool
 	typesetFocusPDF     bool
 	typesetDarkReading  bool
+	typesetWidth        float64
 	typesetPage         int
 	typesetPagePath     string
 	scholarBound        bool

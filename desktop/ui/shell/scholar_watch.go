@@ -29,7 +29,6 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 	root := p.project.Root
 	probe := s.win != nil && (p.probeAt.IsZero() || !c.Now().Before(p.probeAt))
 	priorZ := p.literature.zotero
-	body := p.bodyConfirmed
 	preview := s.compile
 	if preview != nil && (preview.project.Root == "" || preview.parkedPage != 0) {
 		preview = nil
@@ -54,18 +53,20 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 				fmt.Fprintf(&signature, "%s:%d:%d\n", name, info.Size(), info.ModTime().UnixNano())
 			}
 		}
-		bodyStamp := ""
-		var bodyErr error
-		if body != nil || preview != nil {
-			bodyStamp, bodyErr = project.InputStamp(p.ctx)
+		previewStamp := ""
+		if preview != nil {
+			var err error
+			previewStamp, err = project.InputStamp(p.ctx)
+			if err != nil {
+				previewStamp = err.Error()
+			}
 		}
 		var z scholar.Zotero
 		var err error
 		version := ""
 		if probe {
 			ctx, cancel := context.WithTimeout(p.ctx, 900*time.Millisecond)
-			z, err = scholar.ConnectZotero(ctx)
-			z.Group = priorZ.Group
+			z, err = priorZ.Reconnect(ctx)
 			if err == nil {
 				version, _ = z.LibraryVersion(ctx)
 			}
@@ -78,34 +79,44 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 			}
 			p.watchPending = false
 			if preview != nil && s.compile == preview && p.project == project {
-				stamp := bodyStamp
-				if bodyErr != nil {
-					stamp = bodyErr.Error()
-				}
-				if p.previewStamp != stamp {
-					p.previewStamp = stamp
+				if p.previewStamp != previewStamp {
+					p.previewStamp = previewStamp
 					p.previewDisk++
 				}
-			}
-			if body != nil && p.bodyConfirmed == body && (bodyErr != nil || bodyStamp != body.disk) {
-				p.bodyConfirmed = nil
 			}
 			if p.watchSignature != "" && p.watchSignature != value {
 				p.libraryReady = false
 			}
 			p.watchSignature = value
-			if probe {
-				was := p.literature.connected
-				p.literature.connected = err == nil
+			l := &p.literature
+			if probe && l.zotero == priorZ {
+				if err == nil && z.ServerID != priorZ.ServerID && p.busy {
+					p.probeAt = time.Time{}
+					return
+				}
+				was := l.connected
+				l.connected = err == nil
 				if err == nil {
-					z.Group = p.literature.zotero.Group
-					p.literature.zotero = z
-					if version != "" && p.literature.pageData.Version != "" && version != p.literature.pageData.Version {
-						p.literature.refreshPending = true
+					if z.ServerID != priorZ.ServerID {
+						l.loaded = false
+						l.pageData = scholar.ZoteroPage{}
+						l.tree, l.treeTried, l.libraries = nil, false, nil
+						l.tag, l.tagPicker = "", scholarTagPicker{}
+						l.collection, l.scope, l.fulltext = "", scholar.ZoteroAll, false
+						l.zoteroForm, l.annotations = nil, nil
+						if l.selected.RemoteID != "" {
+							l.selected, l.detail = scholar.Entry{}, scholar.ZoteroDetail{}
+						}
+						l.recent, l.recentOpen = nil, false
+						z.Group = 0
+					}
+					l.zotero = z
+					if version != "" && l.pageData.Version != "" && version != l.pageData.Version {
+						l.refreshPending = true
 					}
 				}
-				if !was && err == nil && p.references.catalog && p.literature.mode == 1 && !p.literature.recentOpen && !p.busy {
-					s.loadZotero(p, false, p.literature.collection, p.literature.sentQuery, 0)
+				if !was && err == nil {
+					l.refreshPending = true
 				}
 			}
 		})

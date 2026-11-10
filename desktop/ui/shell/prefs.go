@@ -83,13 +83,10 @@ type Prefs struct {
 }
 
 type scholarProjectPrefs struct {
-	Sources             map[string]scholarSourceLink `json:"sources,omitempty"`
-	ExcludeBibliography bool                         `json:"excludeBibliography,omitempty"`
-	BodyEndPage         int                          `json:"bodyEndPage,omitempty"`
-	MainSelected        bool                         `json:"mainSelected,omitempty"`
-	Main                string                       `json:"main,omitempty"`
-	PageBudget          int                          `json:"pageBudget,omitempty"`
-	DrawerWidth         int                          `json:"drawerWidth,omitempty"`
+	Sources      map[string]scholarSourceLink `json:"sources,omitempty"`
+	MainSelected bool                         `json:"mainSelected,omitempty"`
+	Main         string                       `json:"main,omitempty"`
+	DrawerWidth  int                          `json:"drawerWidth,omitempty"`
 }
 
 // ImageSettings 与原版 ImageHandlingSettings（src/lib/services/render.ts）一致。

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -579,48 +578,6 @@ func (s *Shell) scholarDiagnosticsView(c *ui.Context, p *scholarState) {
 	}
 	if ui.Button(c, s.tr("scholarRebuildPreview")).Disabled(!s.canPreviewTypeset(tab)).Clicked() {
 		s.rebuildScholarPreview(p, tab)
-	}
-	if p.err != "" {
-		ui.Text(c, p.err).Wrap().FontSize(11)
-	}
-}
-
-func (s *Shell) scholarBudgetControls(c *ui.Context, p *scholarState) {
-	ui.Checkbox(c, &p.excludeBibliography, s.tr("scholarExcludeBibliography"))
-	if p.excludeBibliography {
-		if p.bodyConfirmed == nil {
-			ui.Text(c, s.tr("scholarBodyAwaiting")).FontSize(11).Wrap()
-		}
-		ui.Text(c, s.tr("scholarBibliographyBoundary")).FontSize(11).Wrap()
-		ui.TextInput(c, &p.bodyBoundary).FillWidth()
-	}
-	ui.Text(c, s.tr("scholarPDFBudget")).FontSize(12).Wrap()
-	in := ui.TextInput(c, &p.budget).FillWidth().Placeholder(s.tr("scholarZeroDisables"))
-	if ui.Button(c, s.tr("scholarSaveBudget")).Disabled(p.busy).Clicked() || in.Submitted() {
-		n, err := strconv.Atoi(strings.TrimSpace(p.budget))
-		if err != nil || n < 0 || n > 10000 {
-			p.err = s.tr("scholarInvalidBudget")
-		} else {
-			p.err = ""
-			boundary, boundErr := strconv.Atoi(strings.TrimSpace(p.bodyBoundary))
-			if boundErr != nil || boundary < 0 || boundary > 10000 {
-				p.err = s.tr("scholarInvalidBudget")
-				return
-			}
-			pref := s.prefs.ScholarProjects[p.project.Root]
-			pref.BodyEndPage = boundary
-			pref.ExcludeBibliography = p.excludeBibliography
-			if s.prefs.ScholarProjects == nil {
-				s.prefs.ScholarProjects = make(map[string]scholarProjectPrefs)
-			}
-			s.prefs.ScholarProjects[p.project.Root] = pref
-			s.storeScholarProject(p, n)
-			if p.excludeBibliography && boundary > 0 {
-				s.confirmScholarBody(p)
-			} else {
-				p.bodyConfirmed = nil
-			}
-		}
 	}
 	if p.err != "" {
 		ui.Text(c, p.err).Wrap().FontSize(11)

@@ -52,38 +52,70 @@ func latexPreamble(text string) string {
 }
 
 func (s *Session) PageForProjectLine(ctx context.Context, original string, line int, expected string) int {
+	return s.PositionForProjectLine(ctx, original, line, expected).Page
+}
+
+func (s *Session) PositionForProjectLine(ctx context.Context, original string, line int, expected string) PDFPosition {
 	if s.mirror == nil || line < 0 {
-		return 0
+		return PDFPosition{}
 	}
 	path, ok := s.mirror.sourcePath(original)
 	if !ok {
-		return 0
+		return PDFPosition{}
 	}
 	text, ok := projectLine(ctx, path, line)
 	if !ok || text != expected {
-		return 0
+		return PDFPosition{}
 	}
 	if IsLaTeXPath(s.path) {
 		if path == s.path {
 			path = "preview.tex"
 		}
-		return s.syncTeXPage(ctx, path, line)
+		return s.syncTeXPosition(ctx, path, line)
 	}
 	// Typst CLI has no SyncTeX output. Locate a uniquely matching rendered block.
 	name, err := filepath.Rel(s.mirror.dir, path)
 	if err != nil || !slices.Contains(s.sourceDeps, name) || strings.TrimSpace(text) == "" {
-		return 0
+		return PDFPosition{}
 	}
-	return s.Anchor(ctx, strings.TrimSpace(text)).Page
+	return s.positionForText(ctx, text)
+}
+
+func (s *Session) positionForText(ctx context.Context, text string) PDFPosition {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return PDFPosition{}
+	}
+	if marks := strings.TrimLeft(text, "="); marks != text && strings.HasPrefix(marks, " ") {
+		text = strings.TrimSpace(marks)
+	} else if strings.HasPrefix(text, "#") {
+		if _, body, ok := strings.Cut(text, "["); ok && strings.HasSuffix(body, "]") {
+			if body := strings.TrimSuffix(body, "]"); !strings.ContainsAny(body, "[]") {
+				text = strings.TrimSpace(body)
+			}
+		}
+	}
+	if a := s.Anchor(ctx, text); a.Page > 0 {
+		return PDFPosition{Page: a.Page, Y: a.Y / a.PageH}
+	}
+	return PDFPosition{}
 }
 
 // ProjectSourceLocation resolves only real project sources in the compiled tree.
 // Ambiguous Typst text and generated LaTeX input are left without a location.
 func (s *Session) ProjectSourceLocation(ctx context.Context, page int, x, y float64) ProjectLocation {
+	return s.projectSourceLocation(ctx, page, x, y, false)
+}
+
+func (s *Session) ProjectSourceNear(ctx context.Context, page int, x, y float64) ProjectLocation {
+	return s.projectSourceLocation(ctx, page, x, y, true)
+}
+
+func (s *Session) projectSourceLocation(ctx context.Context, page int, x, y float64, nearest bool) ProjectLocation {
 	if s.mirror == nil {
 		return ProjectLocation{}
 	}
-	hit := s.sourceHit(ctx, page, x, y)
+	hit := s.sourceHit(ctx, page, x, y, nearest)
 	if hit == nil {
 		return ProjectLocation{}
 	}

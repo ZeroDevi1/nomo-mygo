@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -34,7 +33,7 @@ type scholarPDFTab struct {
 	zotero           scholar.Zotero
 	key, path, title string
 	page, pages      int
-	pageInput        string
+	pageNavigation   scholarPageNavigation
 	pinned           bool
 	bitmap           *ui.Bitmap
 	err              string
@@ -92,21 +91,18 @@ func (r *scholarReferenceTabs) visible(split, covered bool) (left, right *schola
 		}
 	}
 	for _, t := range r.tabs {
-		if t != left && t != right && (t.bitmap != nil || t.cancel != nil) {
-			t.releasePage()
+		if t != left && t != right {
+			t.pageNavigation.open = false
+			if t.bitmap != nil || t.cancel != nil {
+				t.releasePage()
+			}
 		}
 	}
 	return left, right
 }
 
 func (s *Shell) showScholarCatalog(p *scholarState) {
-	l := &p.literature
-	if !l.catalogSeen {
-		l.catalogSeen = true
-		if l.connected {
-			l.mode = 1
-		}
-	}
+	p.literature.annotations = nil
 	s.closeScholarInspector(p)
 	if p.nav != scholarLiterature {
 		p.lastProjectNav = p.nav
@@ -121,7 +117,8 @@ func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, pat
 	z := p.literature.zotero
 	z.Group = e.Library
 	for _, t := range r.tabs {
-		if (key != "" && t.key == key && t.zotero == z) || (key == "" && t.key == "" && samePath(t.path, path)) {
+		if (key != "" && t.key == key && t.zotero.ServerID == z.ServerID && t.zotero.Group == z.Group) ||
+			(key == "" && t.key == "" && samePath(t.path, path)) {
 			s.selectScholarPDF(p, t)
 			if key != "" {
 				p.literature.rememberReading(t.entry)
@@ -169,7 +166,7 @@ func (t *scholarPDFTab) setPage(page int) {
 		t.releasePage()
 		t.err = ""
 	}
-	t.page, t.pageInput = page, strconv.Itoa(page)
+	t.page = page
 }
 
 func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarPDFTab) {
@@ -216,7 +213,7 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarPDFTab) {
 				t.err = err.Error()
 				return
 			}
-			t.path, t.page, t.pages, t.pageInput, t.bitmap = path, page, pages, strconv.Itoa(page), bitmap
+			t.path, t.page, t.pages, t.bitmap = path, page, pages, bitmap
 		})
 	}()
 }
@@ -319,23 +316,6 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarP
 	ui.Column(c).Grow(1).Fill().MinWidth(0).Clip().Children(func() {
 		ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 7).Gap(4).AlignItems(ui.Center).Background(s.ch.content).Children(func() {
 			ui.Text(c, t.title).FontSize(12).SingleLine().Grow(1).MinWidth(0).Tooltip(t.title)
-			if s.toolButton(c.Key("prev"), "chevron-left", s.tr("scholarPreviousPage"), false).Disabled(t.page <= 1).Clicked() {
-				t.setPage(t.page - 1)
-			}
-			input := ui.TextInput(c.Key("page"), &t.pageInput).Width(42).Disabled(t.pages == 0)
-			if input.Submitted() {
-				if page, err := strconv.Atoi(t.pageInput); err == nil {
-					t.setPage(page)
-				} else {
-					t.pageInput = strconv.Itoa(t.page)
-				}
-			}
-			if t.pages > 0 {
-				ui.Text(c, "/ "+strconv.Itoa(t.pages)).FontSize(11).TextColor(s.ch.muted)
-			}
-			if s.toolButton(c.Key("next"), "chevron-right", s.tr("scholarNextPage"), false).Disabled(t.page >= t.pages).Clicked() {
-				t.setPage(t.page + 1)
-			}
 			if s.toolButton(c.Key("external"), "external-link", s.tr("scholarOpenExternalPDF"), false).Clicked() {
 				if t.key != "" {
 					c.Services().OpenURL(t.zotero.PDFLink(t.key, t.page))
@@ -343,9 +323,8 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarP
 					c.Services().OpenURL((&url.URL{Scheme: "file", Path: t.path}).String())
 				}
 			}
-			if t.key != "" && s.toolButton(c.Key("annotations"), "list-tree", s.tr("scholarReadAnnotations"), false).Disabled(p.busy).Clicked() {
-				s.selectScholarEntry(p, t.entry)
-				p.literature.pendingAnnotation = t.key
+			if t.key != "" && ui.Button(c.Key("annotations"), s.tr("scholarReadAnnotations")).Disabled(p.busy).Clicked() {
+				s.openScholarAnnotations(p, t.entry, t.zotero, t.key, t.title)
 			}
 			if right && s.toolButton(c.Key("unsplit"), "x", s.tr("scholarEndPDFSplit"), false).Clicked() {
 				p.references.right = nil
@@ -367,7 +346,7 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarP
 			w, h := bitmap.Size()
 			ui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Background(s.ch.tabBar).Children(func() {
 				ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(10).Children(func() {
-					ui.Image(c, bitmap).WidthPercent(float32(s.prefs.ContentWidthPercent)).AspectRatio(float32(w) / float32(h)).Label(t.title)
+					ui.Image(c, bitmap).WidthPercent(float32(s.documentWidth(s.activeTab()))).AspectRatio(float32(w) / float32(h)).Label(t.title)
 				})
 			})
 		} else {

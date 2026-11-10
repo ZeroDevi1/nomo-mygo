@@ -101,9 +101,8 @@ func (s *Shell) menuGroups() []menuGroup {
 				s.scholarToggleSidebarAt(float32(width))
 			}},
 			{id: "outline", label: "showOutline", run: func(s *Shell) {
-				if p := s.scholarForTab(s.activeTab()); p != nil && s.win != nil {
-					width, _ := s.win.ContentSize()
-					s.showScholarNavigation(p, scholarOutline, float32(width))
+				if p := s.scholarForTab(s.activeTab()); p != nil {
+					p.navigation.outlineOpen = !p.navigation.outlineOpen
 					return
 				}
 				s.toggleOutline()

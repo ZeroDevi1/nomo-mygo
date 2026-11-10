@@ -5,7 +5,6 @@ import (
 	"math"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -30,15 +29,15 @@ type pageRequest struct {
 }
 
 type sourcePageRequest struct {
-	line    int
-	text    string
-	version uint64
+	line            int
+	version, serial uint64
 }
 
 type pageClick struct {
-	page    int
-	version uint64
-	x, y    float64
+	page            int
+	version, serial uint64
+	x, y            float64
+	scroll          bool
 }
 type previewRevision struct {
 	snap    editor.Snapshot
@@ -77,14 +76,14 @@ type compilePane struct {
 	sections                chan sourcePageRequest
 	clicks                  chan pageClick
 	jump                    func(int)
-	jumpProject             func(typeset.ProjectLocation)
+	jumpProject             func(typeset.ProjectLocation, int, bool)
+	sync                    typesetPositionSync
 	page, pages, resumePage int
 	parkedPage              int
 	checkingPreview         bool
 	reuseChecks             chan func(bool) // nil 请求释放段落快览，有回调的请求校验当前 PDF。
 	busy                    bool
-	pageJumpOpen            bool
-	pageJumpInput           string
+	pageNavigation          scholarPageNavigation
 	elapsed                 time.Duration
 	warnings                []typeset.Diagnostic
 	err                     string
@@ -100,14 +99,10 @@ func (s *Shell) closeCompile() {
 				p.tab.typesetPage, p.tab.typesetPagePath = first+1, p.path
 			}
 			if workspace := s.scholar; workspace != nil {
-				workspace.budgetOpen = false
 				if !p.busy && (p.err != "" || p.pages > 0) {
 					workspace.diagnostics = p.report()
 				}
 			}
-		}
-		if s.scholar != nil && s.scholar.bodyConfirmed != nil && s.scholar.bodyConfirmed.pane == p {
-			s.scholar.bodyConfirmed = nil
 		}
 		p.tab.outRows = nil
 		s.compile = nil
@@ -123,9 +118,6 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	}
 	wantPreview := s.canPreviewTypeset(t) && mode != typesetSource && (s.scholar == nil || workspace != nil)
 	trial := wantPreview && workspace != nil && workspace.agent.trial.show
-	if workspace != nil && (!wantPreview || trial) {
-		workspace.budgetOpen = false
-	}
 	if trial {
 		s.closeCompile()
 		return s.scholarTrialWorkspace(c, workspace, t)
@@ -170,6 +162,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	if p != nil && p.parkedPage != 0 {
 		p = nil
 	}
+	if p != nil {
+		p.observeSourcePosition(c, workspace != nil && mode == typesetSplit && p.canLocate())
+	}
 	if p != nil || wantPreview && (workspace != nil || t.typesetPaused) {
 		preview := func() {
 			canvas := c.Theme().SurfaceHover
@@ -179,7 +174,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 			paper = ui.Column(c).Fill().MinWidth(0).Clip().Focusable().Label("PDF").Background(canvas)
 			paper.Children(func() {
 				if workspace != nil {
-					s.scholarPDFHeader(c, workspace, t, p)
+					s.scholarPDFHeader(c, t, p)
 				}
 				if p == nil {
 					return
@@ -196,8 +191,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				if p.image == nil {
 					return
 				}
-				ui.Column(c).Fill().Grow(1).MinHeight(0).Padding(8).Children(func() {
-					s.previewPages(c, p)
+				viewport := ui.Column(c).Fill().Grow(1).MinHeight(0).Padding(8)
+				viewport.Children(func() {
+					s.previewPages(c, p, viewport.Bounds())
 				})
 				if p.paragraph != nil && p.anchor.Page == 0 {
 					ui.Column(c).Absolute().Bottom(12).Left(12).Right(12).Background(c.Theme().Surface).Padding(6).Gap(3).Children(func() {
@@ -220,6 +216,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	} else {
 		source()
 	}
+	if p != nil {
+		p.flushPositionSync(c)
+	}
 	if workspace != nil && paper.Valid() {
 		if s.focusEditor && (mode == typesetPreview || t.typesetFocusPDF) {
 			paper.Focus()
@@ -233,7 +232,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	return
 }
 
-func (s *Shell) scholarPDFHeader(c *ui.Context, workspace *scholarState, tab *Tab, pane *compilePane) {
+func (s *Shell) scholarPDFHeader(c *ui.Context, tab *Tab, pane *compilePane) {
 	path := tab.Path
 	if pane != nil {
 		path = pane.path
@@ -243,9 +242,6 @@ func (s *Shell) scholarPDFHeader(c *ui.Context, workspace *scholarState, tab *Ta
 	ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 6, 0, 10).Gap(6).AlignItems(ui.Center).Background(s.ch.content).Children(func() {
 		ui.Icon(c, s.icon("file-text")).FontSize(14).TextColor(s.ch.muted)
 		ui.Text(c, "PDF · "+filepath.Base(path)).FontSize(11).SingleLine().Grow(1).MinWidth(0).Tooltip(path)
-		if pane != nil && pane.pages > 0 {
-			s.scholarPDFPageControl(c, pane)
-		}
 		reading := s.tr("scholarPDFDarkReading")
 		if s.toolButton(c.Key("pdf-dark-reading"), "moon", reading, tab.typesetDarkReading).
 			Label(reading).Role(ui.RoleToggleButton).Checked(tab.typesetDarkReading).FocusRing(true).
@@ -253,46 +249,15 @@ func (s *Shell) scholarPDFHeader(c *ui.Context, workspace *scholarState, tab *Ta
 			tab.typesetDarkReading = !tab.typesetDarkReading
 			c.Invalidate()
 		}
-		label := s.tr("scholarPageBudgetSettings")
-		b := s.toolButton(c.Key("pdf-budget"), "sliders-horizontal", label, workspace.budgetOpen).Label(label).FocusRing(true)
-		if b.Clicked() {
-			workspace.budgetOpen = !workspace.budgetOpen
-		}
-		ui.Popover(c, b, &workspace.budgetOpen, func() {
-			ui.Column(c).Width(270).Padding(12).Gap(6).Role(ui.RoleDialog).Label(label).Children(func() {
-				s.scholarBudgetControls(c, workspace)
-			})
-		})
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 }
 
-func (s *Shell) scholarPDFPageControl(c *ui.Context, pane *compilePane) {
-	first, _ := pane.list.Visible()
-	current := first + 1
-	label := strconv.Itoa(current) + " / " + strconv.Itoa(pane.pages)
-	b := s.scholarMenuButton(c.Key("pdf-page"), "list-tree", label, true)
-	if b.Clicked() {
-		pane.pageJumpOpen = !pane.pageJumpOpen
-		pane.pageJumpInput = strconv.Itoa(current)
-	}
-	ui.Popover(c, b, &pane.pageJumpOpen, func() {
-		label := s.tr("scholarGoToPage")
-		ui.Row(c).Padding(8).Gap(6).AlignItems(ui.Center).Children(func() {
-			in := ui.TextInput(c, &pane.pageJumpInput).Width(60).Label(label).AutoFocus()
-			page, err := strconv.Atoi(strings.TrimSpace(pane.pageJumpInput))
-			valid := err == nil && page >= 1 && page <= pane.pages
-			if (ui.Button(c, label).Disabled(!valid).Clicked() || in.Submitted()) && valid {
-				pane.list.ScrollTo(page-1, ui.Start)
-				pane.pageJumpOpen = false
-			}
-		})
-	})
-}
-
 // 整页缓存的原始 RGBA 像素预算为 128 MiB；拖宽窗口时保留现有位图，待后台从 PDF 补绘。
-func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
+func (s *Shell) previewPages(c *ui.Context, p *compilePane, viewport ui.Rect) {
 	dark := p.tab.typesetDarkReading
+	width := s.documentWidth(p.tab)
+	follow := p.observePDFLayout(viewport, width)
 	if p.cacheDark != dark {
 		p.cached = nil
 		p.cacheDark = dark
@@ -314,7 +279,10 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 			w, h = bmp.Size()
 		}
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(0, 0, 8, 0).Children(func() {
-			frame := ui.Box(c).WidthPercent(float32(s.prefs.ContentWidthPercent)).AspectRatio(float32(w) / float32(h)).Clip()
+			frame := ui.Box(c).WidthPercent(float32(width)).AspectRatio(float32(w) / float32(h)).Clip()
+			if row >= first && row <= last && p.syncPDFPage(c, number, frame.Bounds(), follow) {
+				follow = false
+			}
 			if dark {
 				frame.Background(ui.Hex("#202020"))
 			}
@@ -346,15 +314,12 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 					return
 				}
 				pageImage := ui.Image(c, bmp).Fill().Label(s.tr("compiledPage"))
-				if pageImage.Clicked() && !p.busy && p.err == "" && p.fullVersion == p.version {
+				if pageImage.Clicked() && p.canLocate() {
 					x, y, over := pageImage.PointerPosition()
 					box := pageImage.Bounds()
 					x, y = x/box.W, y/box.H
 					if over && x >= 0 && y >= 0 && x <= 1 && y <= 1 {
-						select {
-						case p.clicks <- pageClick{number, p.fullVersion, float64(x), float64(y)}:
-						default:
-						}
+						p.requestPDFPosition(number, float64(x), float64(y))
 					}
 				}
 				if a := p.anchor; (p.paragraph != nil || p.inlineText != "") && a.Page == number {
@@ -377,7 +342,7 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane) {
 				}
 			})
 		})
-	}).Grow(1).FillWidth().MinHeight(0)
+	}).TrackScroll(&p.sync.pdfScroll).Grow(1).FillWidth().MinHeight(0)
 }
 func (p *compilePane) keepPage(n int, bmp *ui.Bitmap) {
 	if p.cached == nil {
@@ -402,7 +367,7 @@ func (s *Shell) sourceEditor(c *ui.Context, t *Tab) ui.Element {
 	if t.afterSourceInput != nil {
 		t.afterSourceInput()
 	}
-	return editor.View(c, st).FillHeight().WidthPercent(float32(s.prefs.ContentWidthPercent))
+	return editor.View(c, st).FillHeight().WidthPercent(float32(s.documentWidth(t)))
 }
 
 func (s *Shell) openTypeset(t *Tab, live bool) {
@@ -439,7 +404,9 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 		}
 	}
 	if project.Root != "" {
-		p.jumpProject = func(location typeset.ProjectLocation) { s.jumpProjectPreview(p, location) }
+		p.jumpProject = func(location typeset.ProjectLocation, page int, scroll bool) {
+			s.jumpProjectPreview(p, location, page, scroll)
+		}
 		p.projectInput = s.projectPreviewRevision(p)
 	}
 	revision := previewRevision{snap: initial, ctx: buildCtx, version: p.version, project: p.projectInput}
@@ -646,44 +613,57 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 				continue
 			}
 			if projectSession != nil {
-				location := projectSession.ProjectSourceLocation(buildCtx, click.page, click.x, click.y)
+				locate := projectSession.ProjectSourceLocation
+				if click.scroll {
+					locate = projectSession.ProjectSourceNear
+				}
+				location := locate(buildCtx, click.page, click.x, click.y)
 				if location.Path != "" {
-					publish(click.version, false, func() { p.jumpProject(location) })
+					publish(click.version, false, func() {
+						if click.serial == p.sync.serial && p.canLocate() {
+							p.jumpProject(location, click.page, click.scroll)
+						}
+					})
+				}
+				continue
+			}
+			var line = -1
+			if click.scroll {
+				if locator, ok := session.(interface {
+					SourceLineNear(context.Context, int, float64, float64, func() string) int
+				}); ok {
+					line = locator.SourceLineNear(buildCtx, click.page, click.x, click.y, base.String)
 				}
 			} else if locator, ok := session.(interface {
 				SourceLine(context.Context, int, float64, float64, func() string) int
 			}); ok {
-				line := locator.SourceLine(buildCtx, click.page, click.x, click.y, base.String)
-				if line >= 0 && line < base.LineCount() {
-					publish(click.version, false, func() {
-						if !p.busy {
-							p.jump(line)
-						}
-					})
-				}
+				line = locator.SourceLine(buildCtx, click.page, click.x, click.y, base.String)
+			}
+			if line >= 0 && line < base.LineCount() {
+				publish(click.version, false, func() {
+					if click.serial != p.sync.serial || !p.canLocate() {
+						return
+					}
+					p.sync.ignoreSource = 2
+					if click.scroll {
+						p.tab.Source().ScrollTo(line)
+					} else {
+						p.jump(line)
+					}
+				})
 			}
 		case section := <-p.sections:
-			line := section.line
 			if buildCtx.Err() != nil || pages == 0 || section.version != baseVersion {
 				continue
 			}
-			dest := 0
-			if projectSession != nil {
-				dest = projectSession.PageForProjectLine(buildCtx, p.sourcePath, line, section.text)
-			} else if rev, ok := session.(interface {
-				PageForLine(context.Context, int) int
-			}); ok {
-				dest = rev.PageForLine(buildCtx, line)
-			} else {
-				continue
+			pos := p.sourcePDFPosition(buildCtx, session, projectSession, base, section.line)
+			if pos.Page > 0 {
+				publish(section.version, false, func() {
+					if section.serial == p.sync.serial && p.canLocate() {
+						p.alignPDFPosition(pos)
+					}
+				})
 			}
-			publish(baseVersion, false, func() {
-				if dest > 0 && dest <= p.pages {
-					p.list.ScrollTo(dest-1, ui.Start)
-				} else {
-					p.jump(line)
-				}
-			})
 		case request := <-p.requests:
 			n := request.number
 			if n >= 1 && n <= pages {

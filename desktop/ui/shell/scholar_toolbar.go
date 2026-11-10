@@ -145,6 +145,18 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 				}
 			}
 		})
+		label = s.tr("scholarOutline")
+		open := &p.navigation.outlineOpen
+		outline := s.toolButton(c.Key("outline"), "list-tree", label, *open).Label(label).FocusRing(true)
+		if outline.Clicked() {
+			*open = !*open
+		}
+		ui.Popover(c, outline, open, func() {
+			_, height := c.Size()
+			ui.Column(c).Width(300).Height(min(360, height*.65)).Padding(5).Role(ui.RoleDialog).Label(label).Children(func() {
+				s.scholarOutlineView(c, p, tab)
+			})
+		})
 	}
 	label := s.tr("scholarToggleInspector")
 	width, _ := c.Size()
@@ -153,8 +165,11 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 		if visible {
 			s.closeScholarInspector(p)
 		} else if reading := p.references.focused; reading != nil && !p.references.catalog && !p.busy {
-			s.selectScholarEntry(p, reading.entry)
-			p.literature.pendingAnnotation = reading.key
+			if reading.key != "" {
+				s.openScholarAnnotations(p, reading.entry, reading.zotero, reading.key, reading.title)
+			} else {
+				s.selectScholarEntry(p, reading.entry)
+			}
 		} else {
 			drawer := p.lastInspector
 			if drawer == scholarClosed || p.references.catalog && p.literature.selected != (scholar.Entry{}) {

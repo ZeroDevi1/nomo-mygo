@@ -27,7 +27,7 @@ func (s *Shell) scholarLinkedEntry(p *scholarState, e scholar.Entry) scholar.Ent
 	return e
 }
 
-func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, _ ui.Services) {
+func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, services ui.Services) {
 	e := s.scholarLinkedEntry(p, entry)
 	if e.RemoteID == "" {
 		file := e.File
@@ -55,22 +55,33 @@ func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, _ ui.Servic
 			if err != nil {
 				return nil, err
 			}
-			if len(detail.PDFs) > 0 {
-				attachment = detail.PDFs[0]
-				break
+			for _, pdf := range detail.PDFs {
+				if !pdf.LinkOnly || attachment.Key == "" && pdf.URL != "" {
+					attachment = pdf
+				}
+				if !pdf.LinkOnly {
+					break
+				}
 			}
-			if !detail.More {
+			if !detail.More || attachment.Key != "" && !attachment.LinkOnly {
 				break
 			}
 		}
 		return func() {
-			if attachment.Key == "" {
-				p.err = s.tr("scholarNoPDF")
-			} else {
-				s.openScholarAttachment(p, e, attachment.Key, "", attachment.Title, 0)
-			}
+			s.openScholarZoteroPDF(p, e, attachment, services)
 		}, nil
 	})
+}
+
+func (s *Shell) openScholarZoteroPDF(p *scholarState, entry scholar.Entry, pdf scholar.Attachment, services ui.Services) {
+	switch {
+	case pdf.URL != "" && pdf.LinkOnly:
+		services.OpenURL(pdf.URL)
+	case pdf.Key != "" && !pdf.LinkOnly:
+		s.openScholarAttachment(p, entry, pdf.Key, "", pdf.Title, 0)
+	default:
+		p.err = s.tr("scholarNoPDF")
+	}
 }
 
 func (s *Shell) showScholarReferenceAt(st *editor.State, p *scholarState, ref scholar.Citation, pin bool) {

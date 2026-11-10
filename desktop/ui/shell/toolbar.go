@@ -15,7 +15,8 @@ type toolbarState struct {
 	tableOpen            bool
 	tableRows, tableCols int // 网格中悬停预览的尺寸；打开时复位为 3 × 3（同原版）
 	widthOpen            bool
-	width                float64 // 内容宽度滑块的界面值，拖动时写回 prefs.ContentWidthPercent
+	widthTab             int
+	width                float64 // 内容宽度滑块的界面值
 	zoomOpen             bool
 	zoom                 float64 // 缩放滑块的界面值，拖动时按 5% 取整写回 prefs.ZoomPercent
 	colorOpen            bool
@@ -151,7 +152,7 @@ func (s *Shell) toolbar(c *ui.Context) {
 				s.openEmojiPicker(ui.Point{X: r.X + r.W - emojiPickerW, Y: r.Y + r.H + 6})
 			}
 		}
-		s.widthControl(c)
+		s.widthControl(c, nil)
 		if !s.pf.mac {
 			divider()
 			s.documentTools(c)
@@ -248,17 +249,34 @@ func (s *Shell) tablePicker(c *ui.Context, anchor ui.Element) {
 	})
 }
 
-// widthControl 是内容宽度按钮（原版 width-control-compact）：显示当前百分比，单击弹出 45–90% 滑块；
-// 双栏模式下宽度自适应，按钮禁用（原版 splitAdaptiveWidth）。
-func (s *Shell) widthControl(c *ui.Context) {
+func (s *Shell) documentWidth(tab *Tab) float64 {
+	if tab != nil && tab.typesetWidth > 0 {
+		return tab.typesetWidth
+	}
+	return s.prefs.ContentWidthPercent
+}
+
+// Markdown 对照模式沿用自适应宽度。稿件的宽度按各栏的可用宽度计算。
+func (s *Shell) widthControl(c *ui.Context, tab *Tab) {
 	st := &s.tbar
-	split := s.split()
+	tabID, limit := 0, float64(90)
+	if tab != nil {
+		tabID, limit = tab.ID, 100
+	}
+	if st.widthTab != tabID {
+		st.widthTab, st.widthOpen = tabID, false
+	}
+	split := tab == nil && s.split()
 	tip := s.tr("contentWidth")
 	if split {
 		tip = s.tr("splitAdaptiveWidth")
 	}
-	pct := fmt.Sprintf("%.0f%%", s.prefs.ContentWidthPercent)
+	value := s.documentWidth(tab)
+	pct := fmt.Sprintf("%.0f%%", value)
 	b := ui.ButtonBase(c).Padding(4, 6).Radius(c.Theme().Radius).Tooltip(tip).Label(tip).Disabled(split)
+	if tab != nil {
+		b.Padding(1, 5).Shrink(0).FocusRing(true)
+	}
 	switch {
 	case st.widthOpen:
 		b.Background(s.ch.pressed)
@@ -271,12 +289,14 @@ func (s *Shell) widthControl(c *ui.Context) {
 	b.Children(func() {
 		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, s.icon("align-horizontal-space-around")).FontSize(15).TextColor(s.ch.muted)
-			ui.Text(c, pct).FontSize(12).TextColor(s.ch.muted)
+			if tab == nil || s.scholarWorkspaceWidth(c) >= 420 {
+				ui.Text(c, pct).FontSize(12).TextColor(s.ch.muted)
+			}
 		})
 	})
 	if b.Clicked() {
 		st.widthOpen = !st.widthOpen
-		st.width = s.prefs.ContentWidthPercent
+		st.width = value
 	}
 	ui.Popover(c, b, &st.widthOpen, func() {
 		ui.Column(c).Padding(12).Gap(6).Width(220).Role(ui.RoleDialog).Label(s.tr("contentWidth")).Children(func() {
@@ -284,9 +304,28 @@ func (s *Shell) widthControl(c *ui.Context) {
 				ui.Text(c, s.tr("contentWidth")).FontSize(12).Bold().Grow(1)
 				ui.Text(c, pct).FontSize(12).TextColor(s.ch.muted)
 			})
-			if ui.Slider(c, &st.width, 45, 90).FillWidth().Label(s.tr("contentWidth")).Changed() {
-				s.prefs.ContentWidthPercent = float64(int(st.width + 0.5))
-				s.setPref("contentWidthPercent")
+			set := func(width float64) {
+				width = float64(int(width + 0.5))
+				if width == value {
+					return
+				}
+				if tab == nil {
+					s.prefs.ContentWidthPercent = width
+					s.setPref("contentWidthPercent")
+					return
+				}
+				tab.typesetWidth = width
+				if pane := s.compile; pane != nil && pane.tab == tab {
+					pane.sync.invalidate()
+					pane.sync.ignoreSource, pane.sync.ignorePDF = 2, 2
+				}
+			}
+			if ui.Slider(c, &st.width, 45, limit).FillWidth().Label(s.tr("contentWidth")).Changed() {
+				set(st.width)
+			}
+			if tab != nil && ui.Button(c, s.tr("scholarFitWidth")).Clicked() {
+				set(limit)
+				st.widthOpen = false
 			}
 		})
 	})

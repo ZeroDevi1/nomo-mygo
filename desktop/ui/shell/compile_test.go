@@ -86,7 +86,9 @@ func TestCompiledPreview(t *testing.T) {
 					}
 				}
 			}
-			click(s.tr("semanticEditing"))
+			tt.Frame()
+			s.setTypesetView(s.scholar, tab, typesetPreview)
+			tt.Frame()
 			wait(func() bool { return s.compile != nil && !s.compile.busy })
 			if p := s.compile; p == nil || p.err != "" || p.image == nil || p.pages != 2 {
 				t.Fatalf("preview: %+v", p)

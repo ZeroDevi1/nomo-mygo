@@ -186,7 +186,9 @@ func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
 			p.parkedPage = first + 1
 		}
 		tab.typesetPage, tab.typesetPagePath = p.parkedPage, p.path
-		workspace.budgetOpen, p.pageJumpOpen = false, false
+		p.pageNavigation.open = false
+		p.sync.linked = false
+		p.sync.invalidate()
 		p.reuseChecks <- nil
 	}
 }
@@ -223,7 +225,7 @@ func (s *Shell) restoreTypesetPreview(p *compilePane) {
 	}
 }
 
-func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocation) {
+func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocation, page int, scroll bool) {
 	if location.Path == "" || s.compile != p || p.busy || p.fullVersion != p.version {
 		return
 	}
@@ -235,6 +237,9 @@ func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocat
 		return
 	}
 	if t := s.scholarTab(location.Path); t == nil || t != s.activeTab() {
+		if scroll {
+			return
+		}
 		s.OpenFiles([]string{location.Path})
 	}
 	t := s.activeTab()
@@ -245,6 +250,14 @@ func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocat
 	if location.Line < 0 || location.Line >= snap.LineCount() ||
 		strings.TrimSuffix(strings.TrimPrefix(snap.Line(location.Line), "\ufeff"), "\r") != location.Text {
 		return
+	}
+	p.sync.ignoreSource = 2
+	if scroll {
+		t.Source().ScrollTo(location.Line)
+		return
+	}
+	if t != p.tab {
+		t.typesetPage, t.typesetPagePath = page, p.path
 	}
 	t.typesetMode = typesetSplit
 	s.jumpScholarOutline(t, snap.LineStart(location.Line))

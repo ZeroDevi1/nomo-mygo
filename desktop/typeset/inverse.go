@@ -1,10 +1,11 @@
-// PDF 反查仅在点击时读取当前页的文本框，坐标使用 PDF 左上角为原点的点数。
+// PDF 反查按需读取当前页的文本框，坐标使用 PDF 左上角为原点的点数。
 package typeset
 
 import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,12 +23,20 @@ type pdfWord struct {
 
 // SourceLine 返回主文件中从零起算的行。空白、外部 TeX 文件或无法唯一定位时返回 -1。
 func (s *Session) SourceLine(ctx context.Context, page int, x, y float64, source func() string) int {
-	hit := s.sourceHit(ctx, page, x, y)
+	return s.sourceLine(ctx, page, x, y, source, false)
+}
+
+func (s *Session) SourceLineNear(ctx context.Context, page int, x, y float64, source func() string) int {
+	return s.sourceLine(ctx, page, x, y, source, true)
+}
+
+func (s *Session) sourceLine(ctx context.Context, page int, x, y float64, source func() string, nearest bool) int {
+	hit := s.sourceHit(ctx, page, x, y, nearest)
 	if hit == nil {
 		return -1
 	}
 	if IsLaTeXPath(s.path) {
-		if line, ok := s.syncTeXLine(ctx, page, hit.x, hit.y); ok {
+		if line, ok := s.syncTeXLine(ctx, page, hit.x, hit.y); ok || len(hit.words) == 0 {
 			return line
 		}
 	}
@@ -40,7 +49,19 @@ type pdfSourceHit struct {
 	index int
 }
 
-func (s *Session) sourceHit(ctx context.Context, page int, x, y float64) *pdfSourceHit {
+type pdfSourcePage struct {
+	number int
+	Width  float64 `xml:"width,attr"`
+	Height float64 `xml:"height,attr"`
+	Lines  []struct {
+		Words []pdfWord `xml:"word"`
+	} `xml:"flow>block>line"`
+}
+
+func (s *Session) readSourcePage(ctx context.Context, page int) *pdfSourcePage {
+	if p := s.sourcePage; p != nil && p.number == page {
+		return p
+	}
 	dir := filepath.Join(s.dir, "pages")
 	n := strconv.Itoa(page)
 	file := filepath.Join(dir, "click.xhtml")
@@ -57,28 +78,44 @@ func (s *Session) sourceHit(ctx context.Context, page int, x, y float64) *pdfSou
 		return nil
 	}
 	var doc struct {
-		Page struct {
-			Width  float64 `xml:"width,attr"`
-			Height float64 `xml:"height,attr"`
-			Lines  []struct {
-				Words []pdfWord `xml:"word"`
-			} `xml:"flow>block>line"`
-		} `xml:"body>doc>page"`
+		Page pdfSourcePage `xml:"body>doc>page"`
 	}
-	if xml.NewDecoder(pdfXML{f}).Decode(&doc) != nil {
+	if xml.NewDecoder(pdfXML{f}).Decode(&doc) != nil || doc.Page.Width <= 0 || doc.Page.Height <= 0 {
 		return nil
 	}
-	x *= doc.Page.Width
-	y *= doc.Page.Height
-	for _, line := range doc.Page.Lines {
+	doc.Page.number = page
+	s.sourcePage = &doc.Page
+	return s.sourcePage
+}
+
+func (s *Session) sourceHit(ctx context.Context, page int, x, y float64, nearest bool) *pdfSourceHit {
+	p := s.readSourcePage(ctx, page)
+	if p == nil {
+		return nil
+	}
+	x, y = x*p.Width, y*p.Height
+	var hit pdfSourceHit
+	distance := math.Inf(1)
+	for _, line := range p.Lines {
 		for i, w := range line.Words {
-			if x < w.X || x > w.R || y < w.Y || y > w.B {
-				continue
+			dx, dy := max(0, w.X-x, x-w.R), max(0, w.Y-y, y-w.B)
+			if dx == 0 && dy == 0 {
+				return &pdfSourceHit{x: x, y: y, words: line.Words, index: i}
 			}
-			return &pdfSourceHit{x: x, y: y, words: line.Words, index: i}
+			if score := dy*4 + dx; nearest && score < distance {
+				distance = score
+				hit = pdfSourceHit{x: (w.X + w.R) / 2, y: (w.Y + w.B) / 2, words: line.Words, index: i}
+			}
 		}
 	}
-	return nil
+	if IsLaTeXPath(s.path) && !nearest {
+		// SyncTeX also covers figures and equations with no extractable words.
+		return &pdfSourceHit{x: x, y: y}
+	}
+	if len(hit.words) == 0 {
+		return nil
+	}
+	return &hit
 }
 
 func (s *Session) syncTeXLine(ctx context.Context, page int, x, y float64) (int, bool) {

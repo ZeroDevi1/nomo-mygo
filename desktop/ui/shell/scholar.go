@@ -21,7 +21,6 @@ import (
 const (
 	scholarFiles = iota
 	scholarLiterature
-	scholarOutline
 )
 
 const (
@@ -72,7 +71,6 @@ type scholarState struct {
 	drawerNav                                                                      bool // 紧凑导航让出空间前的展开状态。
 	files                                                                          *folderNode
 	diagnostics                                                                    scholarCompileReport
-	budgetOpen                                                                     bool
 	drawerSize                                                                     float32
 	drawerSave                                                                     time.Time
 	winRailCollapsed, winRailPopup, winProjectOpen, winCompactProject, accountOpen bool
@@ -84,27 +82,23 @@ type scholarState struct {
 	busy              bool
 	err               string
 
-	library             *scholar.Library
-	libraryReady        bool
-	libraryError        string
-	bibNames            []string
-	mainVersion         uint64
-	mainTabID           int
-	bibVersions         map[int]uint64
-	reloadAt            time.Time
-	citations           scholarCitations
-	literature          scholarLiteratureState
-	references          scholarReferenceTabs
-	changes             scholarChangeState
-	navigation          scholarNavigation
-	agent               scholarAgentState
-	budget              string
-	bodyBoundary        string
-	bodyConfirmed       *scholarBodyConfirmation
-	excludeBibliography bool
-	watchAt, probeAt    time.Time
-	watchPending        bool
-	watchSignature      string
+	library          *scholar.Library
+	libraryReady     bool
+	libraryError     string
+	bibNames         []string
+	mainVersion      uint64
+	mainTabID        int
+	bibVersions      map[int]uint64
+	reloadAt         time.Time
+	citations        scholarCitations
+	literature       scholarLiteratureState
+	references       scholarReferenceTabs
+	changes          scholarChangeState
+	navigation       scholarNavigation
+	agent            scholarAgentState
+	watchAt, probeAt time.Time
+	watchPending     bool
+	watchSignature   string
 }
 
 type scholarCitations struct {
@@ -208,7 +202,10 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 	}
 	if p == nil {
 		ctx, cancel := context.WithCancel(context.Background())
-		p = &scholarState{project: scholar.Project{Root: root, Main: tab.Path}, ctx: ctx, cancel: cancel}
+		p = &scholarState{
+			project: scholar.Project{Root: root, Main: tab.Path}, ctx: ctx, cancel: cancel,
+			literature: scholarLiteratureState{mode: 1},
+		}
 		width, _ := c.Size()
 		p.winProjectOpen = s.pf.windows && width >= scholarWindowsExpanded
 		pref := s.prefs.ScholarProjects[root]
@@ -219,9 +216,6 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 			}
 		}
 		p.mainSelected = pref.MainSelected
-		p.budget = strconv.Itoa(p.pageBudget(s.prefs))
-		p.bodyBoundary = strconv.Itoa(pref.BodyEndPage)
-		p.excludeBibliography = pref.ExcludeBibliography
 		s.scholar = p
 	}
 	p.activeTabID = tab.ID
@@ -275,7 +269,8 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 		}
 	}
 	s.observeScholarSources(c, p)
-	if !p.busy && p.literature.refreshPending && p.references.catalog && p.literature.mode == 1 && !p.literature.recentOpen {
+	if !p.busy && p.literature.connected && p.literature.refreshPending && p.references.catalog &&
+		p.literature.mode == 1 && !p.literature.recentOpen && p.literature.zoteroForm == nil {
 		l := &p.literature
 		l.refreshPending = false
 		start := l.page
@@ -590,7 +585,6 @@ func (s *Shell) scholarForTab(tab *Tab) *scholarState {
 
 var scholarDestinations = [...]struct{ icon, label string }{
 	{"folder", "scholarFiles"}, {"book-open", "scholarLiterature"},
-	{"list-tree", "scholarOutline"},
 }
 
 func (s *Shell) showScholarNavigation(p *scholarState, destination int, width float32) {
@@ -598,9 +592,6 @@ func (s *Shell) showScholarNavigation(p *scholarState, destination int, width fl
 	p.accountOpen, p.winRailPopup = false, false
 	if destination == scholarLiterature {
 		s.showScholarCatalog(p)
-		if p.literature.connected && p.literature.mode == 1 && p.literature.pageData.Version == "" && !p.busy {
-			s.loadZotero(p, false, "", "", 0)
-		}
 		return
 	}
 	p.nav = destination
@@ -727,10 +718,6 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 		if !p.references.catalog && ui.Button(c, s.tr("scholarOpenLibrary")).Clicked() {
 			s.showScholarCatalog(p)
 		}
-	case scholarOutline:
-		if tab := s.activeTab(); tab != nil {
-			s.scholarOutlineView(c, p, tab)
-		}
 	default:
 		ui.Scroll(c.Key(p.project.Root)).Grow(1).MinHeight(0).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Padding(4, 6, 8, 6).Children(func() {
@@ -765,24 +752,20 @@ func (s *Shell) scholarMainMenu(m *ui.Menu, p *scholarState) {
 		p.agent.resetSession()
 		p.agent.trial.close()
 		p.agent = scholarAgentState{}
-		s.storeScholarProject(p, p.pageBudget(s.prefs))
+		s.storeScholarProject(p)
 	}
 	if s.folder == nil && m.Item(s.tr("scholarOpenProjectFolder")).Chosen() {
 		s.openFolder(p.project.Root)
 	}
 }
 
-func (p *scholarState) pageBudget(prefs *Prefs) int {
-	return min(10000, max(0, prefs.ScholarProjects[p.project.Root].PageBudget))
-}
-
-func (s *Shell) storeScholarProject(p *scholarState, budget int) {
+func (s *Shell) storeScholarProject(p *scholarState) {
 	if s.prefs.ScholarProjects == nil {
 		s.prefs.ScholarProjects = make(map[string]scholarProjectPrefs)
 	}
 	main, _ := scholar.Relative(p.project.Root, p.project.Main)
 	pref := s.prefs.ScholarProjects[p.project.Root]
-	pref.Main, pref.PageBudget, pref.DrawerWidth = main, budget, p.drawerWidth(s.prefs)
+	pref.Main, pref.DrawerWidth = main, p.drawerWidth(s.prefs)
 	pref.MainSelected = p.mainSelected
 	s.prefs.ScholarProjects[p.project.Root] = pref
 	s.setPref("scholarProjects")
@@ -905,8 +888,12 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 	c = c.Key(tab.ID)
 	width := s.scholarWorkspaceWidth(c)
+	gap := float32(10)
+	if width < 420 {
+		gap = 5
+	}
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-	ui.Row(c).Height(statusH).FillWidth().Padding(0, 10).Gap(10).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Height(statusH).FillWidth().Padding(0, 10).Gap(gap).AlignItems(ui.Center).Children(func() {
 		part := func(label, channel string) {
 			ui.Text(c, label).FontSize(11).TextColor(scholarInk(c, channel)).SingleLine().MinWidth(0).Shrink(1)
 		}
@@ -920,34 +907,17 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 					s.showScholarInspector(p, scholarDiagnostics)
 				}
 			case pane.pages > 0:
-				label, channel := fmt.Sprintf(s.tr("scholarTotalPages"), pane.pages), "brand"
-				measured, known := pane.pages, true
-				if pref := s.prefs.ScholarProjects[p.project.Root]; pref.ExcludeBibliography {
-					measured, known = s.scholarBodyPages(p, pane, pref.BodyEndPage)
-					if known {
-						label = fmt.Sprintf(s.tr("scholarBodyPages"), measured)
-					} else {
-						label = s.tr("scholarBodyUnconfirmed")
-						channel = "warning"
-					}
-				}
-				if limit := p.pageBudget(s.prefs); limit > 0 && known && samePath(pane.path, p.project.Main) {
-					label += fmt.Sprintf(" / %d", limit)
-					if measured > limit {
-						channel = "warning"
-					}
-				}
 				engine := "XeLaTeX"
 				if strings.EqualFold(filepath.Ext(pane.path), ".typ") {
 					engine = "Typst"
 				}
-				status := fmt.Sprintf("%s · %d ms · %s", engine, pane.elapsed.Milliseconds(), label)
+				status := fmt.Sprintf("%s · %d ms", engine, pane.elapsed.Milliseconds())
 				if len(pane.warnings) > 0 {
 					if s.scholarStatusButton(c, "triangle-alert", "warning", status, s.tr("scholarOpenDiagnostics")+" · "+pane.path).Clicked() {
 						s.showScholarInspector(p, scholarDiagnostics)
 					}
 				} else {
-					s.scholarStatusButton(c, "check", channel, status, s.tr("scholarTypesetSuccess")+" · "+pane.path).
+					s.scholarStatusButton(c, "check", "brand", status, s.tr("scholarTypesetSuccess")+" · "+pane.path).
 						Menu(func(m *ui.Menu) { s.scholarCompileActions(m, tab) })
 				}
 			}
@@ -991,6 +961,10 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 		}
 		if tab.Dirty() {
 			part(s.tr("scholarManuscriptUnsaved"), "warning")
+		}
+		s.scholarPageStatus(c.Key("page-navigation"), p, tab)
+		if isManuscript(tab) && !p.agent.trial.show {
+			s.widthControl(c.Key("document-width"), tab)
 		}
 		s.zoomControl(c)
 	})

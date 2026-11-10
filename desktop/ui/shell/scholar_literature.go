@@ -38,6 +38,7 @@ type scholarLiteratureState struct {
 	visible                                            []scholar.Entry
 	target                                             int
 	zotero                                             scholar.Zotero
+	zoteroForm                                         *scholarZoteroForm
 	connected                                          bool
 	collection                                         string
 	page                                               int
@@ -45,18 +46,15 @@ type scholarLiteratureState struct {
 	results                                            []scholar.Entry
 	selected                                           scholar.Entry
 	detail                                             scholar.ZoteroDetail
-	attachment                                         string
-	annotationPage                                     int
-	annotations                                        []scholar.Annotation
-	moreAnnotations                                    bool
+	annotations                                        *scholarAnnotationView
 	attachmentPage                                     int
-	selectedNote, pendingAnnotation                    string
+	selectedNote                                       string
 	tag                                                string
 	tagPicker                                          scholarTagPicker
 	recent                                             []scholar.Entry
 	recentOpen                                         bool
 	expanded, scopeOpen                                bool
-	loaded, treeTried, catalogSeen                     bool
+	loaded, treeTried                                  bool
 	scope                                              scholar.ZoteroScope
 	tree                                               map[string]*scholarCollectionBranch
 }
@@ -348,7 +346,8 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 		defer cancel()
 		var err error
 		if connect {
-			z, err = scholar.ConnectZotero(ctx)
+			z.Group = 0
+			z, err = z.Reconnect(ctx)
 		}
 		var page scholar.ZoteroPage
 		var full scholar.ZoteroFulltextResult
@@ -369,6 +368,7 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 		return func() {
 			if connect {
 				l.connected = err == nil
+				l.annotations = nil
 			}
 			if fulltext {
 				l.fulltextJob = 0
@@ -388,9 +388,8 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 				lo := min(l.fulltextPage*scholar.ZoteroPageSize, len(l.fulltextEntries))
 				page.Entries = l.fulltextEntries[lo:min(lo+scholar.ZoteroPageSize, len(l.fulltextEntries))]
 			}
-			if (err != nil || connect) && l.selected.RemoteID != "" {
+			if connect && l.selected.RemoteID != "" {
 				l.selected, l.detail = scholar.Entry{}, scholar.ZoteroDetail{}
-				l.attachment, l.annotations, l.moreAnnotations = "", nil, false
 			}
 			if err != nil {
 				if connect {
@@ -416,10 +415,13 @@ func (s *Shell) selectScholarEntry(p *scholarState, entry scholar.Entry) {
 func (s *Shell) setScholarEntry(p *scholarState, entry scholar.Entry) {
 	l := &p.literature
 	entry = s.scholarLinkedEntry(p, entry)
+	if l.zoteroForm != nil && !l.zoteroForm.catalog {
+		l.zoteroForm = nil
+	}
 	l.selected, l.detail, l.attachmentPage = entry, scholar.ZoteroDetail{}, 0
-	l.selectedNote, l.pendingAnnotation = "", ""
+	l.selectedNote = ""
 	l.expanded = true
-	l.attachment, l.annotations, l.moreAnnotations = "", nil, false
+	l.annotations = nil
 	if entry.RemoteID != "" {
 		s.loadScholarDetail(p, entry, 0)
 	}
@@ -434,14 +436,17 @@ func (s *Shell) loadScholarDetail(p *scholarState, entry scholar.Entry, start in
 		defer cancel()
 		detail, err := z.Detail(ctx, entry.RemoteID, start)
 		return func() {
-			if l.selected == entry && err == nil {
-				l.detail, l.attachmentPage = detail, start
+			if l.selected != entry {
+				return
 			}
-			if l.selected == entry && l.pendingAnnotation != "" {
-				key := l.pendingAnnotation
-				l.pendingAnnotation = ""
-				if err == nil {
-					s.loadScholarAnnotations(p, key, 0)
+			if err == nil {
+				l.detail, l.attachmentPage = detail, start
+				if entry.Source == "Zotero" && detail.Entry.RemoteID == entry.RemoteID {
+					if detail.Entry.Key == "" {
+						detail.Entry.Key = entry.Key
+					}
+					detail.Entry.Ordinal = entry.Ordinal
+					l.selected = detail.Entry
 				}
 			}
 		}, err
@@ -453,13 +458,28 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 	if p.err != "" {
 		ui.Text(c, p.err).Wrap().FontSize(11).TextColor(scholarInk(c, "warning"))
 	}
+	if view := l.annotations; view != nil {
+		s.scholarAnnotations(c.Key(view), p, view)
+		return
+	}
 	e := l.selected
 	if e == (scholar.Entry{}) {
 		ui.Text(c, s.tr("scholarSelectPaper")).Wrap()
 		return
 	}
+	if form := l.zoteroForm; form != nil && !form.catalog && form.z.ServerID == l.zotero.ServerID &&
+		form.z.Group == e.Library && (form.key == e.RemoteID || form.key == l.selectedNote) {
+		s.scholarZoteroForm(c.Key("zotero-form"), p, form)
+		return
+	}
+	if l.detail.Deleted {
+		ui.Text(c, e.Title).Bold().Wrap()
+		s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, nil)
+		return
+	}
 	for _, note := range l.detail.Notes {
 		if e.ZoteroNote || note.Key == l.selectedNote {
+			s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, &note)
 			s.scholarNoteDetails(c, p, note, e.ZoteroNote)
 			return
 		}
@@ -472,6 +492,7 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 	ui.Text(c, e.Title).Bold().Wrap()
 	ui.Text(c, strings.TrimSpace(e.Author+" "+e.Year+" "+e.Venue)).Wrap()
 	ui.Text(c, e.Source+" "+e.DOI).FontSize(11).Wrap()
+	s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, nil)
 	if ui.Button(c, s.tr("scholarOpenPDF")).Disabled(p.busy).Clicked() {
 		s.openScholarPDF(p, e, c.Services())
 	}
@@ -514,14 +535,9 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 					}
 				} else {
 					z := l.zotero
-					s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
-						err := z.Save(ctx, e)
-						return func() {
-							if err == nil {
-								s.status = s.tr("scholarSavedZotero")
-							}
-						}, err
-					})
+					s.scholarZoteroWrite(p, func(ctx context.Context) error {
+						return z.Save(ctx, e)
+					}, func() { s.scholarZoteroItemChanged(p, z, "", false) })
 				}
 			}
 		} else if e.Library == 0 && e.Key != "" && ui.Button(c, s.tr("scholarCopyBBT")).Disabled(p.busy).Clicked() {
@@ -570,14 +586,22 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 		ck := c.Key(pdf.Key)
 		ui.Text(ck, pdf.Title).Wrap()
 		ui.Row(ck).Gap(4).Children(func() {
+			if pdf.LinkOnly {
+				if ui.Button(ck, s.tr("scholarOpenExternalPDF")).Disabled(pdf.URL == "").Clicked() {
+					s.openScholarZoteroPDF(p, e, pdf, c.Services())
+				}
+				return
+			}
 			if ui.Button(ck, s.tr("scholarOpenPDF")).Clicked() {
-				s.openScholarAttachment(p, e, pdf.Key, "", pdf.Title, 0)
+				s.openScholarZoteroPDF(p, e, pdf, c.Services())
 			}
 			if s.pf.mac && ui.Button(ck, "Quick Look · Space").Disabled(p.busy).Clicked() {
 				s.quickLookScholarAttachment(p, pdf.Key)
 			}
 			if ui.Button(ck, s.tr("scholarReadAnnotations")).Disabled(p.busy).Clicked() {
-				s.loadScholarAnnotations(p, pdf.Key, 0)
+				z := l.zotero
+				z.Group = e.Library
+				s.openScholarAnnotations(p, e, z, pdf.Key, pdf.Title)
 			}
 		})
 	}
@@ -588,38 +612,6 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 			}
 			if ui.Button(c, s.tr("scholarNextAttachments")).Disabled(p.busy || !l.detail.More).Clicked() {
 				s.loadScholarDetail(p, e, l.attachmentPage+scholar.ZoteroPageSize)
-			}
-		})
-	}
-	projectKey := ""
-	if len(l.annotations) > 0 {
-		projectKey = scholarReferenceKey(p.library, e)
-	}
-	for i, annotation := range l.annotations {
-		ck := c.Key(i)
-		ui.Text(ck, strings.TrimSpace(annotation.Quote+"\n"+annotation.Note)).Wrap()
-		ui.Row(ck).Gap(4).Children(func() {
-			if annotation.Page > 0 && ui.Button(ck, "PDF · "+fmt.Sprint(annotation.Page)).Clicked() {
-				s.openScholarAttachment(p, e, l.attachment, "", "", annotation.Page)
-			}
-			if key := projectKey; key != "" && annotation.Page > 0 {
-				page := fmt.Sprint(annotation.Page)
-				if ui.Button(ck, s.tr("scholarCitePage")).Clicked() {
-					s.insertScholarCitations(p, []string{key}, page)
-				}
-				if annotation.Quote != "" && ui.Button(ck, s.tr("scholarInsertQuote")).Clicked() {
-					s.insertScholarQuote(p, key, page, annotation.Quote)
-				}
-			}
-		})
-	}
-	if l.attachment != "" {
-		ui.Row(c).Gap(4).Children(func() {
-			if ui.Button(c, s.tr("scholarPreviousAnnotations")).Disabled(p.busy || l.annotationPage == 0).Clicked() {
-				s.loadScholarAnnotations(p, l.attachment, l.annotationPage-scholar.ZoteroPageSize)
-			}
-			if ui.Button(c, s.tr("scholarNextAnnotations")).Disabled(p.busy || !l.moreAnnotations).Clicked() {
-				s.loadScholarAnnotations(p, l.attachment, l.annotationPage+scholar.ZoteroPageSize)
 			}
 		})
 	}
@@ -668,21 +660,6 @@ func (s *Shell) insertScholarQuote(p *scholarState, key, page, quote string) {
 		tab.typesetMode = typesetSplit
 	}
 	p.changes.compare, s.focusEditor = false, true
-}
-
-func (s *Shell) loadScholarAnnotations(p *scholarState, key string, start int) {
-	l, z := &p.literature, p.literature.zotero
-	z.Group = l.selected.Library
-	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		list, more, err := z.Annotations(ctx, key, start)
-		return func() {
-			if err == nil {
-				l.attachment, l.annotations, l.moreAnnotations, l.annotationPage = key, list, more, start
-			}
-		}, err
-	})
 }
 
 func (s *Shell) importScholarEntry(p *scholarState, target string, entry scholar.Entry) {
@@ -851,6 +828,11 @@ func (s *Shell) bindScholarCitations(t *Tab) {
 	}
 	pending := false
 	st.OnInput = func(ev ui.InputEvent) bool {
+		if ev.Kind == ui.InputPointerUp && ev.Button == 0 && ev.Clicks == 1 && ev.Mods == 0 {
+			if pane := s.compile; pane != nil && pane.tab == t && pane.sync.linked {
+				pane.sync.sourceClick = true
+			}
+		}
 		if ev.Kind == ui.InputCommand && (ev.Text == "undo" || ev.Text == "redo") {
 			s.tagScholarChange(t, ev.Text)
 		}
@@ -891,11 +873,7 @@ func (s *Shell) bindScholarCitations(t *Tab) {
 		}
 		if pane := s.compile; pane != nil && pane.tab == t && !pane.busy {
 			line := st.Buffer.Snapshot().LineOf(offset)
-			select {
-			case <-pane.sections:
-			default:
-			}
-			pane.sections <- sourcePageRequest{line, st.Buffer.Snapshot().Line(line), pane.fullVersion}
+			pane.requestSourcePosition(line)
 		}
 	}
 	st.RenderHover = func(c *ui.Context, panel ui.Element, h *editor.HoverCard) {

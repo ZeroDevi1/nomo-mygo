@@ -835,18 +835,18 @@ func (s *Shell) outline(c *ui.Context, tab *Tab) {
 	ui.Row(c).FillHeight().Children(func() {
 		ui.Box(c).Width(1).FillHeight().Background(s.ch.separator)
 		ui.Column(c).Width(outlineW).FillHeight().MinHeight(0).Children(func() {
-			s.outlineContent(c, tab)
+			s.outlineContent(c, tab, nil)
 		})
 	})
 }
 
-func (s *Shell) outlineContent(c *ui.Context, tab *Tab) {
+func (s *Shell) outlineContent(c *ui.Context, tab *Tab, navigate func()) {
 	ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 14).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, s.tr("documentOutline")).FontSize(11).Bold().TextColor(s.ch.muted)
 	})
 	// 虚拟列表：只为可见的标题建元素，万级标题的文档每帧成本与标题数无关。
 	p := s.compile
-	pdf := p != nil && len(p.bookmarks) > 0
+	pdf := p != nil && p.tab == tab && p.parkedPage == 0 && len(p.bookmarks) > 0
 	var hs []mdedit.Heading
 	if pdf {
 		hs = p.bookmarks
@@ -909,23 +909,26 @@ func (s *Shell) outlineContent(c *ui.Context, tab *Tab) {
 			if b.Clicked() {
 				switch {
 				case pdf:
-					p.list.ScrollTo(h.Pos-1, ui.Start)
+					p.gotoPDFPage(h.Pos)
 				case s.mode() == modeSource:
 					st := tab.Source()
 					line := st.Buffer.Snapshot().LineOf(h.Pos)
-					st.Select(h.Pos, h.Pos)
-					st.ScrollTo(line)
-					if p != nil && !p.busy && p.err == "" {
-						select {
-						case <-p.sections:
-						default:
-						}
-						p.sections <- sourcePageRequest{line, st.Buffer.Snapshot().Line(line), p.fullVersion}
+					if navigate != nil {
+						s.jumpScholarOutline(tab, h.Pos)
+					} else {
+						st.Select(h.Pos, h.Pos)
+						st.ScrollTo(line)
+					}
+					if p != nil && p.tab == tab {
+						p.requestSourcePosition(line)
 					}
 					s.focusEditor = true
 				default:
 					tab.Ed.JumpTo(h.Pos)
 					s.focusEditor = true
+				}
+				if navigate != nil {
+					navigate()
 				}
 			}
 		})

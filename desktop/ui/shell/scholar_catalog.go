@@ -37,6 +37,15 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 		}
 		return
 	}
+	if form := l.zoteroForm; form != nil && form.catalog && form.z == l.zotero {
+		ui.Scroll(c.Key("zotero-form")).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			ui.Column(c).FillWidth().Padding(0, 8, 8, 0).Gap(5).Children(func() {
+				s.scholarZoteroForm(c, p, form)
+			})
+		})
+		return
+	}
+	s.scholarZoteroCatalogActions(c.Key("zotero-actions"), p)
 	if !p.busy {
 		switch {
 		case !l.loaded && p.err == "":
@@ -336,10 +345,11 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 						ui.Text(ck, strings.TrimSpace(e.Author+" "+e.Year)).FontSize(11).Width(104).SingleLine().TextColor(s.ch.muted)
 					})
 					if b.Clicked() {
-						if !selected {
+						if !selected || e.Source == "Zotero" && l.selected.Source != e.Source {
 							s.selectScholarEntry(p, e)
 						} else {
 							l.selectedNote = ""
+							l.annotations = nil
 							s.showScholarInspector(p, scholarReader)
 						}
 					}
@@ -370,13 +380,18 @@ func (s *Shell) scholarCatalogChildren(c *ui.Context, p *scholarState) {
 			if title == "" {
 				title = s.tr("scholarOpenPDF")
 			}
-			if s.scholarTabButton(c.Key(pdf.Key), "file-text", title, false).Clicked() {
-				s.openScholarAttachment(p, l.selected, pdf.Key, "", title, 0)
+			icon := "file-text"
+			if pdf.LinkOnly {
+				icon = "external-link"
+			}
+			if s.scholarTabButton(c.Key(pdf.Key), icon, title, false).Disabled(pdf.LinkOnly && pdf.URL == "").Clicked() {
+				s.openScholarZoteroPDF(p, l.selected, pdf, c.Services())
 			}
 		}
 		for _, note := range l.detail.Notes {
 			if s.scholarTabButton(c.Key(note.Key), "notebook-pen", scholarNoteTitle(s, note), l.selectedNote == note.Key).Clicked() {
 				l.selectedNote = note.Key
+				l.annotations = nil
 				s.showScholarInspector(p, scholarReader)
 			}
 		}
@@ -450,6 +465,17 @@ func (s *Shell) scholarCollectionTree(c *ui.Context, p *scholarState, parent str
 				ui.Icon(ck, s.icon("folder")).FontSize(13).TextColor(s.ch.accent)
 				ui.Text(ck, collection.Name).FontSize(12).SingleLine().MinWidth(0).Shrink(1)
 			})
+			if l.zotero.ServerID != "" {
+				b.ContextMenu(func(m *ui.Menu) {
+					s.scholarZoteroCollectionActions(m, p, collection)
+				})
+				if l.collection == collection.Key && !l.recentOpen {
+					label := s.tr("scholarZoteroManageCollection")
+					s.toolButton(ck.Key("manage"), "ellipsis", label, false).Disabled(p.busy).Label(label).Menu(func(m *ui.Menu) {
+						s.scholarZoteroCollectionActions(m, p, collection)
+					})
+				}
+			}
 			if b.Clicked() {
 				l.recentOpen, l.scope = false, scholar.ZoteroAll
 				l.scopeOpen = false

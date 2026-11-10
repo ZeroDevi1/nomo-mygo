@@ -33,9 +33,10 @@ func noRedirect(_ *http.Request, _ []*http.Request) error { return http.ErrUseLa
 type Zotero struct {
 	ServerID string
 	Group    int
+	writeKey *zoteroWriteKey
 }
 
-func ConnectZotero(ctx context.Context) (Zotero, error) {
+func (z Zotero) Reconnect(ctx context.Context) (Zotero, error) {
 	h, _, err := (Zotero{}).request(ctx, "GET", "/api/", nil, "")
 	if err != nil {
 		return Zotero{}, err
@@ -43,10 +44,22 @@ func ConnectZotero(ctx context.Context) (Zotero, error) {
 	if h.Get("Zotero-API-Version") != "3" {
 		return Zotero{}, fmt.Errorf("Zotero Local API 版本不可用")
 	}
-	return Zotero{ServerID: h.Get("Zotero-Server-ID")}, nil
+	id := h.Get("Zotero-Server-ID")
+	if z.ServerID == id {
+		return z, nil
+	}
+	z.ServerID, z.writeKey = id, nil
+	if z.ServerID != "" {
+		z.writeKey = &zoteroWriteKey{}
+	}
+	return z, nil
 }
 
 func (z Zotero) request(ctx context.Context, method, path string, data []byte, key string) (http.Header, []byte, error) {
+	return z.requestWithToken(ctx, method, path, data, key, "")
+}
+
+func (z Zotero) requestWithToken(ctx context.Context, method, path string, data []byte, key, token string) (http.Header, []byte, error) {
 	if z.Group > 0 {
 		path = strings.Replace(path, "/api/users/0", fmt.Sprintf("/api/groups/%d", z.Group), 1)
 	}
@@ -64,13 +77,16 @@ func (z Zotero) request(ctx context.Context, method, path string, data []byte, k
 	if key != "" {
 		req.Header.Set("Zotero-API-Key", key)
 	}
+	if token != "" {
+		req.Header.Set("Zotero-Write-Token", token)
+	}
 	resp, err := localHTTP.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return nil, nil, fmt.Errorf("Zotero 本地接口返回 HTTP %d", resp.StatusCode)
+		return nil, nil, zoteroHTTPError(resp.StatusCode)
 	}
 	body, err := readBounded(resp.Body, 1<<20)
 	return resp.Header, body, err
@@ -89,10 +105,13 @@ type zoteroItem struct {
 	Key  string
 	Data struct {
 		Key, ItemType, Title, Date, PublicationTitle, DOI, CitationKey, AbstractNote, ContentType string
-		AnnotationText, AnnotationComment, AnnotationPageLabel                                    string
+		CaseName, Subject, NameOfAct                                                              string
+		URL, LinkMode                                                                             string
+		AnnotationText, AnnotationComment, AnnotationPageLabel, AnnotationType                    string
 		AnnotationPosition                                                                        string
 		Note                                                                                      string
-		Tags                                                                                      []struct{ Tag string }
+		Tags                                                                                      []zoteroTag
+		Deleted                                                                                   bool
 		Collections                                                                               []string
 		Relations                                                                                 map[string]json.RawMessage
 		Creators                                                                                  []struct{ FirstName, LastName, Name, CreatorType string }
@@ -233,7 +252,7 @@ func (z Zotero) search(ctx context.Context, query, collection, tag string, scope
 	}
 	keys := make([]string, 0, len(list))
 	for _, item := range list {
-		if zoteroKey.MatchString(item.Key) && item.Data.Title != "" {
+		if zoteroKey.MatchString(item.Key) && item.title() != "" {
 			keys = append(keys, item.Key)
 		}
 	}
@@ -261,12 +280,22 @@ func (z Zotero) search(ctx context.Context, query, collection, tag string, scope
 	return page, nil
 }
 
+func (item *zoteroItem) title() string {
+	d := &item.Data
+	for _, title := range [...]string{d.Title, d.CaseName, d.Subject, d.NameOfAct} {
+		if title != "" {
+			return title
+		}
+	}
+	return ""
+}
+
 func (z Zotero) entry(item zoteroItem) (Entry, bool) {
-	d := item.Data
+	d := &item.Data
 	if !zoteroKey.MatchString(item.Key) {
 		return Entry{}, false
 	}
-	title := d.Title
+	title := item.title()
 	if d.ItemType == "note" && title == "" {
 		title, _, _ = strings.Cut(zoteroNoteText(d.Note), "\n")
 	}
@@ -367,12 +396,16 @@ func (z Zotero) ExportFor(ctx context.Context, entry Entry, target string) ([]by
 }
 
 type ZoteroDetail struct {
-	Abstract string
-	PDFs     []Attachment
-	Notes    []ZoteroNote
-	Tags     []string
-	Related  []string
-	More     bool
+	Entry       Entry
+	Abstract    string
+	ItemType    string
+	Deleted     bool
+	PDFs        []Attachment
+	Notes       []ZoteroNote
+	Tags        []string
+	Collections []string
+	Related     []string
+	More        bool
 }
 
 type ZoteroNote struct {
@@ -380,10 +413,25 @@ type ZoteroNote struct {
 	Tags, Related    []string
 }
 
-type Attachment struct{ Key, Title string }
+type Attachment struct {
+	Key, Title, URL string
+	LinkOnly        bool
+}
+
+func (item *zoteroItem) attachment() Attachment {
+	pdf := Attachment{Key: item.Key, Title: cleanField(item.Data.Title, 256), LinkOnly: item.Data.LinkMode == "linked_url"}
+	if pdf.LinkOnly {
+		link, err := url.Parse(strings.TrimSpace(item.Data.URL))
+		if err == nil && (link.Scheme == "http" || link.Scheme == "https") && link.Hostname() != "" && link.User == nil {
+			pdf.URL = link.String()
+		}
+	}
+	return pdf
+}
+
 type Annotation struct {
-	Quote, Note, Label string
-	Page               int
+	Quote, Note, Label, Kind string
+	Page                     int
 }
 
 func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail, error) {
@@ -401,9 +449,19 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 		return detail, err
 	}
 	detail.Abstract = cleanField(item.Data.AbstractNote, 16<<10)
+	detail.Entry, _ = z.entry(item)
+	detail.ItemType, detail.Deleted = item.Data.ItemType, item.Data.Deleted
+	detail.Collections = item.Data.Collections
 	detail.Tags, detail.Related = z.itemMetadata(item)
 	if item.Data.ItemType == "note" {
 		detail.Notes = []ZoteroNote{z.note(item)}
+		return detail, nil
+	}
+	if detail.Deleted {
+		return detail, nil
+	}
+	if item.Data.ItemType == "attachment" && item.Data.ContentType == "application/pdf" {
+		detail.PDFs = []Attachment{item.attachment()}
 		return detail, nil
 	}
 	h, raw, err := z.request(ctx, "GET", paged(path+"/children", start, ""), nil, "")
@@ -416,7 +474,7 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 	}
 	for _, item := range children {
 		if item.Data.ContentType == "application/pdf" && zoteroKey.MatchString(item.Key) {
-			detail.PDFs = append(detail.PDFs, Attachment{item.Key, cleanField(item.Data.Title, 256)})
+			detail.PDFs = append(detail.PDFs, item.attachment())
 		} else if item.Data.ItemType == "note" && zoteroKey.MatchString(item.Key) {
 			detail.Notes = append(detail.Notes, z.note(item))
 		}
@@ -502,7 +560,7 @@ func (z Zotero) Annotations(ctx context.Context, key string, start int) ([]Annot
 	if !zoteroKey.MatchString(key) {
 		return nil, false, fmt.Errorf("无效 Zotero 附件键")
 	}
-	h, raw, err := z.request(ctx, "GET", paged("/api/users/0/items/"+key+"/children", start, ""), nil, "")
+	h, raw, err := z.request(ctx, "GET", paged("/api/users/0/items/"+key+"/children", start, "")+"&itemType=annotation", nil, "")
 	if err != nil {
 		return nil, false, err
 	}
@@ -522,7 +580,10 @@ func (z Zotero) Annotations(ctx context.Context, key string, start int) ([]Annot
 		if pos.PageIndex != nil && *pos.PageIndex >= 0 {
 			page = *pos.PageIndex + 1
 		}
-		result = append(result, Annotation{cleanField(d.AnnotationText, 2048), cleanField(d.AnnotationComment, 2048), cleanField(d.AnnotationPageLabel, 32), page})
+		result = append(result, Annotation{
+			Quote: cleanField(d.AnnotationText, 2048), Note: cleanField(d.AnnotationComment, 2048),
+			Label: cleanField(d.AnnotationPageLabel, 32), Kind: cleanField(d.AnnotationType, 32), Page: page,
+		})
 	}
 	return result, hasNext(h, start, len(items)), nil
 }
@@ -538,7 +599,6 @@ func PDFLink(key string, page int) string {
 	return base
 }
 
-// Save uses a one-operation credential kept only in this call.
 func (z Zotero) Save(ctx context.Context, e Entry) error {
 	if z.ServerID == "" {
 		return fmt.Errorf("该 Zotero 版本没有可用的本地写接口")
@@ -583,16 +643,12 @@ func (z Zotero) Save(ctx context.Context, e Entry) error {
 	case "book", "report", "thesis", "dataset", "standard":
 		itemType = c.Type
 	}
-	_, raw, err := z.request(ctx, "GET", "/api/itemTypeFields?itemType="+itemType, nil, "")
+	fields, err := z.itemFields(ctx, itemType)
 	if err != nil {
 		return fmt.Errorf("读取 Zotero 条目字段失败：%w", err)
 	}
-	var available []struct{ Field string }
-	if err := json.Unmarshal(raw, &available); err != nil {
-		return err
-	}
-	allowed := make(map[string]bool, len(available))
-	for _, field := range available {
+	allowed := make(map[string]bool, len(fields))
+	for _, field := range fields {
 		allowed[field.Field] = true
 	}
 	creators := make([]map[string]string, 0, len(c.Author))
@@ -614,27 +670,7 @@ func (z Zotero) Save(ctx context.Context, e Entry) error {
 			item[field[0]] = field[1]
 		}
 	}
-	payload, err := json.Marshal([]any{item})
-	if err != nil {
-		return err
-	}
-	_, raw, err = z.request(ctx, "POST", "/api/local/authorize", []byte(`{"appName":"Nomo Scholar"}`), "")
-	if err != nil {
-		return err
-	}
-	var auth struct{ Key string }
-	if err := json.Unmarshal(raw, &auth); err != nil || auth.Key == "" {
-		return fmt.Errorf("未获得 Zotero 本地写入授权")
-	}
-	_, raw, err = z.request(ctx, "POST", "/api/users/0/items", payload, auth.Key)
-	if err != nil {
-		return err
-	}
-	var result struct{ Successful map[string]json.RawMessage }
-	if err := json.Unmarshal(raw, &result); err != nil || len(result.Successful) != 1 {
-		return fmt.Errorf("Zotero 未确认条目写入")
-	}
-	return nil
+	return z.createObject(ctx, "/api/users/0/items", item, "")
 }
 
 var yearPattern = regexp.MustCompile(`\b[12][0-9]{3}\b`)
