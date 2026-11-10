@@ -50,7 +50,7 @@ func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int
 		}
 		return typesetPreview
 	}
-	if p.drawer != scholarClosed && (p.drawer != scholarCodex || s.scholarWorkspaceWidthAt(width) < 930) {
+	if p.drawer != scholarClosed && (p.drawer != scholarCodex || s.scholarInspectorPrimary(p, width)) {
 		return typesetSource
 	}
 	mode := tab.typesetMode
@@ -72,6 +72,7 @@ func (s *Shell) scholarPDFOnly(c *ui.Context, p *scholarState, tab *Tab) bool {
 
 func (s *Shell) revealScholarSource(tab *Tab) {
 	if p := s.scholar; p != nil {
+		p.dismissWindowsPage()
 		p.references.catalog = false
 		p.references.focused, p.references.left, p.references.right = nil, nil, nil
 		if s.win != nil {

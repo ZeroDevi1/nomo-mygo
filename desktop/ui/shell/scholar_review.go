@@ -122,7 +122,7 @@ func (s *Shell) openScholarReview(p *scholarState) {
 	if s.win != nil {
 		w, _ := s.win.ContentSize()
 		width := float32(w)
-		if p.drawer != scholarCodex || s.scholarSinglePane(width) || s.scholarWorkspaceWidthAt(width) < 930 {
+		if p.drawer != scholarCodex || s.scholarInspectorPrimary(p, width) {
 			s.closeScholarInspector(p)
 		}
 	}

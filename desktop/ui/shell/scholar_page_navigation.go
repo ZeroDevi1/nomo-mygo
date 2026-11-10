@@ -18,8 +18,7 @@ func (s *Shell) scholarPageStatus(c *ui.Context, p *scholarState, tab *Tab) {
 		return
 	}
 	width, _ := c.Size()
-	if s.scholarInspectorVisible(p, width) &&
-		(s.scholarSinglePane(width) || p.drawer == scholarCodex && s.scholarWorkspaceWidthAt(width) < 930) {
+	if s.scholarInspectorVisible(p, width) && s.scholarInspectorPrimary(p, width) {
 		return
 	}
 	if reading := p.references.focused; reading != nil {

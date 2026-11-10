@@ -102,7 +102,7 @@ func (s *Shell) treeRow(c *ui.Context, n *folderNode, depth int, active, main st
 	}
 	switch {
 	case selected:
-		row.Background(s.ch.pressed)
+		row.Background(s.ch.pressed).TextColor(s.ch.text)
 	case row.Hovered():
 		row.Background(s.ch.hover)
 	}

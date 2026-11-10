@@ -206,8 +206,7 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 			project: scholar.Project{Root: root, Main: tab.Path}, ctx: ctx, cancel: cancel,
 			literature: scholarLiteratureState{mode: 1},
 		}
-		width, _ := c.Size()
-		p.winProjectOpen = s.pf.windows && width >= scholarWindowsExpanded
+		p.winProjectOpen = s.pf.windows
 		pref := s.prefs.ScholarProjects[root]
 		if filepath.IsLocal(pref.Main) {
 			main := filepath.Join(root, pref.Main)
@@ -588,8 +587,7 @@ var scholarDestinations = [...]struct{ icon, label string }{
 }
 
 func (s *Shell) showScholarNavigation(p *scholarState, destination int, width float32) {
-	p.closeWindowsSettings()
-	p.accountOpen, p.winRailPopup = false, false
+	p.dismissWindowsPage()
 	if destination == scholarLiterature {
 		s.showScholarCatalog(p)
 		return
@@ -703,13 +701,14 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 				}
 			})
 		}
-		if s.pf.windows && s.toolButton(c.Key("close-project"), "x", s.tr("scholarClose"), false).Clicked() {
-			width, _ := c.Size()
-			if width >= scholarWindowsExpanded {
-				p.winProjectOpen = false
-			} else {
+		if p.winCompactProject {
+			if ui.Button(c.Key("back"), s.tr("scholarReturnManuscript")).Clicked() {
 				p.winCompactProject = false
+				s.focusEditor = true
 			}
+		} else if s.pf.windows && s.toolButton(c.Key("close-project"), "x", s.tr("scholarClose"), false).Clicked() {
+			p.winProjectOpen = false
+			s.focusEditor = true
 		}
 	})
 	ui.Box(c).FillWidth().Height(1).Background(s.ch.separator)
@@ -776,6 +775,7 @@ func (s *Shell) scholarInspectorVisible(p *scholarState, width float32) bool {
 }
 
 func (s *Shell) showScholarInspector(p *scholarState, drawer int) {
+	p.dismissWindowsPage()
 	if p.drawer == scholarClosed || p.compactNav {
 		p.drawerNav = p.compactNav
 	}
@@ -800,19 +800,23 @@ func (s *Shell) scholarToggleDrawer(p *scholarState, drawer int) {
 	if s.win != nil {
 		width, _ = s.win.ContentSize()
 	}
-	if p.drawer == drawer && s.scholarInspectorVisible(p, float32(width)) {
+	p.winRailPopup = false
+	if p.drawer == drawer && !p.winCompactProject && !p.accountOpen && p.winSettings == nil &&
+		s.scholarInspectorVisible(p, float32(width)) {
 		s.closeScholarInspector(p)
 	} else {
 		s.showScholarInspector(p, drawer)
 	}
 }
 
+const (
+	scholarInspectorMinWidth  = 320
+	scholarInspectorGripWidth = 5
+)
+
 func (p *scholarState) drawerWidth(prefs *Prefs) int {
 	width := prefs.ScholarProjects[p.project.Root].DrawerWidth
-	if width == 0 {
-		return 320
-	}
-	return max(320, min(width, 420))
+	return max(scholarInspectorMinWidth, min(width, 420))
 }
 
 func (s *Shell) scholarInspectorWidth(p *scholarState, window float32) float32 {
@@ -820,7 +824,24 @@ func (s *Shell) scholarInspectorWidth(p *scholarState, window float32) float32 {
 	if width == 0 {
 		width = float32(p.drawerWidth(s.prefs))
 	}
+	if s.pf.windows && p.drawer == scholarCodex {
+		return min(width, max(scholarInspectorMinWidth, window-scholarSplitWidth-scholarInspectorGripWidth))
+	}
 	return min(width, max(240, window-340))
+}
+
+func (s *Shell) scholarInspectorPrimary(p *scholarState, width float32) bool {
+	if s.scholarSinglePane(width) {
+		return true
+	}
+	if p.drawer != scholarCodex {
+		return false
+	}
+	workspace := s.scholarWorkspaceWidthAt(width)
+	if s.pf.windows {
+		return workspace < scholarSplitWidth+scholarInspectorMinWidth+scholarInspectorGripWidth
+	}
+	return workspace < 930
 }
 
 func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, singlePane bool) {
@@ -830,11 +851,11 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 	width := w
 	if !singlePane {
 		width = s.scholarInspectorWidth(p, w)
-		grip := ui.Box(c).Width(5).FillHeight().Focusable().FocusRing(true).Label(s.tr("scholarDrawerWidth")).
+		grip := ui.Box(c).Width(scholarInspectorGripWidth).FillHeight().Focusable().FocusRing(true).Label(s.tr("scholarDrawerWidth")).
 			Cursor(ui.CursorResizeEW).Background(s.ch.separator)
 		dx, _, held := grip.Dragged()
 		if held && dx != 0 {
-			p.drawerSize = max(320, min(420, p.drawerSize-dx))
+			p.drawerSize = max(scholarInspectorMinWidth, min(420, p.drawerSize-dx))
 			p.drawerSave = c.Now().Add(splitSaveDelay)
 		}
 		if grip.Shortcut(0, ui.KeyLeft) {
@@ -842,7 +863,7 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 			p.drawerSave = c.Now().Add(splitSaveDelay)
 		}
 		if grip.Shortcut(0, ui.KeyRight) {
-			p.drawerSize = max(320, p.drawerSize-10)
+			p.drawerSize = max(scholarInspectorMinWidth, p.drawerSize-10)
 			p.drawerSave = c.Now().Add(splitSaveDelay)
 		}
 	}

@@ -396,7 +396,16 @@ func (s *Shell) updateTitle() {
 
 // activate 切换到标签 i；离开的标签释放布局缓存（保留原文、撤销与阅读位置）。
 func (s *Shell) activate(i int) {
-	if i == s.active || i < 0 || i >= len(s.tabs) {
+	if i < 0 || i >= len(s.tabs) {
+		return
+	}
+	if p := s.scholar; p != nil && s.pf.windows {
+		if p.winCompactProject || p.accountOpen || p.winSettings != nil {
+			s.focusEditor = true
+		}
+		p.dismissWindowsPage()
+	}
+	if i == s.active {
 		return
 	}
 	if prev := s.activeTab(); prev != nil {

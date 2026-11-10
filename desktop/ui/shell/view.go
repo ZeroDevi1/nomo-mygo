@@ -653,7 +653,7 @@ func (s *Shell) document(c *ui.Context) {
 	total, _ := c.Size()
 	inspector := p != nil && s.scholarInspectorVisible(p, total)
 	singlePane := p != nil && s.scholarSinglePane(total)
-	inspectorPrimary := inspector && (singlePane || p.drawer == scholarCodex && width < 930)
+	inspectorPrimary := inspector && s.scholarInspectorPrimary(p, total)
 	if p == nil && !s.prefs.ToolbarHidden {
 		s.toolbar(c)
 	}
