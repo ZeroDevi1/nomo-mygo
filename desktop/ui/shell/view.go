@@ -664,7 +664,7 @@ func (s *Shell) document(c *ui.Context) {
 	ui.Row(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		var leftPDF, rightPDF *scholarPDFTab
 		if p != nil {
-			leftPDF, rightPDF = p.references.visible(!singlePane, inspectorPrimary)
+			leftPDF, rightPDF = p.references.visible(!singlePane, inspectorPrimary || p.agent.trial.show)
 		}
 		if inspectorPrimary {
 			s.hideTypesetPreview(p, tab)
@@ -738,7 +738,7 @@ func (s *Shell) document(c *ui.Context) {
 				s.linkPopover(c, tab, el)
 				s.emojiSuggest(c, tab, el)
 			}
-			if p != nil && !s.scholarPDFOnly(c, p, tab) {
+			if p != nil && !p.agent.trial.show && !s.scholarPDFOnly(c, p, tab) {
 				p.agent.anchor = el.Bounds()
 				s.scholarInlineCitations(c, p, tab, el)
 				s.scholarInlineReview(c, p, tab, el)

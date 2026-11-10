@@ -26,6 +26,8 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 		return
 	}
 	p.changes.compare = false
+	p.agent.trial.close()
+	p.agent.reviewHidden = true
 	p.references.right = nil
 	p.references.selectTab(nil)
 	s.closeScholarInspector(p)
@@ -38,24 +40,34 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 
 func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int {
 	width, _ := c.Size()
+	if v := &p.agent.trial; v.show && v.tabID == tab.ID {
+		return typesetSplit
+	}
+	review := s.scholarReviewPatch(p, tab) != nil
 	if p.references.right != nil && !p.references.catalog && !s.scholarSinglePane(width) {
+		if review {
+			return typesetSource
+		}
 		return typesetPreview
 	}
 	if p.drawer != scholarClosed && (p.drawer != scholarCodex || s.scholarWorkspaceWidthAt(width) < 930) {
 		return typesetSource
 	}
-	if tab.typesetMode == typesetSplit && s.scholarSinglePane(width) {
-		if tab.typesetCompactPDF {
+	mode := tab.typesetMode
+	if review && mode == typesetPreview {
+		mode = typesetSplit
+	}
+	if mode == typesetSplit && s.scholarSinglePane(width) {
+		if tab.typesetCompactPDF && !review {
 			return typesetPreview
 		}
 		return typesetSource
 	}
-	return tab.typesetMode
+	return mode
 }
 
 func (s *Shell) scholarPDFOnly(c *ui.Context, p *scholarState, tab *Tab) bool {
-	mode := s.scholarPreviewMode(c, p, tab)
-	return s.canPreviewTypeset(tab) && (mode == typesetPreview || mode != typesetSource && p.agent.trial.show && p.agent.trial.compare)
+	return s.canPreviewTypeset(tab) && s.scholarPreviewMode(c, p, tab) == typesetPreview
 }
 
 func (s *Shell) revealScholarSource(tab *Tab) {
@@ -69,9 +81,7 @@ func (s *Shell) revealScholarSource(tab *Tab) {
 			}
 		}
 		p.changes.compare = false
-		if p.agent.trial.show {
-			p.agent.trial.compare = false
-		}
+		p.agent.trial.close()
 	}
 	if tab.typesetMode == typesetPreview {
 		tab.typesetMode = typesetSplit
@@ -86,7 +96,6 @@ func (s *Shell) rebuildScholarPreview(p *scholarState, tab *Tab) {
 		mode = typesetSplit
 	}
 	s.setTypesetView(p, tab, mode)
-	p.agent.trial = scholarTrialView{}
 	tab.typesetCompactPDF, tab.typesetPaused = true, false
 	s.closeCompile()
 }
@@ -108,7 +117,7 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 		compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
 		if p.references.catalog || p.references.focused != nil || p.references.right != nil && !compact {
 			label = s.tr("scholarManuscriptLayout")
-		} else if compact && mode == typesetSplit && p.drawer == scholarClosed {
+		} else if compact && mode == typesetSplit && p.drawer == scholarClosed && !p.agent.trial.show {
 			label = s.tr(compactLabels[shown])
 			if shown == typesetPreview {
 				icon = "book-open-text"
@@ -128,6 +137,8 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 					if m.Item(s.tr(compactLabels[side])).Radio(side == shown && p.drawer == scholarClosed).Chosen() {
 						tab.typesetCompactPDF = side == typesetPreview
 						p.changes.compare = false
+						p.agent.trial.close()
+						p.agent.reviewHidden = true
 						s.selectScholarPDF(p, nil)
 						s.focusEditor = side == typesetSource
 					}

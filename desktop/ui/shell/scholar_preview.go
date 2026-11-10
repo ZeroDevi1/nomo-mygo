@@ -169,7 +169,8 @@ func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
 	}
 	covered := workspace != nil && (workspace.drawer != scholarClosed || workspace.references.catalog ||
 		workspace.references.focused != nil || workspace.accountOpen || workspace.winSettings != nil ||
-		workspace.winCompactProject || tab != nil && tab.typesetMode == typesetSplit && !tab.typesetCompactPDF)
+		workspace.winCompactProject || tab != nil && (tab.typesetMode == typesetSplit && !tab.typesetCompactPDF ||
+		s.scholarReviewPatch(workspace, tab) != nil))
 	if !covered ||
 		workspace.agent.trial.show ||
 		p.tab != tab || tab.typesetMode == typesetSource || tab.typesetPaused || p.reuseChecks == nil ||

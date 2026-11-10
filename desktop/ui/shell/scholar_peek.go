@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Shell) scholarChangePeek(c *ui.Context, p *scholarState, t *Tab, el ui.Element) {
-	if p.agent.trial.show && p.agent.trial.compare {
+	if p.agent.trial.show {
 		return
 	}
 	d := &p.changes

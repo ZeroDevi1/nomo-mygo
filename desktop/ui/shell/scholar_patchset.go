@@ -147,6 +147,7 @@ func (s *Shell) sendScholarPatchSet(p *scholarState) {
 		})
 		set := &scholarPatchSet{summary: proposal.Summary}
 		if err == nil {
+			extra := scholarReviewMaxFragments - len(proposal.Edits)
 			grouped := make(map[string][]scholar.PatchEdit)
 			for _, e := range proposal.Edits {
 				if _, ok := bases[e.Path]; !ok {
@@ -165,13 +166,19 @@ func (s *Shell) sendScholarPatchSet(p *scholarState) {
 					err = e
 					break
 				}
-				for _, span := range spans {
+				for i, span := range spans {
 					target := base
 					target.start, target.end = span.Start, span.End
 					target.before = strings.Clone(base.before[span.Start:span.End])
 					target.digest = sha256.Sum256([]byte(target.before))
 					target.line = strings.Count(base.before[:span.Start], "\n")
-					set.hunks = append(set.hunks, &scholarPatch{target: target, next: span.After, diff: scholarDiffView(target.before, span.After)})
+					nextStart := -1
+					if i+1 < len(spans) {
+						nextStart = spans[i+1].Start
+					}
+					parts := splitScholarReview(target, span.After, extra+1, nextStart)
+					extra -= len(parts) - 1
+					set.hunks = append(set.hunks, parts...)
 				}
 			}
 			sort.Slice(set.hunks, func(i, j int) bool {
@@ -193,10 +200,10 @@ func (s *Shell) sendScholarPatchSet(p *scholarState) {
 					return
 				}
 			}
-			a.reviewHidden = false
 			a.batch = set
 			// Retain a bounded, visible conversation summary across isolated turns.
 			a.conversation = trimScholarConversation(a.conversation + "\nUser: " + instruction + "\nProposal: " + proposal.Summary)
+			s.presentScholarReview(p)
 		}, err
 	})
 }
@@ -217,43 +224,32 @@ func (s *Shell) scholarPatchSetView(c *ui.Context, p *scholarState, set *scholar
 		return
 	}
 	set.selected = min(set.selected, len(set.hunks)-1)
-	ui.Text(c, set.summary).Wrap().FontSize(12)
+	if set.summary != "" {
+		ui.Text(c, set.summary).Wrap().FontSize(12)
+	}
 	ui.Row(c).Gap(4).Children(func() {
-		if ui.Button(c, "↑").Clicked() {
+		if ui.Button(c, "↑").Disabled(p.busy).Clicked() {
 			s.navigateScholarHunk(p, -1)
 		}
 		ui.Text(c, fmt.Sprintf("%d / %d", set.selected+1, len(set.hunks))).FontSize(11)
-		if ui.Button(c, "↓").Clicked() {
+		if ui.Button(c, "↓").Disabled(p.busy).Clicked() {
 			s.navigateScholarHunk(p, 1)
 		}
-		if ui.Button(c, s.tr("scholarJumpSource")).Clicked() {
-			s.jumpScholarPatch(set.hunks[set.selected])
-		}
 	})
-	patch := set.hunks[set.selected]
-	ui.Text(c, "┆ "+s.tr("scholarPendingProposal")+" · "+patch.target.path).Wrap().TextColor(scholarInk(c, "agent")).FontSize(11)
-	scholarDiffElement(c, patch.diff).Height(180).FillWidth()
+	patch := p.agent.pendingPatch()
+	stale := !s.scholarTargetCurrent(patch.target)
+	ui.Text(c, s.scholarReviewLabel(patch)).Wrap().TextColor(scholarInk(c, "agent")).FontSize(11)
+	if stale {
+		ui.Text(c, s.tr("scholarBaselineChanged")).FontSize(11).TextColor(scholarInk(c, "warning"))
+		if ui.Button(c, s.tr("scholarAgentReject")).Disabled(p.busy).Clicked() {
+			s.rejectScholarHunk(p)
+			return
+		}
+	} else if ui.Button(c, s.tr("scholarShowReview")).Clicked() {
+		s.openScholarReview(p)
+	}
 	ui.Row(c).Gap(4).Children(func() {
-		accept := func() {
-			if ui.Button(c, s.tr("scholarAcceptHunk")).Disabled(p.busy).Clicked() {
-				s.acceptScholarHunks(p, []*scholarPatch{patch})
-			}
-		}
-		reject := func() {
-			if ui.Button(c, s.tr("scholarAgentReject")).Disabled(p.busy).Clicked() {
-				s.rejectScholarHunk(p)
-			}
-		}
-		if s.pf.mac {
-			reject()
-			accept()
-		} else {
-			accept()
-			reject()
-		}
-	})
-	ui.Row(c).Gap(4).Children(func() {
-		if ui.Button(c, s.tr("scholarAcceptFile")).Disabled(p.busy).Clicked() {
+		if ui.Button(c, s.tr("scholarAcceptFile")).Disabled(p.busy || stale).Clicked() {
 			var chosen []*scholarPatch
 			for _, h := range set.hunks {
 				if h.target.path == patch.target.path {
@@ -269,11 +265,14 @@ func (s *Shell) scholarPatchSetView(c *ui.Context, p *scholarState, set *scholar
 	if ui.Button(c, s.tr("scholarRejectAll")).Disabled(p.busy).Clicked() {
 		p.agent.batch = nil
 		if p.agent.trial.pending {
-			p.agent.trial = scholarTrialView{}
+			p.agent.trial.close()
 		}
 	}
-	if ui.Button(c, s.tr("scholarAgentTrial")).Disabled(p.busy).Clicked() {
+	if ui.Button(c, s.tr("scholarPDFDiffAll")).Disabled(p.busy).Clicked() {
 		s.trialScholarPatchSet(p, set)
+	}
+	if p.agent.trialPreparing && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() {
+		p.cancelCurrent()
 	}
 }
 
@@ -283,26 +282,34 @@ func (s *Shell) rejectScholarHunk(p *scholarState) {
 		return
 	}
 	i := min(set.selected, len(set.hunks)-1)
-	set.hunks = append(set.hunks[:i], set.hunks[i+1:]...)
+	resume, all := p.agent.trial.show && p.agent.trial.pending, p.agent.trial.allPending
+	advance := resume || !p.agent.reviewHidden && s.activeTab() != nil && s.activeTab().ID == set.hunks[i].target.tabID
+	set.hunks = slices.Delete(set.hunks, i, i+1)
 	if p.agent.trial.pending {
-		p.agent.trial = scholarTrialView{}
+		p.agent.trial.close()
 	}
 	if len(set.hunks) == 0 {
 		p.agent.batch = nil
 	} else {
 		set.selected = min(i, len(set.hunks)-1)
+		if advance {
+			s.openScholarReview(p)
+			if resume {
+				s.resumeScholarTrial(p, all)
+			}
+		}
 	}
 }
-func (s *Shell) jumpScholarPatch(patch *scholarPatch) {
-	if t := s.tabWithID(patch.target.tabID); t != nil {
-		s.activate(s.findTabIndex(t.ID))
-		s.jumpScholarOutline(t, patch.target.start)
-	}
-}
+
 func (s *Shell) navigateScholarHunk(p *scholarState, delta int) {
-	if set := p.agent.batch; set != nil && len(set.hunks) > 0 {
-		set.selected = (set.selected + len(set.hunks) + delta) % len(set.hunks)
-		s.jumpScholarPatch(set.hunks[set.selected])
+	if p.agent.pendingPatch() != nil {
+		if p.busy {
+			return
+		}
+		if set := p.agent.batch; set != nil {
+			set.selected = (set.selected + len(set.hunks) + delta) % len(set.hunks)
+		}
+		s.openScholarReview(p)
 		return
 	}
 	s.navigateScholarChange(p, delta)
@@ -371,9 +378,13 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 				}
 			}
 			p.agent.applied = applied
-			p.agent.trial = scholarTrialView{}
+			resume, all := p.agent.trial.show && p.agent.trial.pending, p.agent.trial.allPending
+			p.agent.trial.close()
+			selected := p.agent.pendingPatch()
+			advance := resume || !p.agent.reviewHidden && slices.Contains(chosen, selected) && s.activeTab() != nil && s.activeTab().ID == selected.target.tabID
 			remaining := set.hunks[:0]
-			for _, h := range set.hunks {
+			nextIndex := 0
+			for i, h := range set.hunks {
 				accepted := false
 				for _, c := range chosen {
 					if c == h {
@@ -383,6 +394,9 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 				}
 				if accepted {
 					continue
+				}
+				if i < set.selected {
+					nextIndex++
 				}
 				if f := files[h.target.tabID]; f != nil {
 					shift := 0
@@ -399,13 +413,24 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 				}
 				remaining = append(remaining, h)
 			}
+			clear(set.hunks[len(remaining):])
 			set.hunks = remaining
 			if len(remaining) == 0 {
 				p.agent.resetSession()
 				p.agent.batch = nil
 				p.agent.files = nil
+				if !p.agent.multi {
+					p.agent.target = scholarTarget{}
+					p.agent.parts[0], p.agent.include[0] = "", false
+				}
 			} else {
-				set.selected = min(set.selected, len(remaining)-1)
+				set.selected = min(nextIndex, len(remaining)-1)
+				if advance {
+					s.openScholarReview(p)
+					if resume {
+						s.resumeScholarTrial(p, all)
+					}
+				}
 			}
 			s.startScholarChangeWorker(p)
 			s.focusEditor = true
@@ -444,69 +469,4 @@ func (s *Shell) rollbackScholarFiles(p *scholarState) {
 	s.startScholarChangeWorker(p)
 	p.agent.applied = nil
 	p.agent.batch = nil
-}
-
-func (s *Shell) scholarInlineReview(c *ui.Context, p *scholarState, t *Tab, el ui.Element) {
-	var patch *scholarPatch
-	if set := p.agent.batch; set != nil && len(set.hunks) > 0 {
-		patch = set.hunks[min(set.selected, len(set.hunks)-1)]
-	} else {
-		patch = p.agent.patch
-	}
-	if patch == nil || patch.target.tabID != t.ID {
-		return
-	}
-	if p.agent.reviewHidden {
-		return
-	}
-	// The locked editor API exposes visible lines, not layout insertion zones.
-	// A source-anchored review overlay preserves editing and scrolling state.
-	first, last := t.Source().VisibleLines()
-	if patch.target.line < first || patch.target.line > last {
-		return
-	}
-	r := el.Bounds()
-	if r.W < 280 {
-		return
-	}
-	_, h := c.Size()
-	y := min(r.Y+float32(patch.target.line-first+1)*21, h-230)
-	ui.Overlay(c, func() {
-		box := ui.Column(c).Absolute().Left(r.X+24).Top(max(r.Y, y)).Width(min(520, r.W-32)).Padding(8).Gap(4).Background(c.Theme().Background).Border(1, scholarInk(c, "agent"))
-		box.Children(func() {
-			ui.Text(c, "┆ "+s.tr("scholarPendingProposal")).TextColor(scholarInk(c, "agent")).FontSize(11)
-			scholarDiffElement(c, patch.diff).Height(140).FillWidth()
-			ui.Row(c).Gap(4).Children(func() {
-				accept := func() {
-					if ui.Button(c, s.tr("scholarAgentAccept")).Disabled(p.busy).Clicked() {
-						if p.agent.batch != nil {
-							s.acceptScholarHunks(p, []*scholarPatch{patch})
-						} else {
-							s.acceptScholarPatch(p, patch)
-						}
-					}
-				}
-				reject := func() {
-					if ui.Button(c, s.tr("scholarAgentReject")).Disabled(p.busy).Clicked() {
-						if p.agent.batch != nil {
-							s.rejectScholarHunk(p)
-						} else {
-							s.rejectScholarSingle(p)
-						}
-					}
-				}
-				if s.pf.mac {
-					reject()
-					accept()
-				} else {
-					accept()
-					reject()
-				}
-				if ui.Button(c, s.tr("scholarHideReview")).Clicked() {
-					p.agent.reviewHidden = true
-					s.showScholarInspector(p, scholarCodex)
-				}
-			})
-		})
-	})
 }

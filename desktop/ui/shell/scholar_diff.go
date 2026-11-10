@@ -11,6 +11,9 @@ import (
 )
 
 type scholarToken struct{ start, end int }
+
+const scholarDiffLineHeight = 1.5 // MyGo measures line height as a font-size multiplier.
+
 type scholarDiff struct {
 	*editor.DiffState
 	long                 bool
@@ -19,7 +22,7 @@ type scholarDiff struct {
 }
 
 func scholarDiffView(old, next string) *scholarDiff {
-	state := &editor.DiffState{Old: editor.NewBuffer(old), New: editor.NewBuffer(next), Layout: editor.DiffUnified, Inline: editor.DiffInlineWord, Wrap: true, LineHeight: 19}
+	state := &editor.DiffState{Old: editor.NewBuffer(old), New: editor.NewBuffer(next), Layout: editor.DiffUnified, Inline: editor.DiffInlineWord, Wrap: true, LineHeight: scholarDiffLineHeight}
 	d := &scholarDiff{DiffState: state}
 	for _, text := range []string{old, next} {
 		for line := range strings.SplitSeq(text, "\n") {
@@ -32,8 +35,8 @@ func scholarDiffView(old, next string) *scholarDiff {
 	if !d.long {
 		return d
 	}
-	d.oldView = &editor.State{Buffer: state.Old, ReadOnly: true, SoftWrap: true, LineHeight: 19}
-	d.newView = &editor.State{Buffer: state.New, ReadOnly: true, SoftWrap: true, LineHeight: 19}
+	d.oldView = &editor.State{Buffer: state.Old, ReadOnly: true, SoftWrap: true, LineHeight: scholarDiffLineHeight}
+	d.newView = &editor.State{Buffer: state.New, ReadOnly: true, SoftWrap: true, LineHeight: scholarDiffLineHeight}
 	a, b := scholarTokens(old), scholarTokens(next)
 	tokenLines := func(text string, tokens []scholarToken) string {
 		var out strings.Builder

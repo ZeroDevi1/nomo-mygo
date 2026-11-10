@@ -126,22 +126,20 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	if workspace != nil && (!wantPreview || trial) {
 		workspace.budgetOpen = false
 	}
-	if trial && workspace.agent.trial.compare {
+	if trial {
 		s.closeCompile()
-		el = ui.Column(c).Fill().Focusable().Label(s.tr("scholarComparePDFs"))
-		el.Children(func() { s.scholarTrialPaper(c, workspace) })
-		return
+		return s.scholarTrialWorkspace(c, workspace, t)
 	}
 	if st.OnCompletion == nil && t.Kind() == kindMarkdown {
 		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(t, req) }
 	}
 	var project scholar.Project
-	if wantPreview && !trial {
+	if wantPreview {
 		project = s.typesetProject(t)
 	}
 	if p := s.compile; p != nil {
 		switch {
-		case p.tab != t || t.typesetPaused || trial:
+		case p.tab != t || t.typesetPaused:
 			s.closeCompile()
 		case !wantPreview:
 			s.hideTypesetPreview(workspace, t)
@@ -151,7 +149,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 			s.restoreTypesetPreview(p)
 		}
 	}
-	if wantPreview && !t.typesetPaused && !trial && s.compile == nil {
+	if wantPreview && !t.typesetPaused && s.compile == nil {
 		s.openTypeset(t, true)
 	}
 	if p := s.compile; p != nil && p.parkedPage == 0 {
@@ -180,9 +178,6 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 			}
 			paper = ui.Column(c).Fill().MinWidth(0).Clip().Focusable().Label("PDF").Background(canvas)
 			paper.Children(func() {
-				if trial && s.scholarTrialPaper(c, workspace) {
-					return
-				}
 				if workspace != nil {
 					s.scholarPDFHeader(c, workspace, t, p)
 				}
@@ -216,17 +211,11 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 		if mode == typesetPreview {
 			preview()
 			el = paper
-		} else if !trial {
+		} else {
 			if t.typesetSplitPercent == 0 {
 				t.typesetSplitPercent = 50
 			}
 			ui.SplitPercent(c, &t.typesetSplitPercent, source, preview).Fill()
-		} else {
-			v := &workspace.agent.trial
-			if v.split == 0 {
-				v.split = 50
-			}
-			ui.SplitPercent(c, &v.split, source, preview).Fill()
 		}
 	} else {
 		source()

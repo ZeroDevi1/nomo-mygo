@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
@@ -29,13 +28,9 @@ type scholarTarget struct {
 }
 
 type scholarPatch struct {
-	target    scholarTarget
-	next      string
-	diff      *scholarDiff
-	trial     *ui.Bitmap
-	pages     int
-	trialAt   time.Duration
-	trialPage int
+	target scholarTarget
+	next   string
+	diff   *scholarDiff
 }
 
 type scholarAgentState struct {
@@ -53,11 +48,13 @@ type scholarAgentState struct {
 	patch               *scholarPatch
 	batch               *scholarPatchSet
 	multi, reviewHidden bool
+	reviewRelayout      bool
 	files               []scholarContextFile
 	conversation        string
 	session             *scholar.CodexConversation
 	applied             []scholarAppliedFile
 	trial               scholarTrialView
+	trialPreparing      bool
 }
 
 func (s *Shell) openScholarAgent(p *scholarState) {
@@ -70,7 +67,11 @@ func (s *Shell) openScholarAgent(p *scholarState) {
 
 func (s *Shell) openScholarInlinePrompt(p *scholarState) {
 	a := &p.agent
-	if a.patch != nil || a.running {
+	if a.pendingPatch() != nil {
+		s.openScholarReview(p)
+		return
+	}
+	if a.running {
 		s.showScholarInspector(p, scholarCodex)
 		return
 	}
@@ -170,6 +171,10 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
 		s.scholarPatchSetView(c, p, a.batch)
 		return
 	}
+	if a.patch != nil {
+		s.scholarPatchView(c, p, a.patch)
+		return
+	}
 	if len(a.applied) > 0 && ui.Button(c, s.tr("scholarRollbackFiles")).Disabled(p.busy).Clicked() {
 		s.rollbackScholarFiles(p)
 	}
@@ -182,10 +187,6 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
 				a.session = nil
 			}
 		}
-	}
-	if a.patch != nil {
-		s.scholarPatchView(c, p, a.patch)
-		return
 	}
 	if !a.probed {
 		ui.Text(c, s.tr("scholarCodexSetup")).FontSize(11).Wrap()
@@ -393,6 +394,11 @@ func (s *Shell) sendScholarAgent(p *scholarState) {
 				})
 			}
 		}, false)
+		next = strings.ReplaceAll(strings.ReplaceAll(next, "\r\n", "\n"), "\r", "\n")
+		var parts []*scholarPatch
+		if err == nil && next != target.before && !strings.ContainsRune(next, 0) {
+			parts = splitScholarReview(target, next, scholarReviewMaxFragments, -1)
+		}
 		return func() {
 			a.running, a.stream = false, ""
 			if err != nil {
@@ -402,7 +408,6 @@ func (s *Shell) sendScholarAgent(p *scholarState) {
 				p.err = s.tr("scholarProposalStale")
 				return
 			}
-			next = strings.ReplaceAll(strings.ReplaceAll(next, "\r\n", "\n"), "\r", "\n")
 			if strings.ContainsRune(next, 0) {
 				p.err = s.tr("scholarNullProposal")
 				return
@@ -411,49 +416,37 @@ func (s *Shell) sendScholarAgent(p *scholarState) {
 				p.err = s.tr("scholarUnchangedProposal")
 				return
 			}
-			a.reviewHidden = false
 			a.conversation = trimScholarConversation(a.conversation + "\nUser: " + a.instruction + "\nProposal: selection replacement")
-			a.patch = &scholarPatch{target: target, next: next, diff: scholarDiffView(target.before, next)}
+			if len(parts) == 1 {
+				a.patch = parts[0]
+			} else {
+				a.batch = &scholarPatchSet{hunks: parts}
+			}
+			s.presentScholarReview(p)
 		}, err
 	})
 }
 
 func (s *Shell) scholarPatchView(c *ui.Context, p *scholarState, patch *scholarPatch) {
 	stale := !s.scholarTargetCurrent(patch.target)
-	ui.Text(c, fmt.Sprintf(s.tr("scholarPendingLocation"), filepath.Base(patch.target.path), patch.target.line+1)).
+	ui.Text(c, s.scholarReviewLabel(patch)).
 		FontSize(12).TextColor(scholarInk(c, "agent"))
 	if stale {
 		ui.Text(c, s.tr("scholarBaselineChanged")).FontSize(11).TextColor(scholarInk(c, "warning"))
+		if ui.Button(c, s.tr("scholarAgentReject")).Disabled(p.busy).Clicked() {
+			s.rejectScholarSingle(p)
+		}
+		return
 	}
-	scholarDiffElement(c, patch.diff).FillWidth().Height(220)
-	if patch.trial != nil {
-		ui.Text(c, fmt.Sprintf("试排 · PDF 共 %d 页 · %d ms · 第 %d 页", patch.pages, patch.trialAt.Milliseconds(), patch.trialPage)).FontSize(11)
-		w, h := patch.trial.Size()
-		ui.Image(c, patch.trial).FillWidth().AspectRatio(float32(w) / float32(h))
+	if ui.Button(c, s.tr("scholarShowReview")).Clicked() {
+		s.openScholarReview(p)
 	}
 	ui.Row(c).Gap(4).Children(func() {
-		if ui.Button(c, s.tr("scholarAgentTrial")).Disabled(p.busy || stale).Clicked() {
+		if ui.Button(c, s.tr("scholarPDFDiff")).Disabled(p.busy).Clicked() {
 			s.trialScholarPatch(p, patch)
 		}
 		if p.busy && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() {
 			p.cancelCurrent()
-		}
-		accept := func() {
-			if ui.Button(c, s.tr("scholarAgentAccept")).Disabled(stale || p.busy).Clicked() {
-				s.acceptScholarPatch(p, patch)
-			}
-		}
-		reject := func() {
-			if ui.Button(c, s.tr("scholarAgentReject")).Disabled(p.busy).Clicked() {
-				s.rejectScholarSingle(p)
-			}
-		}
-		if s.pf.mac {
-			reject()
-			accept()
-		} else {
-			accept()
-			reject()
 		}
 	})
 }
@@ -486,11 +479,8 @@ func (s *Shell) acceptScholarPatch(p *scholarState, patch *scholarPatch) {
 			p.agent.conversation = trimScholarConversation(p.agent.conversation + "\nReview: accepted")
 			p.agent.resetSession()
 			p.agent.patch, p.agent.target = nil, scholarTarget{}
-			p.agent.trial = scholarTrialView{}
+			p.agent.trial.close()
 			p.agent.parts = [4]string{}
-			if tab.typesetMode == typesetPreview {
-				tab.typesetMode = typesetSplit
-			}
 			s.focusEditor = true
 		}, nil
 	})
@@ -678,7 +668,7 @@ func (s *Shell) rejectScholarSingle(p *scholarState) {
 	}
 	p.agent.patch = nil
 	if p.agent.trial.pending {
-		p.agent.trial = scholarTrialView{}
+		p.agent.trial.close()
 	}
 	p.agent.conversation = trimScholarConversation(p.agent.conversation + "\nReview: rejected")
 }

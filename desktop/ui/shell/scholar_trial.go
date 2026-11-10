@@ -2,9 +2,9 @@ package shell
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,24 +16,52 @@ import (
 
 type scholarTrialView struct {
 	pending                       bool
+	allPending                    bool
 	ownerPatch                    *scholarPatch
 	ownerBatch                    *scholarPatchSet
-	compare                       bool
 	identities                    map[int]*Tab
 	paths                         map[int]string
-	paragraph                     *ui.Bitmap
-	anchor                        typeset.PageAnchor
-	before, after                 *ui.Bitmap
+	anchors                       map[*scholarPatch]typeset.PageAnchor
+	pdfs                          *typeset.TrialPDFPair
+	sources                       []scholarTrialSource
+	source                        scholarTrialSourceState
+	pageList                      ui.ListState
+	cached                        map[int]scholarTrialPage
+	cacheBytes                    int
+	firstVisible, failedPage      int
+	pageAspect                    float32
 	pagesBefore, pagesAfter, page int
-	pageBefore                    int
+	tabID                         int
+	pageInput, pageError          string
+	cancelPage                    context.CancelFunc
+	markChanges, searched         bool
+	searching                     bool
 	split                         float32
-	elapsed                       time.Duration
 	show                          bool
 	versions                      map[int]uint64
 }
 
+func (v *scholarTrialView) close() {
+	v.source.close()
+	if v.cancelPage != nil {
+		v.cancelPage()
+	}
+	if v.pdfs != nil {
+		v.pdfs.Close()
+	}
+	*v = scholarTrialView{}
+}
+
 func (s *Shell) trialScholarPatchSet(p *scholarState, set *scholarPatchSet) {
 	s.trialScholarHunks(p, append([]*scholarPatch(nil), set.hunks...))
+}
+
+func (s *Shell) resumeScholarTrial(p *scholarState, all bool) {
+	if set := p.agent.batch; set != nil && all {
+		s.trialScholarPatchSet(p, set)
+	} else if patch := p.agent.pendingPatch(); patch != nil {
+		s.trialScholarPatch(p, patch)
+	}
 }
 
 func (s *Shell) trialScholarEdit(p *scholarState, revision *scholarChangeBatch) {
@@ -99,9 +127,15 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 	}
 	project := p.project
 	ownerPatch, ownerBatch := p.agent.patch, p.agent.batch
-	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
+	allPending := revision == nil && ownerBatch != nil && len(hunks) == len(ownerBatch.hunks)
+	reviewTab := s.activeTab()
+	selectedPatch := p.agent.pendingPatch()
+	p.agent.trial.close()
+	p.agent.trialPreparing = true
+	s.scholarOwnedJob(p, func(ctx context.Context, _ uint64) (func(), func(), error) {
 		ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 		defer cancel()
+		var sources []scholarTrialSource
 		inputs := func(after bool) map[string]io.Reader {
 			out := make(map[string]io.Reader)
 			for name, snap := range snapshots {
@@ -111,6 +145,7 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 						chosen := revision.before
 						if after {
 							chosen = revision.after
+							sources = append(sources, scholarTrialSource{path: name, before: revision.before, after: chosen})
 						}
 						out[name] = &scholarSnapshotReader{snap: chosen}
 						continue
@@ -121,10 +156,12 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 					continue
 				}
 				var edits []editor.Edit
+				var patches []*scholarPatch
 				for _, h := range hunks {
 					n, _ := scholar.Relative(project.Root, h.target.path)
 					if n == name {
 						edits = append(edits, editor.Edit{Start: h.target.start, End: h.target.end, Text: h.next})
+						patches = append(patches, h)
 					}
 				}
 				if len(edits) == 0 {
@@ -134,60 +171,81 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 				// The source budget is checked before making the temporary edited rope.
 				buf := editor.NewBuffer(snap.String())
 				buf.Edit(edits...)
-				out[name] = &scholarSnapshotReader{snap: buf.Snapshot()}
+				proposed := buf.Snapshot()
+				sources = append(sources, scholarTrialSource{path: name, before: snap, after: proposed, patches: patches})
+				out[name] = &scholarSnapshotReader{snap: proposed}
 			}
 			return out
 		}
-		started := time.Now()
 		before, err := typeset.OpenProjectTrial(ctx, project.Root, project.Main, inputs(false))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer before.Close()
 		nBefore, err := before.CompileProjectTrial(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		mainName, _ := scholar.Relative(project.Root, project.Main)
 		after, err := typeset.OpenProjectTrial(ctx, before.TrialRoot(), filepath.Join(before.TrialRoot(), mainName), inputs(true))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer after.Close()
 		nAfter, err := after.CompileProjectTrial(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		text := ""
-		if len(hunks) > 0 {
-			text = hunks[0].next
+		var anchor typeset.PageAnchor
+		anchors := make(map[*scholarPatch]typeset.PageAnchor, len(hunks))
+		if len(hunks) == 0 {
+			anchor = after.Anchor(ctx, strings.TrimSpace(revision.change.after))
 		} else {
-			text = revision.change.after
-		}
-		anchor := after.Anchor(ctx, strings.TrimSpace(text))
-		page := max(1, anchor.Page)
-		var paragraph *ui.Bitmap
-		if len(hunks) == 1 {
-			mainName, _ := scholar.Relative(project.Root, project.Main)
-			if main, ok := snapshots[mainName]; ok {
-				header := main.Slice(0, min(main.Len(), 8<<10))
-				if img := after.Paragraph(ctx, header, text); img != nil {
-					paragraph = ui.NewBitmap(img)
+			for _, h := range hunks {
+				a := after.Anchor(ctx, strings.TrimSpace(h.next))
+				if a.Page == 0 && strings.TrimSpace(h.next) == "" {
+					a = before.Anchor(ctx, strings.TrimSpace(h.target.before))
 				}
+				anchors[h] = a
 			}
+			initial := selectedPatch
+			if _, ok := anchors[initial]; !ok {
+				initial = hunks[0]
+			}
+			selectedPatch, anchor = initial, anchors[initial]
 		}
-		page = min(max(1, page), nAfter)
-		b, err := before.PageAtSize(ctx, min(page, nBefore), 1200)
+		page := min(max(1, anchor.Page), nAfter)
+		pdfs, err := typeset.KeepTrialPDFs(before, after)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		a, err := after.PageAtSize(ctx, page, 1200)
+		diff, err := pdfs.DiffPage(ctx, page)
 		if err != nil {
-			return nil, err
+			pdfs.Close()
+			return nil, nil, err
 		}
-		elapsed := time.Since(started)
+		result := newScholarTrialPage(diff)
+		sourceIndex := scholarTrialInitialSource(sources, selectedPatch)
+		var sourceView *editor.DiffState
+		var sourceHunks []editor.DiffHunk
+		var sourceTargets []int
+		if sourceIndex >= 0 {
+			sourceView, sourceHunks, sourceTargets = sources[sourceIndex].diff()
+		}
 		return func() {
+			installed := false
+			defer func() {
+				if !installed {
+					pdfs.Close()
+				}
+			}()
+			if s.activeTab() != reviewTab || p.references.catalog || p.references.focused != nil || p.accountOpen || p.winSettings != nil {
+				return
+			}
 			if revision == nil {
+				if len(hunks) == 1 && p.agent.pendingPatch() != hunks[0] {
+					return
+				}
 				if ownerPatch != nil && p.agent.patch != ownerPatch {
 					return
 				}
@@ -224,80 +282,33 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 					return
 				}
 			}
-			p.agent.trial = scholarTrialView{before: ui.NewBitmap(b), after: ui.NewBitmap(a), pagesBefore: nBefore, pagesAfter: nAfter, page: page, pageBefore: min(page, nBefore), elapsed: elapsed, show: true, versions: versions, identities: identities, paths: paths, pending: revision == nil, ownerPatch: ownerPatch, ownerBatch: ownerBatch, compare: revision != nil, paragraph: paragraph, anchor: anchor}
+			p.agent.reviewHidden = true
 			p.changes.compare = false
 			s.closeScholarInspector(p)
+			p.compactNav, p.winCompactProject = false, false
 			if !isManuscript(s.activeTab()) {
 				if t := s.scholarTab(project.Main); t != nil {
 					s.activate(s.findTabIndex(t.ID))
 				}
 			}
-			if t := s.activeTab(); t != nil {
-				t.typesetMode, t.typesetCompactPDF = typesetSplit, true
-			}
-		}, nil
-	})
-}
-
-func (s *Shell) scholarTrialPaper(c *ui.Context, p *scholarState) bool {
-	v := &p.agent.trial
-	if !v.show || v.after == nil {
-		return false
-	}
-	ui.Column(c).Fill().MinWidth(0).Background(c.Theme().SurfaceHover).Padding(8).Gap(6).Children(func() {
-		ui.Row(c).Gap(4).FillWidth().Children(func() {
-			ui.Text(c, fmt.Sprintf("%s · %d → %d · %d ms", s.tr("scholarTrialComparison"), v.pagesBefore, v.pagesAfter, v.elapsed.Milliseconds())).FontSize(11).Grow(1)
-			if ui.Button(c, s.tr("scholarComparePDFs")).Clicked() {
-				v.compare = !v.compare
-			}
-			if ui.Button(c, s.tr("scholarCloseTrial")).Clicked() {
-				*v = scholarTrialView{}
-			}
-		})
-		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-			ui.Row(c).FillWidth().Gap(8).Children(func() {
-				for i, img := range []*ui.Bitmap{v.before, v.after} {
-					if i == 0 && !v.compare {
-						continue
-					}
-					ck := c.Key(i)
-					ui.Column(ck).Grow(1).Width(0).MinWidth(0).Gap(4).Children(func() {
-						label := s.tr("scholarBeforeEdit")
-						if i == 1 {
-							label = s.tr("scholarAfterEdit")
-							if v.pending {
-								label = s.tr("scholarPendingProposal")
-							}
-						}
-						pageNo := v.page
-						if i == 0 {
-							pageNo = v.pageBefore
-						}
-						ui.Text(ck, label+fmt.Sprintf(" · p.%d", pageNo)).FontSize(11)
-						w, h := img.Size()
-						page := ui.Box(ck).FillWidth().AspectRatio(float32(w) / float32(h))
-						page.Children(func() {
-							ui.Image(ck, img).Fill()
-							if i == 1 && v.anchor.Page == v.page && v.anchor.PageW > 0 {
-								scale := page.Bounds().W / float32(v.anchor.PageW)
-								a := v.anchor
-								ui.Box(ck).Absolute().Left(float32(a.X)*scale).Top(float32(a.Y)*scale).Width(float32(a.W)*scale).Height(float32(a.H)*scale).Border(2, scholarInk(c, "diff"))
-							}
-						})
-					})
+			if t := s.activeTab(); isManuscript(t) {
+				p.agent.trial = scholarTrialView{
+					pdfs: pdfs, pagesBefore: nBefore, pagesAfter: nAfter,
+					page: page, pageInput: strconv.Itoa(page), tabID: t.ID,
+					versions: versions, identities: identities, paths: paths, anchors: anchors,
+					show: true, markChanges: true, pending: revision == nil, allPending: allPending,
+					ownerPatch: ownerPatch, ownerBatch: ownerBatch,
+					sources: sources, source: scholarTrialSourceState{index: sourceIndex, diff: sourceView, hunks: sourceHunks, targets: sourceTargets},
+					firstVisible: -1,
 				}
-			})
-		})
-		if v.paragraph != nil {
-			ui.Text(c, s.tr("liveParagraph")).FontSize(11)
-			w, h := v.paragraph.Size()
-			ui.Image(c, v.paragraph).FillWidth().AspectRatio(float32(w) / float32(h))
-		}
-		if v.anchor.Page == 0 {
-			ui.Text(c, s.tr("scholarPDFLocationUnknown")).FontSize(11).Wrap()
-		}
+				p.agent.trial.keepPage(page, result)
+				p.agent.trial.jumpPage(page)
+				p.agent.trial.source.reveal(selectedPatch)
+				installed = true
+				s.focusEditor = true
+			}
+		}, pdfs.Close, nil
 	})
-	return true
 }
 
 // Read bounded rope slices without materializing another full source string.

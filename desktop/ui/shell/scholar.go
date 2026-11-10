@@ -21,7 +21,6 @@ import (
 const (
 	scholarFiles = iota
 	scholarLiterature
-	scholarChanges
 	scholarOutline
 )
 
@@ -132,6 +131,7 @@ func isManuscript(tab *Tab) bool {
 func (s *Shell) closeScholar() {
 	if p := s.scholar; p != nil {
 		p.cancel()
+		p.agent.trial.close()
 		p.closeWindowsSettings()
 		p.references.visible(false, true)
 		s.persistScholarDrawer(p)
@@ -225,14 +225,17 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 		s.scholar = p
 	}
 	p.activeTabID = tab.ID
+	if v := &p.agent.trial; v.show && (v.tabID != tab.ID || p.references.catalog || p.references.focused != nil || p.accountOpen || p.winSettings != nil) {
+		v.close()
+	}
 	if p.agent.trial.pending && (p.agent.trial.ownerPatch != nil && p.agent.trial.ownerPatch != p.agent.patch || p.agent.trial.ownerBatch != nil && p.agent.trial.ownerBatch != p.agent.batch) {
-		p.agent.trial = scholarTrialView{}
+		p.agent.trial.close()
 	}
 	if p.agent.trial.show {
 		for id, v := range p.agent.trial.versions {
 			t := s.tabWithID(id)
 			if t == nil || t != p.agent.trial.identities[id] || !samePath(t.Path, p.agent.trial.paths[id]) || t.Source().Buffer.Version() != v {
-				p.agent.trial = scholarTrialView{}
+				p.agent.trial.close()
 				break
 			}
 		}
@@ -307,6 +310,7 @@ func (p *scholarState) cancelCurrent() {
 	}
 	p.job++
 	p.busy = false
+	p.agent.trialPreparing = false
 	p.cancelJob = nil
 }
 
@@ -348,6 +352,7 @@ func (s *Shell) scholarOwnedJob(p *scholarState, work func(context.Context, uint
 				return
 			}
 			p.busy, p.cancelJob = false, nil
+			p.agent.trialPreparing = false
 			if err != nil {
 				p.err = err.Error()
 			}
@@ -585,7 +590,7 @@ func (s *Shell) scholarForTab(tab *Tab) *scholarState {
 
 var scholarDestinations = [...]struct{ icon, label string }{
 	{"folder", "scholarFiles"}, {"book-open", "scholarLiterature"},
-	{"file-diff", "scholarChanges"}, {"list-tree", "scholarOutline"},
+	{"list-tree", "scholarOutline"},
 }
 
 func (s *Shell) showScholarNavigation(p *scholarState, destination int, width float32) {
@@ -722,8 +727,6 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 		if !p.references.catalog && ui.Button(c, s.tr("scholarOpenLibrary")).Clicked() {
 			s.showScholarCatalog(p)
 		}
-	case scholarChanges:
-		s.scholarChangesView(c, p)
 	case scholarOutline:
 		if tab := s.activeTab(); tab != nil {
 			s.scholarOutlineView(c, p, tab)
@@ -760,6 +763,7 @@ func (s *Shell) scholarMainMenu(m *ui.Menu, p *scholarState) {
 		tab.typesetPaused = false
 		p.libraryReady = false
 		p.agent.resetSession()
+		p.agent.trial.close()
 		p.agent = scholarAgentState{}
 		s.storeScholarProject(p, p.pageBudget(s.prefs))
 	}
@@ -952,7 +956,16 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 				tab.typesetPaused = false
 			}
 		}
-		// 窄窗口只保留排版状态、未保存提示和缩放。各类详情仍可从对应导航与检查器打开。
+		if patch := p.agent.pendingPatch(); patch != nil {
+			count := 1
+			if p.agent.batch != nil {
+				count = len(p.agent.batch.hunks)
+			}
+			if s.scholarStatusButton(c.Key("review"), "file-diff", "agent", fmt.Sprintf(s.tr("scholarPendingCount"), count), s.tr("scholarShowReview")).Clicked() {
+				s.openScholarReview(p)
+			}
+		}
+		// 窄窗口优先保留排版状态、待审入口、未保存提示和缩放。
 		if width >= 660 {
 			if p.changes.latest(tab.ID) != nil {
 				b := ui.ButtonBase(c).Padding(2, 4).Tooltip(s.tr("scholarViewRecentEdit"))
@@ -969,12 +982,6 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 			}
 			if p.citations.unknown > 0 {
 				part(fmt.Sprintf(s.tr("scholarUnknownCount"), p.citations.unknown), "warning")
-			}
-			if set := p.agent.batch; set != nil {
-				part(fmt.Sprintf(s.tr("scholarPendingCount"), len(set.hunks)), "agent")
-			}
-			if p.agent.patch != nil {
-				part(s.tr("scholarOnePending"), "agent")
 			}
 		}
 		ui.Spacer(c)
@@ -1093,25 +1100,6 @@ func (s *Shell) scholarShortcuts(root ui.Element) {
 	}
 	if root.Shortcut(ui.Alt, ui.KeyUp) {
 		s.navigateScholarHunk(p, -1)
-	}
-	if p.agent.batch != nil {
-		set := p.agent.batch
-		if len(set.hunks) > 0 && root.Shortcut(ui.Cmd, ui.KeyEnter) {
-			s.acceptScholarHunks(p, []*scholarPatch{set.hunks[min(set.selected, len(set.hunks)-1)]})
-		}
-		if root.Shortcut(ui.Cmd, ui.KeyBackspace) {
-			s.rejectScholarHunk(p)
-		}
-		return
-	}
-	if p.agent.patch == nil {
-		return
-	}
-	if root.Shortcut(ui.Cmd, ui.KeyEnter) {
-		s.acceptScholarPatch(p, p.agent.patch)
-	}
-	if root.Shortcut(ui.Cmd, ui.KeyBackspace) && !p.busy {
-		s.rejectScholarSingle(p)
 	}
 }
 

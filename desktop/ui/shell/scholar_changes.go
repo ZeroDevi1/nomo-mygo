@@ -3,7 +3,6 @@ package shell
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -312,51 +311,13 @@ func (s *Shell) recordScholarPatch(p *scholarState, patch *scholarPatch, before,
 	d.selected, d.compare = 0, false
 }
 
-func (s *Shell) scholarChangesView(c *ui.Context, p *scholarState) {
-	tab := s.activeTab()
-	d := &p.changes
-	ui.Column(c).FillWidth().Grow(1).MinHeight(0).Padding(8).Gap(6).Children(func() {
-		if set := p.agent.batch; set != nil {
-			ui.Text(c, "┆ "+s.tr("scholarPendingProposal")).Bold().TextColor(scholarInk(c, "agent"))
-			for i, h := range set.hunks {
-				if ui.Button(c.Key("pending-"+fmt.Sprint(i)), fmt.Sprintf("%s · L%d", filepath.Base(h.target.path), h.target.line+1)).FillWidth().Clicked() {
-					set.selected = i
-					p.agent.reviewHidden = false
-					s.jumpScholarPatch(h)
-					s.showScholarInspector(p, scholarCodex)
-				}
-			}
-		}
-		ui.Text(c, "│ "+s.tr("scholarAppliedChanges")).Bold().TextColor(scholarInk(c, "diff"))
-		if d.missed {
-			ui.Text(c, s.tr("scholarDroppedBatches")).Wrap().FontSize(11)
-		}
-		if d.running || len(d.waiting) > 0 || !d.due.IsZero() {
-			ui.Text(c, s.tr("scholarWaitingForEdits")).FontSize(11)
-		}
-		if ui.Button(c, s.tr("scholarViewRecentEdit")).Disabled(d.latest(tab.ID) == nil && d.due.IsZero() && !d.running && len(d.waiting) == 0).Clicked() {
-			s.openScholarChange(p, 0)
-		}
-		ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			for _, change := range d.records {
-				if change.tabID != tab.ID {
-					continue
-				}
-				origin := s.scholarChangeOrigin(change.origin)
-				if ui.Button(c.Key(change.id), fmt.Sprintf(s.tr("scholarLineLabel"), origin, change.line+1)).FillWidth().Clicked() {
-					s.openScholarChange(p, change.id)
-				}
-			}
-		})
-	})
-}
-
 func (s *Shell) openScholarChange(p *scholarState, id uint64) {
 	s.flushScholarChanges(p)
 	p.references.right = nil
 	s.selectScholarPDF(p, nil)
 	d := &p.changes
 	d.selected, d.compare = id, true
+	p.agent.reviewHidden = true
 	s.closeCompile()
 }
 
@@ -380,6 +341,15 @@ func (s *Shell) scholarCompare(c *ui.Context, p *scholarState, tab *Tab) bool {
 				d.compare = false
 				d.view, d.viewID = nil, 0
 			}
+			if change != nil {
+				s.scholarMenuButton(c.Key("edit-history"), "history", s.tr("scholarRecentEdit"), true).Menu(func(m *ui.Menu) {
+					for _, record := range d.records {
+						if record.tabID == tab.ID && m.Item(fmt.Sprintf(s.tr("scholarLineLabel"), s.scholarChangeOrigin(record.origin), record.line+1)).Radio(record == change).Chosen() {
+							d.selected, d.hunk = record.id, 0
+						}
+					}
+				})
+			}
 			ui.Checkbox(c, &d.lineDiff, s.tr("scholarLineDiff"))
 			if ui.Button(c, "↑").Clicked() {
 				s.navigateScholarChange(p, -1)
@@ -388,6 +358,9 @@ func (s *Shell) scholarCompare(c *ui.Context, p *scholarState, tab *Tab) bool {
 				s.navigateScholarChange(p, 1)
 			}
 		})
+		if d.missed {
+			ui.Text(c, s.tr("scholarDroppedBatches")).Wrap().FontSize(11)
+		}
 		if change == nil {
 			ui.Text(c, s.tr("scholarPreparingDiff")).FontSize(11)
 			return
@@ -454,18 +427,18 @@ func (s *Shell) scholarGutter(c *ui.Context, tab *Tab) {
 			for i, h := range set.hunks {
 				if h.target.tabID == tab.ID && h.target.line == line && h.target.version == st.Buffer.Version() {
 					set.selected = i
-					p.agent.reviewHidden = false
-					s.showScholarInspector(p, scholarCodex)
+					s.openScholarReview(p)
 					return
 				}
 			}
 		}
 		if patch := p.agent.patch; patch != nil && patch.target.tabID == tab.ID && patch.target.line == line &&
 			patch.target.version == st.Buffer.Version() {
-			s.showScholarInspector(p, scholarCodex)
+			s.openScholarReview(p)
 			return
 		}
 		if latest := p.changes.latest(tab.ID); latest != nil && slices.Contains(latest.lines, line) {
+			p.agent.reviewHidden = true
 			p.changes.peek = latest
 			p.changes.peekView = nil
 		}
