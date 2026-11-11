@@ -87,10 +87,9 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 		return
 	}
 	if form := l.catalogForm(); form != nil {
-		ui.Scroll(c.Key("zotero-form")).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Padding(8, 12).Gap(8).Children(func() {
-				s.scholarZoteroForm(c, p, form)
-			})
+		ui.Column(c.Key("zotero-form")).FillWidth().Grow(1).MinHeight(0).Background(s.ch.sidebar).Children(func() {
+			s.scholarReaderHeader(c.Key("title"), s.tr(form.label), "", nil, nil)
+			s.scholarZoteroForm(c.Key(form), p, form, "")
 		})
 		return
 	}
@@ -333,25 +332,16 @@ func scholarNoteContent(s *Shell, note scholar.ZoteroNote) (title, body string) 
 	return s.tr("scholarChildNote"), body
 }
 
-func (s *Shell) scholarNoteDetails(c *ui.Context, p *scholarState, note scholar.ZoteroNote, standalone bool) {
+func (s *Shell) scholarNoteDetails(c *ui.Context, p *scholarState, note scholar.ZoteroNote) {
 	l := &p.literature
-	framed := p.references.catalog && l.mode == 1
-	title, body := scholarNoteContent(s, note)
+	_, body := scholarNoteContent(s, note)
 	if l.readerJump == 4 {
 		ui.Box(c.Key("note-top")).Height(1).FillWidth().ScrollIntoView()
 		l.readerJump = 0
 	}
-	ui.Column(c.Key("note-body")).FillWidth().Padding(8, 4, 12, 4).Gap(8).Children(func() {
-		if !framed {
-			if !standalone && s.scholarReaderCommand(c.Key("parent"), "arrow-left", s.tr("scholarParentItem"), false).Clicked() {
-				l.selectedNote, l.readerActive, l.readerJump = "", 0, 1
-			}
-			ui.Text(c, title).FontSize(13).Bold().LineHeight(1.3).Wrap()
-		}
-		if body != "" {
-			ui.Text(c, body).FontSize(12).LineHeight(1.5).Wrap().Selectable()
-		}
-	})
+	if body != "" {
+		scholarReaderText(c.Key("note-body"), body).Padding(10, 0, 12, 0).Selectable()
+	}
 	s.scholarZoteroMetadata(c, p, note.Tags, note.Related)
 }
 

@@ -1,6 +1,7 @@
 package shell
 
 import (
+	_ "embed"
 	"net/url"
 	"strings"
 
@@ -11,6 +12,9 @@ import (
 )
 
 const scholarWebStateLimit = 128 << 10
+
+//go:embed scholar_web_dark.js
+var scholarWebDarkScript string
 
 // Only visible tabs own a WebView. The bounded, memory-only session snapshot
 // restores history/scroll position on backends that provide it.
@@ -108,7 +112,7 @@ func (s *Shell) loadScholarWeb(w *scholarWebTab) {
 	state := w.state
 	w.state = nil
 	v, err := s.win.NewWebView(mygo.WebViewOptions{Page: mygo.PageOptions{
-		Untrusted: true, Session: mygo.NewEphemeralSession(), SessionState: state,
+		Untrusted: true, Session: mygo.NewEphemeralSession(), SessionState: state, PreloadScript: scholarWebDarkScript,
 	}, BackgroundColor: "light-dark(#ffffff, #1e1e1e)"})
 	if err != nil {
 		w.err = s.tr("scholarWebUnavailable")
@@ -165,7 +169,8 @@ func (s *Shell) scholarWebPage(c *ui.Context, t *scholarReferenceTab) {
 	w := t.web
 	s.loadScholarWeb(w)
 	ui.Column(c).Grow(1).Fill().MinWidth(0).MinHeight(0).Clip().Children(func() {
-		ui.Row(c.Key("web-controls")).Height(sidebarHd).FillWidth().Padding(0, 6).Gap(3).AlignItems(ui.Center).Children(func() {
+		ui.Row(c.Key("web-controls")).FillWidth().Height(36).Shrink(0).Padding(0, scholarReaderInset).Gap(4).
+			AlignItems(ui.Center).Background(s.ch.content).Children(func() {
 			var page *mygo.Page
 			if w.view != nil {
 				page = w.view.Page()
@@ -184,18 +189,19 @@ func (s *Shell) scholarWebPage(c *ui.Context, t *scholarReferenceTab) {
 			if w.loading {
 				label = s.tr("scholarWebLoading") + " · " + label
 			}
-			ui.Text(c, label).FontSize(11).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.muted).Tooltip(w.url)
+			ui.Text(c, label).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.muted).Tooltip(w.url)
 			if s.scholarCompactIcon(c.Key("browser"), "external-link", s.tr("scholarOpenBrowser"), false).Clicked() {
 				c.Services().OpenURL(w.url)
 			}
 		})
-		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+		s.scholarReaderDivider(c)
 		if w.err != "" {
-			s.scholarReaderNotice(c.Key("web-error"), w.err, nil)
-			if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("refresh"), false).Clicked() {
-				w.stop(false)
-				w.err = ""
-			}
+			s.scholarReferenceError(c, w.err, func() {
+				if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("refresh"), false).Clicked() {
+					w.stop(false)
+					w.err = ""
+				}
+			})
 		} else if w.view != nil {
 			ui.WebView(c.Key("web"), w.view).Grow(1).FillWidth().MinHeight(0).MinWidth(0)
 		}

@@ -891,16 +891,13 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 			s.persistScholarDrawer(p)
 		}
 	}
-	if p.drawer == scholarReader && p.references.catalog && p.literature.mode == 1 {
-		s.scholarZoteroInspector(c, p, width, singlePane)
+	if p.drawer == scholarReader {
+		s.scholarReaderPane(c, p, width, singlePane)
 		return
 	}
 	ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.content).Children(func() {
 		ui.Row(c).Height(s.pf.scholarNavHeight()).FillWidth().Padding(0, 8).Gap(4).AlignItems(ui.Center).Children(func() {
 			label := [...]string{"", "scholarLiterature", "scholarWritingAssistant", "scholarDiagnostics"}[p.drawer]
-			if p.drawer == scholarReader {
-				label = "scholarReferenceDetails"
-			}
 			ui.Text(c, s.tr(label)).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
 			label = s.tr("scholarCloseDrawer")
 			if singlePane && p.drawer == scholarCodex {
@@ -918,8 +915,6 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 		ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
 			ui.Column(c).FillWidth().Padding(8).Gap(6).Children(func() {
 				switch p.drawer {
-				case scholarReader:
-					s.scholarReaderView(c, p)
 				case scholarCodex:
 					s.scholarAgentView(c, p)
 				case scholarDiagnostics:

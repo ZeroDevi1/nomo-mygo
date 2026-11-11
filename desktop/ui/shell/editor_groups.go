@@ -408,18 +408,34 @@ func (s *Shell) editorGroupView(c *ui.Context, p *scholarState, g *editorGroup, 
 					s.editorGroupTab(c.Key(item), p, g, item)
 				}
 			})
-			s.editorSplitButtons(c.Key("split-buttons"), g.selected)
-			s.scholarCompactIcon(c.Key("group-menu"), "ellipsis", s.tr("editorGroup"), false).Menu(func(m *ui.Menu) {
-				for _, item := range g.tabs {
-					_, title := s.workspaceItemLabel(item)
-					if m.Item(title).Radio(g.selected == item).Chosen() {
-						s.activateWorkspaceItem(g, item)
+			ui.Row(c.Key("group-controls")).FillHeight().Shrink(0).AlignItems(ui.Center).Children(func() {
+				pdf := g.selected.reference
+				if p == nil || (pdf != nil && pdf.web != nil) {
+					pdf = nil
+				}
+				// Reserve room for two tab labels and the existing group controls.
+				compact := width < 340
+				if pdf != nil && !compact {
+					s.scholarPDFTabControls(c, p, pdf)
+					ui.Box(c).Size(1, 14).Margin(0, 4).Background(s.ch.separator)
+				}
+				s.editorSplitButtons(c.Key("split-buttons"), g.selected)
+				s.scholarCompactIcon(c.Key("group-menu"), "ellipsis", s.tr("editorGroup"), false).Menu(func(m *ui.Menu) {
+					if pdf != nil && compact {
+						s.scholarPDFMenu(c, m, p, pdf)
+						m.Separator()
 					}
-				}
-				m.Separator()
-				if m.Item(s.tr("mergeEditorGroups")).Chosen() {
-					s.mergeEditorGroups()
-				}
+					for _, item := range g.tabs {
+						_, title := s.workspaceItemLabel(item)
+						if m.Item(title).Radio(g.selected == item).Chosen() {
+							s.activateWorkspaceItem(g, item)
+						}
+					}
+					m.Separator()
+					if m.Item(s.tr("mergeEditorGroups")).Chosen() {
+						s.mergeEditorGroups()
+					}
+				})
 			})
 		})
 		s.editorGroupDrop(bar, g)
@@ -498,8 +514,8 @@ func (s *Shell) editorGroupTab(c *ui.Context, p *scholarState, g *editorGroup, i
 	} else {
 		el.Drag(item)
 		el.ContextMenu(func(m *ui.Menu) {
-			if item.reference != nil {
-				s.scholarReferenceActions(m, p, item.reference)
+			if item.reference != nil && p != nil {
+				s.scholarReferenceActions(c, m, p, item.reference)
 			} else {
 				s.editorGroupMenu(m, item)
 			}

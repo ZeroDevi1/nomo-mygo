@@ -38,6 +38,8 @@ type scholarReferenceTab struct {
 	pageNavigation   scholarPageNavigation
 	pinned           bool
 	bitmap           *ui.Bitmap
+	pageDark         bool
+	pageAspect       float32
 	err              string
 	cancel           context.CancelFunc
 	generation       uint64
@@ -49,7 +51,7 @@ func (t *scholarReferenceTab) releasePage() {
 		t.cancel = nil
 	}
 	t.generation++
-	t.bitmap = nil
+	t.bitmap, t.pageAspect = nil, 0
 }
 
 func (r *scholarReferenceTabs) selectTab(t *scholarReferenceTab) {
@@ -157,7 +159,16 @@ func (t *scholarReferenceTab) setPage(page int) {
 	t.page = page
 }
 
-func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab) {
+func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab, dark bool) {
+	if t.pageDark != dark {
+		t.pageDark = dark
+		if t.bitmap != nil || t.cancel != nil {
+			// Keep the scroll extent while the same page is rasterized again.
+			aspect := t.pageAspect
+			t.releasePage()
+			t.pageAspect = aspect
+		}
+	}
 	if t.cancel != nil || t.bitmap != nil || t.err != "" {
 		return
 	}
@@ -188,7 +199,10 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab) {
 			page = min(page, pages)
 			if img, renderErr := typeset.ReadPDFPage(ctx, path, page, scholarReferenceEdge); renderErr != nil {
 				err = renderErr
-			} else {
+			} else if err = ctx.Err(); err == nil {
+				if dark {
+					img = darkPDFPage(img)
+				}
 				bitmap = ui.NewBitmap(img)
 			}
 		}
@@ -202,6 +216,8 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab) {
 				return
 			}
 			t.path, t.page, t.pages, t.bitmap = path, page, pages, bitmap
+			w, h := bitmap.Size()
+			t.pageAspect = float32(w) / float32(h)
 		})
 	}()
 }
@@ -248,7 +264,7 @@ func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState) {
 		}
 		if r.focused != nil && !r.catalog {
 			m.Separator()
-			s.scholarReferenceActions(m, p, r.focused)
+			s.scholarReferenceActions(c, m, p, r.focused)
 		}
 	})
 	ui.Row(c.Key("attachment-tabs")).FillHeight().MinWidth(0).Shrink(1).Clip().Gap(1).AlignItems(ui.Stretch).Children(func() {
@@ -264,7 +280,7 @@ func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState) {
 			b := s.scholarWorkspaceTab(ck, glyph, t.title, s.tr("closeTab"), !r.catalog && r.focused == t,
 				func() { s.selectScholarPDF(p, t) }, func() { s.closeScholarPDF(p, t) })
 			b.ContextMenu(func(m *ui.Menu) {
-				s.scholarReferenceActions(m, p, t)
+				s.scholarReferenceActions(c, m, p, t)
 			})
 		}
 	})
@@ -327,7 +343,11 @@ func (s *Shell) scholarTabButton(c *ui.Context, glyph, title string, selected bo
 	return b
 }
 
-func (s *Shell) scholarReferenceActions(m *ui.Menu, p *scholarState, t *scholarReferenceTab) {
+func (s *Shell) scholarReferenceActions(c *ui.Context, m *ui.Menu, p *scholarState, t *scholarReferenceTab) {
+	if t.web == nil {
+		s.scholarPDFMenu(c, m, p, t)
+		m.Separator()
+	}
 	if m.Item(s.tr("scholarPinPDF")).Checked(t.pinned).Chosen() {
 		t.pinned = !t.pinned
 	}
@@ -337,57 +357,83 @@ func (s *Shell) scholarReferenceActions(m *ui.Menu, p *scholarState, t *scholarR
 	}
 }
 
+func (s *Shell) scholarPDFTabControls(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
+	if t.key != "" && s.scholarCompactIcon(c.Key("pdf-annotations"), "highlighter", s.tr("scholarReadAnnotations"), false).
+		Disabled(p.busy).Clicked() {
+		s.openScholarAnnotations(p, t.entry, t.zotero, t.key, t.title)
+	}
+	if s.scholarCompactIcon(c.Key("pdf-external"), "external-link", s.tr("scholarOpenExternalPDF"), false).Disabled(!t.hasExternalPDF()).Clicked() {
+		t.openExternalPDF(c)
+	}
+}
+
+func (s *Shell) scholarPDFMenu(c *ui.Context, m *ui.Menu, p *scholarState, t *scholarReferenceTab) {
+	if t.key != "" && m.Item(s.tr("scholarReadAnnotations")).Disabled(p.busy).Chosen() {
+		s.openScholarAnnotations(p, t.entry, t.zotero, t.key, t.title)
+	}
+	if m.Item(s.tr("scholarOpenExternalPDF")).Disabled(!t.hasExternalPDF()).Chosen() {
+		t.openExternalPDF(c)
+	}
+}
+
+func (t *scholarReferenceTab) hasExternalPDF() bool {
+	return t.key != "" || t.path != ""
+}
+
+func (t *scholarReferenceTab) openExternalPDF(c *ui.Context) {
+	if t.key != "" {
+		c.Services().OpenURL(t.zotero.PDFLink(t.key, t.page))
+	} else if t.path != "" {
+		c.Services().OpenURL((&url.URL{Scheme: "file", Path: t.path}).String())
+	}
+}
+
+func (s *Shell) scholarReferenceError(c *ui.Context, message string, actions func()) {
+	s.scholarReaderNotice(c.Key("message"), message, nil)
+	ui.Column(c.Key("recovery")).FillWidth().Padding(0, scholarReaderInset).Gap(4).Children(actions)
+}
+
 func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
 	c = c.Key(t)
 	if t.web != nil {
 		s.scholarWebPage(c, t)
 		return
 	}
-	s.loadScholarPDFPage(p, t)
+	s.loadScholarPDFPage(p, t, c.Theme().Dark)
 	ui.Column(c).Grow(1).Fill().MinWidth(0).Clip().Children(func() {
-		ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 7).Gap(4).AlignItems(ui.Center).Background(s.ch.content).Children(func() {
-			ui.Text(c, t.title).FontSize(12).SingleLine().Grow(1).MinWidth(0).Tooltip(t.title)
-			if s.toolButton(c.Key("external"), "external-link", s.tr("scholarOpenExternalPDF"), false).Clicked() {
-				if t.key != "" {
-					c.Services().OpenURL(t.zotero.PDFLink(t.key, t.page))
-				} else {
-					c.Services().OpenURL((&url.URL{Scheme: "file", Path: t.path}).String())
-				}
-			}
-			if t.key != "" && ui.Button(c.Key("annotations"), s.tr("scholarReadAnnotations")).Disabled(p.busy).Clicked() {
-				s.openScholarAnnotations(p, t.entry, t.zotero, t.key, t.title)
-			}
-		})
-		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 		if t.err != "" {
-			s.scholarReaderNotice(c.Key("pdf-error"), t.err, nil)
-			if address := scholarEntryWebURL(t.entry); address != "" && s.scholarReaderCommand(c.Key("web-fallback"), "globe", s.tr("scholarOpenWeb"), false).Clicked() {
-				s.openScholarWeb(p, t.entry, address)
-			}
-			if t.key != "" {
-				ui.Text(c, s.tr("scholarPDFZoteroHelp")).FontSize(12).Wrap()
-				if s.scholarReaderCommand(c.Key("locate"), "external-link", s.tr("scholarShowInZotero"), false).Clicked() {
-					c.Services().OpenURL(t.zotero.ItemLink(t.key))
+			s.scholarReferenceError(c, t.err, func() {
+				if address := scholarEntryWebURL(t.entry); address != "" && s.scholarReaderCommand(c.Key("web-fallback"), "globe", s.tr("scholarOpenWeb"), false).Clicked() {
+					s.openScholarWeb(p, t.entry, address)
 				}
-			}
-			if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("scholarRetryPDF"), false).Clicked() {
-				t.releasePage()
-				t.err = ""
-				t.pages = 0
 				if t.key != "" {
-					t.path = ""
+					scholarReaderText(c, s.tr("scholarPDFZoteroHelp")).TextColor(s.ch.muted)
+					if s.scholarReaderCommand(c.Key("locate"), "external-link", s.tr("scholarShowInZotero"), false).Clicked() {
+						c.Services().OpenURL(t.zotero.ItemLink(t.key))
+					}
 				}
-			}
-		} else if t.bitmap != nil {
-			bitmap := t.bitmap
-			w, h := bitmap.Size()
-			ui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Background(s.ch.tabBar).Children(func() {
+				if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("scholarRetryPDF"), false).Clicked() {
+					t.releasePage()
+					t.err = ""
+					t.pages = 0
+					if t.key != "" {
+						t.path = ""
+					}
+				}
+			})
+		} else if t.pageAspect > 0 {
+			ui.Scroll(c.Key("pdf-page")).Grow(1).MinHeight(0).FillWidth().Background(s.ch.tabBar).Children(func() {
 				ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(10).Children(func() {
-					ui.Image(c, bitmap).WidthPercent(float32(s.documentWidth(s.activeTab()))).AspectRatio(float32(w) / float32(h)).Label(t.title)
+					width := float32(s.documentWidth(s.activeTab()))
+					if t.bitmap != nil {
+						ui.Image(c, t.bitmap).WidthPercent(width).AspectRatio(t.pageAspect).Label(t.title)
+					} else {
+						ui.Box(c).WidthPercent(width).AspectRatio(t.pageAspect)
+					}
 				})
 			})
 		} else {
-			ui.Text(c, s.tr("scholarLoadingPDF")).Padding(12)
+			scholarReaderText(c, s.tr("scholarLoadingPDF")).Padding(scholarReaderInset).TextColor(s.ch.muted)
 		}
 	})
 }

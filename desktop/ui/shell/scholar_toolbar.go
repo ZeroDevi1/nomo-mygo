@@ -94,52 +94,63 @@ func (s *Shell) rebuildScholarPreview(p *scholarState, tab *Tab) {
 	s.closeCompile()
 }
 
+func (s *Shell) scholarManuscriptLayout(c *ui.Context, p *scholarState, tab *Tab) {
+	total, _ := c.Size()
+	width := s.scholarWorkspaceWidthAt(total)
+	preview := s.canPreviewTypeset(tab)
+	mode := tab.typesetMode
+	if !preview {
+		mode = typesetSource
+	}
+	shown := s.scholarPreviewMode(c, p, tab)
+	compact := s.scholarSinglePane(total)
+	label := s.tr(scholarViewLabels[mode])
+	icon := [...]string{"code-xml", "book-open-text", "columns-2"}[mode]
+	compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
+	if p.references.catalog || p.references.focused != nil {
+		label = s.tr("scholarManuscriptLayout")
+	} else if compact && mode == typesetSplit && p.drawer == scholarClosed && !p.agent.trial.show {
+		label = s.tr(compactLabels[shown])
+		if shown == typesetPreview {
+			icon = "book-open-text"
+		} else {
+			icon = "code-xml"
+		}
+	}
+	s.scholarMenuButton(c.Key("layout"), icon, label, width >= 400).Menu(func(m *ui.Menu) {
+		for i, key := range scholarViewLabels {
+			if m.Item(s.tr(key)).Radio(i == mode).Disabled(!preview && i != typesetSource).Chosen() {
+				s.setTypesetView(p, tab, i)
+			}
+		}
+		if compact && mode == typesetSplit {
+			m.Separator()
+			for _, side := range []int{typesetSource, typesetPreview} {
+				if m.Item(s.tr(compactLabels[side])).Radio(side == shown && p.drawer == scholarClosed).Chosen() {
+					tab.typesetCompactPDF = side == typesetPreview
+					p.changes.compare = false
+					p.agent.trial.close()
+					p.agent.reviewHidden = true
+					s.selectScholarPDF(p, nil)
+					s.focusEditor = side == typesetSource
+				}
+			}
+		}
+	})
+}
+
 func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 	c = c.Key(tab.ID)
+	width, _ := c.Size()
+	if reading := p.references.focused; reading != nil && reading.web == nil && !s.editorGroupsVisible(p) &&
+		!p.references.catalog && !p.agent.trial.show && !(s.scholarInspectorVisible(p, width) && s.scholarInspectorPrimary(p, width)) {
+		s.scholarPDFTabControls(c, p, reading)
+	}
 	if isManuscript(tab) {
-		total, _ := c.Size()
-		width := s.scholarWorkspaceWidthAt(total)
-		preview := s.canPreviewTypeset(tab)
-		mode := tab.typesetMode
-		if !preview {
-			mode = typesetSource
+		if s.groups.root == nil {
+			s.scholarManuscriptLayout(c, p, tab)
 		}
-		shown := s.scholarPreviewMode(c, p, tab)
-		compact := s.scholarSinglePane(total)
-		label := s.tr(scholarViewLabels[mode])
-		icon := [...]string{"code-xml", "book-open-text", "columns-2"}[mode]
-		compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
-		if p.references.catalog || p.references.focused != nil {
-			label = s.tr("scholarManuscriptLayout")
-		} else if compact && mode == typesetSplit && p.drawer == scholarClosed && !p.agent.trial.show {
-			label = s.tr(compactLabels[shown])
-			if shown == typesetPreview {
-				icon = "book-open-text"
-			} else {
-				icon = "code-xml"
-			}
-		}
-		s.scholarMenuButton(c.Key("layout"), icon, label, width >= 400).Disabled(s.groups.root != nil).Menu(func(m *ui.Menu) {
-			for i, key := range scholarViewLabels {
-				if m.Item(s.tr(key)).Radio(i == mode).Disabled(!preview && i != typesetSource).Chosen() {
-					s.setTypesetView(p, tab, i)
-				}
-			}
-			if compact && mode == typesetSplit {
-				m.Separator()
-				for _, side := range []int{typesetSource, typesetPreview} {
-					if m.Item(s.tr(compactLabels[side])).Radio(side == shown && p.drawer == scholarClosed).Chosen() {
-						tab.typesetCompactPDF = side == typesetPreview
-						p.changes.compare = false
-						p.agent.trial.close()
-						p.agent.reviewHidden = true
-						s.selectScholarPDF(p, nil)
-						s.focusEditor = side == typesetSource
-					}
-				}
-			}
-		})
-		label = s.tr("scholarOutline")
+		label := s.tr("scholarOutline")
 		open := &p.navigation.outlineOpen
 		outline := s.toolButton(c.Key("outline"), "list-tree", label, *open).Label(label).FocusRing(true)
 		if outline.Clicked() {
@@ -153,7 +164,6 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 		})
 	}
 	label := s.tr("scholarToggleInspector")
-	width, _ := c.Size()
 	visible := (p.drawer == scholarReader || p.drawer == scholarDiagnostics) && s.scholarInspectorVisible(p, width)
 	var inspector ui.Element
 	if p.references.catalog && p.literature.mode == 1 {

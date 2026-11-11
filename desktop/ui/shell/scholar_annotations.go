@@ -56,30 +56,16 @@ func (s *Shell) returnScholarAnnotationEntry(p *scholarState, view *scholarAnnot
 }
 
 func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholarAnnotationView) {
-	ui.Column(c).FillWidth().Padding(8, 4).Gap(6).FontSize(12).LineHeight(1.5).Children(func() {
+	ui.Column(c).FillWidth().Padding(8, 0, 12, 0).Gap(6).Children(func() {
 		currentLibrary := view.zotero.ServerID == p.literature.zotero.ServerID
-		framed := p.references.catalog && p.literature.mode == 1
-		if !framed {
-			if s.scholarReaderCommand(c.Key("details"), "arrow-left", s.tr("scholarAnnotationEntry"), false).Disabled(p.busy || !currentLibrary).Clicked() {
-				s.returnScholarAnnotationEntry(p, view)
-				return
-			}
-			ui.Text(c, s.tr("scholarReadAnnotations")).FontSize(13).Bold().LineHeight(1.3).Wrap()
-			ui.Text(c, view.title).FontSize(12).LineHeight(1.5).TextColor(s.ch.muted).Wrap()
-			if view.loaded && s.scholarReaderCommand(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(p.busy || !currentLibrary).Clicked() {
-				s.loadScholarAnnotations(p, view, view.start)
-			}
-		}
 		if !view.loaded {
 			if p.busy {
-				ui.Text(c, s.tr("scholarLoadingAnnotations")).FontSize(12).Padding(8, 4).Wrap()
-			} else if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("refresh"), false).Clicked() {
-				s.loadScholarAnnotations(p, view, 0)
+				scholarReaderText(c, s.tr("scholarLoadingAnnotations")).TextColor(s.ch.muted)
 			}
 			return
 		}
 		if len(view.items) == 0 {
-			ui.Text(c, s.tr("scholarNoAnnotations")).FontSize(12).LineHeight(1.5).TextColor(s.ch.muted).Padding(12, 4).Wrap()
+			scholarReaderText(c, s.tr("scholarNoAnnotations")).TextColor(s.ch.muted)
 		}
 		projectKey := ""
 		if len(view.items) > 0 && isManuscript(s.activeTab()) {
@@ -87,12 +73,14 @@ func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholar
 		}
 		for i, annotation := range view.items {
 			ck := c
-			ui.Column(c.Key(i)).FillWidth().Padding(6, 0).Gap(5).Children(func() {
+			if i > 0 {
+				s.scholarReaderDivider(c)
+			}
+			ui.Column(c.Key(i)).FillWidth().Padding(4, 0).Gap(5).Children(func() {
 				label := strings.TrimSpace(annotation.Label)
 				if label == "" && annotation.Page > 0 {
 					label = strconv.Itoa(annotation.Page)
 				}
-				ui.Box(ck).FillWidth().Height(1).Background(s.ch.separator)
 				ui.Row(ck).Gap(6).AlignItems(ui.Center).Children(func() {
 					kind := "scholarReadAnnotations"
 					switch annotation.Kind {
@@ -122,10 +110,10 @@ func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholar
 					}
 				})
 				if annotation.Quote != "" {
-					ui.Text(ck, annotation.Quote).FontSize(12).LineHeight(1.5).Wrap().Selectable()
+					scholarReaderText(ck, annotation.Quote).Selectable()
 				}
 				if annotation.Note != "" {
-					ui.Text(ck, annotation.Note).FontSize(12).LineHeight(1.5).Wrap().Selectable().TextColor(s.ch.muted)
+					scholarReaderText(ck, annotation.Note).Selectable().TextColor(s.ch.muted)
 				}
 				if projectKey != "" && label != "" {
 					ui.Row(ck.Key("cite-actions")).Gap(4).Children(func() {
@@ -142,7 +130,8 @@ func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholar
 			})
 		}
 		if view.start > 0 || view.more {
-			ui.Row(c.Key("pagination")).Gap(4).Children(func() {
+			s.scholarReaderDivider(c)
+			ui.Row(c.Key("pagination")).FillWidth().Gap(4).Justify(ui.End).Children(func() {
 				if s.scholarCompactIcon(c.Key("previous"), "chevron-left", s.tr("scholarPreviousAnnotations"), false).Disabled(p.busy || view.start == 0).Clicked() {
 					s.loadScholarAnnotations(p, view, view.start-scholar.ZoteroPageSize)
 				}

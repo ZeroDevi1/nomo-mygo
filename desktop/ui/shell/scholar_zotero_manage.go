@@ -128,7 +128,7 @@ func (s *Shell) scholarZoteroReaderActions(c *ui.Context, p *scholarState, entry
 		key, title = note.Key, scholarNoteTitle(s, *note)
 	}
 	link := z.ItemLink(key)
-	s.scholarMenuButton(c, "ellipsis", s.tr("scholarZoteroActions"), !p.references.catalog || l.mode != 1).Menu(func(m *ui.Menu) {
+	s.scholarCompactIcon(c, "ellipsis", s.tr("scholarZoteroActions"), false).Menu(func(m *ui.Menu) {
 		if address := scholarEntryWebURL(entry); note == nil && address != "" {
 			if m.Item(s.tr("scholarOpenWeb")).Disabled(p.busy).Chosen() {
 				s.openScholarWeb(p, entry, address)
@@ -184,59 +184,73 @@ func (s *Shell) loadScholarZoteroItemDraft(p *scholarState, form *scholarZoteroF
 	})
 }
 
-func (s *Shell) scholarZoteroForm(c *ui.Context, p *scholarState, form *scholarZoteroForm) {
-	ui.Column(c).FillWidth().MaxWidth(520).MinWidth(0).Padding(8, 4).Gap(8).FontSize(12).Children(func() {
-		if form.catalog || !p.references.catalog || p.literature.mode != 1 {
-			ui.Text(c, s.tr(form.label)).FontSize(13).Bold().LineHeight(1.3).Wrap()
+const scholarZoteroFormWidth = 520
+
+func (s *Shell) scholarZoteroForm(c *ui.Context, p *scholarState, form *scholarZoteroForm, message string) {
+	ui.Column(c).FillWidth().Grow(1).MinHeight(0).AlignItems(ui.Center).Children(func() {
+		if message != "" {
+			s.scholarReaderNotice(c.Key("error"), message, nil)
 		}
 		var save func()
 		label := s.tr("save")
-		switch {
-		case form.item != nil:
-			s.scholarZoteroItemFields(c, p, form)
-			save = func() {
-				draft := *form.item
-				draft.Fields = slices.Clone(draft.Fields)
-				draft.Creators = slices.Clone(draft.Creators)
-				draft.Tags = slices.Clone(draft.Tags)
-				s.scholarZoteroWrite(p, func(ctx context.Context) error {
-					return draft.Save(ctx, form.parent, form.token)
-				}, func() { s.scholarZoteroItemChanged(p, form.z, form.key, false) })
-			}
-		case len(form.itemTypes) > 0:
-			labels := make([]string, len(form.itemTypes))
-			for i, kind := range form.itemTypes {
-				labels[i] = kind.Localized
-			}
-			s.scholarReaderChoice(c, "file-text", &form.itemType, labels, p.busy)
-			label = s.tr("scholarZoteroNext")
-			save = func() { s.loadScholarZoteroItemDraft(p, form, form.itemTypes[form.itemType].ItemType) }
-		case form.label == "scholarZoteroNewNote":
-			s.scholarReaderTextArea(c.Key("note"), &form.note, 125).Label(s.tr("scholarZoteroNoteText")).Disabled(p.busy)
-			if strings.TrimSpace(form.note) != "" {
-				body := form.note
-				save = func() {
-					s.scholarZoteroWrite(p, func(ctx context.Context) error {
-						return form.z.CreateNote(ctx, form.key, body, form.token)
-					}, func() { s.scholarZoteroItemChanged(p, form.z, form.key, false) })
+		ui.Scroll(c.Key("fields")).FillWidth().Grow(1).MinHeight(0).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(scholarZoteroFormWidth).MinWidth(0).
+				Padding(10, scholarReaderInset).Gap(8).FontSize(12).Children(func() {
+				switch {
+				case form.item != nil:
+					s.scholarZoteroItemFields(c, p, form)
+					save = func() {
+						draft := *form.item
+						draft.Fields = slices.Clone(draft.Fields)
+						draft.Creators = slices.Clone(draft.Creators)
+						draft.Tags = slices.Clone(draft.Tags)
+						s.scholarZoteroWrite(p, func(ctx context.Context) error {
+							return draft.Save(ctx, form.parent, form.token)
+						}, func() { s.scholarZoteroItemChanged(p, form.z, form.key, false) })
+					}
+				case len(form.itemTypes) > 0:
+					labels := make([]string, len(form.itemTypes))
+					for i, kind := range form.itemTypes {
+						labels[i] = kind.Localized
+					}
+					s.scholarZoteroFieldLabel(c, s.tr("scholarItemType"))
+					s.scholarReaderChoice(c, "file-text", &form.itemType, labels, p.busy)
+					label = s.tr("scholarZoteroNext")
+					save = func() { s.loadScholarZoteroItemDraft(p, form, form.itemTypes[form.itemType].ItemType) }
+				case form.label == "scholarZoteroNewNote":
+					fieldLabel := s.tr("scholarZoteroNoteText")
+					s.scholarZoteroFieldLabel(c, fieldLabel)
+					s.scholarReaderTextArea(c.Key("note"), &form.note, 125).Label(fieldLabel).Disabled(p.busy)
+					if strings.TrimSpace(form.note) != "" {
+						body := form.note
+						save = func() {
+							s.scholarZoteroWrite(p, func(ctx context.Context) error {
+								return form.z.CreateNote(ctx, form.key, body, form.token)
+							}, func() { s.scholarZoteroItemChanged(p, form.z, form.key, false) })
+						}
+					}
+				case form.label == "scholarZoteroMoveToTrash":
+					scholarReaderText(c, form.note)
+					label = s.tr("scholarZoteroMoveToTrash")
+					save = func() { s.scholarZoteroTrash(p, form.z, form.key, true) }
+				default:
+					fieldLabel := s.tr("scholarZoteroCollectionName")
+					s.scholarZoteroFieldLabel(c, fieldLabel)
+					s.scholarReaderInput(c.Key("name"), &form.collection.Name).Label(fieldLabel).Disabled(p.busy)
+					if strings.TrimSpace(form.collection.Name) != "" {
+						draft := form.collection
+						save = func() {
+							s.scholarZoteroWrite(p, func(ctx context.Context) error {
+								return form.z.SaveCollection(ctx, form.key, form.parent, draft, form.token)
+							}, func() { s.loadScholarCollectionBranch(p, form.parent, 0) })
+						}
+					}
 				}
-			}
-		case form.label == "scholarZoteroMoveToTrash":
-			ui.Text(c, form.note).FontSize(12).LineHeight(1.5).Wrap()
-			label = s.tr("scholarZoteroMoveToTrash")
-			save = func() { s.scholarZoteroTrash(p, form.z, form.key, true) }
-		default:
-			s.scholarReaderInput(c.Key("name"), &form.collection.Name).Label(s.tr("scholarZoteroCollectionName")).Disabled(p.busy)
-			if strings.TrimSpace(form.collection.Name) != "" {
-				draft := form.collection
-				save = func() {
-					s.scholarZoteroWrite(p, func(ctx context.Context) error {
-						return form.z.SaveCollection(ctx, form.key, form.parent, draft, form.token)
-					}, func() { s.loadScholarCollectionBranch(p, form.parent, 0) })
-				}
-			}
-		}
-		ui.Row(c.Key("form-actions")).FillWidth().Padding(6, 0, 0, 0).Gap(6).Justify(ui.End).Children(func() {
+			})
+		})
+		s.scholarReaderDivider(c)
+		ui.Row(c.Key("form-actions")).FillWidth().MaxWidth(scholarZoteroFormWidth).Shrink(0).
+			Padding(6, scholarReaderInset).Gap(6).Justify(ui.End).Children(func() {
 			if ui.Button(c.Key("cancel"), s.tr("cancel")).Height(26).FontSize(12).Padding(3, 10).Radius(4).Disabled(p.busy).Clicked() {
 				p.literature.zoteroForm, p.err = nil, ""
 			}
@@ -247,17 +261,21 @@ func (s *Shell) scholarZoteroForm(c *ui.Context, p *scholarState, form *scholarZ
 	})
 }
 
+func (s *Shell) scholarZoteroFieldLabel(c *ui.Context, label string) {
+	ui.Text(c, label).FontSize(11).TextColor(s.ch.muted).Wrap()
+}
+
 func (s *Shell) scholarZoteroItemFields(c *ui.Context, p *scholarState, form *scholarZoteroForm) {
 	draft := form.item
+	scholarReaderText(c, s.tr("scholarItemInfo")).Bold()
 	for i := range draft.Fields {
 		field := &draft.Fields[i]
-		ck := c.Key("field").Key(i)
-		ui.Column(ck).FillWidth().Gap(4).Children(func() {
-			ui.Text(ck, field.Label).FontSize(11).TextColor(s.ch.muted).Wrap()
+		ui.Column(c.Key(i)).FillWidth().Gap(4).Children(func() {
+			s.scholarZoteroFieldLabel(c, field.Label)
 			if field.Multiline() {
-				s.scholarReaderTextArea(ck.Key("value"), &field.Value, 90).Label(field.Label).Disabled(p.busy)
+				s.scholarReaderTextArea(c.Key("value"), &field.Value, 90).Label(field.Label).Disabled(p.busy)
 			} else {
-				s.scholarReaderInput(ck.Key("value"), &field.Value).Label(field.Label).Disabled(p.busy)
+				s.scholarReaderInput(c.Key("value"), &field.Value).Label(field.Label).Disabled(p.busy)
 			}
 		})
 	}
@@ -283,13 +301,20 @@ func (s *Shell) scholarZoteroItemFields(c *ui.Context, p *scholarState, form *sc
 		}
 		labels, roles = append(labels, label), append(roles, role.CreatorType)
 	}
+	if len(draft.CreatorTypes) > 0 || len(draft.Creators) > 0 {
+		s.scholarReaderDivider(c)
+		scholarReaderText(c, s.tr("scholarItemCreator")).Bold()
+	}
 	for i := range draft.Creators {
 		creator := &draft.Creators[i]
 		ck := c
 		remove := false
 		// Context.Key identifies only the next control, so each creator needs a parent.
-		ui.Column(c.Key(fmt.Sprintf("creator-%d", i))).FillWidth().Padding(8, 0).Gap(6).
-			Border(1, s.ch.separator).BorderWidth(1, 0, 0, 0).Children(func() {
+		creatorRow := ui.Column(c.Key(fmt.Sprintf("creator-%d", i))).FillWidth().Gap(6)
+		if i > 0 {
+			creatorRow.Padding(8, 0, 0, 0).Border(1, s.ch.separator).BorderWidth(1, 0, 0, 0)
+		}
+		creatorRow.Children(func() {
 			options := labels
 			selected := slices.Index(roles, creator.Type)
 			if selected < 0 {
@@ -320,6 +345,8 @@ func (s *Shell) scholarZoteroItemFields(c *ui.Context, p *scholarState, form *sc
 	if len(draft.CreatorTypes) > 0 && s.scholarReaderCommand(c.Key("add-creator"), "plus", s.tr("scholarZoteroAddCreator"), false).Disabled(p.busy).Clicked() {
 		draft.Creators = append(draft.Creators, scholar.ZoteroCreator{Type: draft.CreatorTypes[0].CreatorType})
 	}
+	s.scholarReaderDivider(c)
+	scholarReaderText(c, s.tr("scholarItemTags")).Bold()
 	for i, tag := range draft.Tags {
 		ck := c.Key("tag").Key(tag)
 		remove := false

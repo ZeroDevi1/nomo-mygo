@@ -30,27 +30,29 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 		}
 		ui.Box(c).Width(1).Height(18).Background(s.ch.separator)
 		s.scholarZoteroCatalogActions(c.Key("create"), p)
-		if s.toolButton(c.Key("lookup"), "wand-sparkles", s.tr("scholarOnline"), false).Disabled(p.busy).Clicked() {
+		if s.scholarCompactIcon(c.Key("lookup"), "wand-sparkles", s.tr("scholarOnline"), false).Disabled(p.busy).Clicked() {
 			l.mode = 2
 		}
 		glyph, label := s.scholarReferenceOpenLabel(p, l.selected)
-		if s.toolButton(c.Key("pdf"), glyph, label, false).Disabled(p.busy || l.selected.RemoteID == "").Clicked() {
+		if s.scholarCompactIcon(c.Key("pdf"), glyph, label, false).Disabled(p.busy || l.selected.RemoteID == "").Clicked() {
 			s.openScholarReference(p, l.selected)
 		}
-		if s.toolButton(c.Key("note"), "sticky-note", s.tr("scholarZoteroNewNote"), false).Disabled(p.busy || l.selected.Source != "Zotero" || l.selected.RemoteID == "" || l.detail.Deleted || l.detail.ItemType == "" || l.detail.ItemType == "note" || l.zotero.ServerID == "").Clicked() {
+		if s.scholarCompactIcon(c.Key("note"), "sticky-note", s.tr("scholarZoteroNewNote"), false).Disabled(p.busy || l.selected.Source != "Zotero" || l.selected.RemoteID == "" || l.detail.Deleted || l.detail.ItemType == "" || l.detail.ItemType == "note" || l.zotero.ServerID == "").Clicked() {
 			s.startScholarZoteroNote(p)
 		}
-		if s.toolButton(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(p.busy).Clicked() {
+		if s.scholarCompactIcon(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(p.busy).Clicked() {
 			s.loadZotero(p, false, l.collection, l.sentQuery, 0)
 		}
 		ui.Spacer(c)
-		in := ui.TextInput(c.Key("search"), &l.remoteQuery).Grow(1).MinWidth(90).MaxWidth(300).Placeholder(s.tr("scholarSearchZotero"))
-		search := s.toolButton(c.Key("submit"), "search", s.tr("scholarSearch"), false).Disabled(p.busy)
+		placeholder := s.tr("scholarSearchZotero")
+		in := s.scholarReaderInput(c.Key("search"), &l.remoteQuery).Width(300).MinWidth(0).Shrink(1).
+			Background(s.ch.content).Label(placeholder).Placeholder(placeholder)
+		search := s.scholarCompactIcon(c.Key("submit"), "search", s.tr("scholarSearch"), false).Disabled(p.busy)
 		if !p.busy && (in.Submitted() || search.Clicked()) {
 			l.recentOpen = false
 			s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
 		}
-		s.toolButton(c.Key("options"), "list-filter", s.tr("scholarSearchOptions"), l.fulltext).Menu(func(m *ui.Menu) {
+		s.scholarCompactIcon(c.Key("options"), "list-filter", s.tr("scholarSearchOptions"), l.fulltext).Menu(func(m *ui.Menu) {
 			if m.Item(s.tr("scholarFulltextPage")).Checked(l.fulltext).
 				Disabled(p.busy || l.scope != scholar.ZoteroAll || l.tag != "").Chosen() {
 				l.fulltext = !l.fulltext
