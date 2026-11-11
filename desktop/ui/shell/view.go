@@ -263,7 +263,6 @@ func (s *Shell) macTabs(c *ui.Context) {
 		}
 		if p == nil {
 			ui.Row(c).Grow(1).FillHeight().MinWidth(0).Clip().AlignItems(ui.Stretch).Children(tabs)
-			s.editorSplitButtons(c.Key("split-buttons"), s.workspaceSelection())
 			return
 		}
 		ui.Row(c).Grow(1).FillHeight().MinWidth(0).Clip().AlignItems(ui.Stretch).Children(func() {
@@ -275,7 +274,6 @@ func (s *Shell) macTabs(c *ui.Context) {
 			right = 0
 		}
 		ui.Row(c).FillHeight().Padding(0, right, 0, 4).Gap(4).AlignItems(ui.Center).Children(func() {
-			s.editorSplitButtons(c.Key("split-buttons"), s.workspaceSelection())
 			s.documentTools(c)
 		})
 	})
@@ -435,11 +433,9 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 		})
 		if tab := s.activeTab(); s.scholarForTab(tab) != nil {
 			ui.Row(c).FillHeight().Gap(4).AlignItems(ui.Center).Children(func() {
-				s.editorSplitButtons(c.Key("split-buttons"), s.workspaceSelection())
 				s.documentTools(c)
 			})
 		} else {
-			s.editorSplitButtons(c.Key("split-buttons"), s.workspaceSelection())
 			if s.toolButton(c, "plus", s.tr("newMarkdown"), false).Clicked() {
 				s.NewDocument()
 			}

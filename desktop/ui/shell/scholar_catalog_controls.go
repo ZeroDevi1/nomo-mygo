@@ -46,7 +46,7 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 			s.startScholarZoteroNote(p)
 		}
 		if s.scholarCompactIcon(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(p.busy).Clicked() {
-			s.loadZotero(p, false, l.collection, l.sentQuery, 0)
+			s.loadZotero(p, l.collection, l.sentQuery, 0)
 		}
 		ui.Spacer(c)
 		placeholder := s.tr("scholarSearchZotero")
@@ -55,7 +55,7 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 		search := s.scholarCompactIcon(c.Key("submit"), "search", s.tr("scholarSearch"), false).Disabled(p.busy)
 		if !p.busy && (in.Submitted() || search.Clicked()) {
 			l.recentOpen = false
-			s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
+			s.loadZotero(p, l.collection, l.remoteQuery, 0)
 		}
 		if offline {
 			if p.busy && l.zoteroBrowseJob == p.job &&
@@ -119,7 +119,7 @@ func (s *Shell) scholarZoteroPagination(c *ui.Context, p *scholarState) {
 			if fulltext {
 				l.fulltextPage--
 			} else {
-				s.loadZotero(p, false, l.collection, l.sentQuery, l.page-scholar.ZoteroPageSize)
+				s.loadZotero(p, l.collection, l.sentQuery, l.page-scholar.ZoteroPageSize)
 			}
 		}
 		ui.Text(c, fmt.Sprint(page+1)).FontSize(11)
@@ -127,7 +127,7 @@ func (s *Shell) scholarZoteroPagination(c *ui.Context, p *scholarState) {
 			if fulltext {
 				l.fulltextPage++
 			} else {
-				s.loadZotero(p, false, l.collection, l.sentQuery, l.pageData.Next)
+				s.loadZotero(p, l.collection, l.sentQuery, l.pageData.Next)
 			}
 		}
 	})

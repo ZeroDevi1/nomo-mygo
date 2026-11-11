@@ -214,5 +214,5 @@ func (s *Shell) scholarReaderOpenCollection(p *scholarState, key string) {
 	l.zotero.Group, l.scope, l.tag = l.selected.Library, scholar.ZoteroAll, ""
 	l.mode, l.recentOpen, l.fulltext = 1, false, false
 	s.showScholarCatalog(p)
-	s.loadZotero(p, false, key, "", 0)
+	s.loadZotero(p, key, "", 0)
 }

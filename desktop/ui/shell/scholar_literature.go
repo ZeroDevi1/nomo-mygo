@@ -2,7 +2,9 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -38,6 +40,7 @@ type scholarLiteratureState struct {
 	visible                                            []scholar.Entry
 	target                                             int
 	zotero                                             scholar.Zotero
+	zoteroConnectJob                                   uint64
 	zoteroBrowseJob                                    uint64
 	zoteroForm                                         *scholarZoteroForm
 	connected                                          bool
@@ -292,7 +295,7 @@ func (s *Shell) scholarZoteroResults(c *ui.Context, p *scholarState) {
 						l.fulltextEntries = nil
 						l.fulltextPage = 0
 					}
-					s.loadZotero(p, false, l.collection, l.sentQuery, l.fulltextNext)
+					s.loadZotero(p, l.collection, l.sentQuery, l.fulltextNext)
 				}
 				if scanning && ui.Button(c.Key("cancel"), s.tr("scholarAgentCancelWork")).Clicked() && p.cancelJob != nil {
 					p.cancelJob()
@@ -308,7 +311,7 @@ func (s *Shell) scholarZoteroResults(c *ui.Context, p *scholarState) {
 	s.scholarZoteroPagination(c.Key("pagination"), p)
 }
 
-func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query string, start int) {
+func (s *Shell) loadZotero(p *scholarState, collection, query string, start int) {
 	if p.busy {
 		return
 	}
@@ -316,10 +319,7 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 	z := l.zotero
 	offline := z.ReadOnly()
 	tag, scope := l.tag, l.scope
-	if connect {
-		tag, scope = "", scholar.ZoteroAll
-	}
-	fulltext := !connect && !offline && l.fulltext && query != "" && scope == scholar.ZoteroAll && tag == ""
+	fulltext := !offline && l.fulltext && query != "" && scope == scholar.ZoteroAll && tag == ""
 	if fulltext {
 		l.fulltextProgress = start
 		l.fulltextPaused = false
@@ -335,27 +335,25 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
 		var err error
-		if connect {
-			z.Group = 0
-			probe, stop := context.WithTimeout(ctx, 5*time.Second)
-			z, err = z.Reconnect(probe)
-			stop()
-		}
 		var page scholar.ZoteroPage
 		var full scholar.ZoteroFulltextResult
-		if err == nil {
-			if fulltext {
-				full, err = z.SearchFulltext(ctx, query, collection, start, func(n int) {
-					s.post(func() {
-						if s.scholar == p && p.job == job {
-							l.fulltextProgress = start + n
-						}
-					})
+		if fulltext {
+			full, err = z.SearchFulltext(ctx, query, collection, start, func(n int) {
+				s.post(func() {
+					if s.scholar == p && p.job == job {
+						l.fulltextProgress = start + n
+					}
 				})
-				page.Entries, page.More = full.Entries, full.More
-			} else {
-				page, err = z.Browse(ctx, query, collection, tag, scope, start)
-			}
+			})
+			page.Entries, page.More = full.Entries, full.More
+		} else {
+			page, err = z.Browse(ctx, query, collection, tag, scope, start)
+		}
+		var connectionErr *url.Error
+		if !offline && ctx.Err() == nil && errors.As(err, &connectionErr) {
+			return func() {
+				l.connected, l.zoteroConnectJob = false, 0
+			}, nil
 		}
 		return func() {
 			l.zoteroBrowseJob = 0
@@ -378,21 +376,13 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 				page.Entries = l.fulltextEntries[lo:min(lo+scholar.ZoteroPageSize, len(l.fulltextEntries))]
 			}
 			if err != nil {
-				if connect && !offline {
-					l.resetZoteroSource()
-					l.zotero, l.connected = scholar.Zotero{}, false
-				}
 				return
 			}
-			if connect {
-				l.resetZoteroSource()
-				l.connected = true
-			}
-			l.zotero, l.pageData, l.collection, l.sentQuery, l.page = z, page, collection, query, start
+			l.pageData, l.collection, l.sentQuery, l.page = page, collection, query, start
 			l.loaded = true
 		}, err
 	})
-	if offline && !connect {
+	if offline {
 		l.zoteroBrowseJob = p.job
 	}
 	if fulltext {

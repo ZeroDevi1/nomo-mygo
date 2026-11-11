@@ -285,16 +285,6 @@ func (s *Shell) editorGroupCount() (count int) {
 	return
 }
 
-func (s *Shell) editorSplitButtons(c *ui.Context, item workspaceItem) {
-	disabled := item == (workspaceItem{}) || s.mini.active || s.editorGroupCount() >= editorGroupLimit
-	if s.scholarCompactIcon(c.Key("split-right"), "columns-2", s.tr("splitGroupRight"), false).Disabled(disabled).Clicked() {
-		s.splitWorkspaceItem(item, false, false)
-	}
-	if s.scholarCompactIcon(c.Key("split-down"), "rows-2", s.tr("splitGroupDown"), false).Disabled(disabled).Clicked() {
-		s.splitWorkspaceItem(item, true, false)
-	}
-}
-
 func (s *Shell) editorGroupMenu(m *ui.Menu, item workspaceItem) {
 	gs := &s.groups
 	count := s.editorGroupCount()
@@ -422,7 +412,6 @@ func (s *Shell) editorGroupView(c *ui.Context, p *scholarState, g *editorGroup, 
 					s.scholarPDFTabControls(c, p, pdf)
 					ui.Box(c).Size(1, 14).Margin(0, 4).Background(s.ch.separator)
 				}
-				s.editorSplitButtons(c.Key("split-buttons"), g.selected)
 				s.scholarCompactIcon(c.Key("group-menu"), "ellipsis", s.tr("editorGroup"), false).Menu(func(m *ui.Menu) {
 					if pdf != nil && compact {
 						s.scholarPDFMenu(c, m, p, pdf)

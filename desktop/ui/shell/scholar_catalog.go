@@ -84,6 +84,14 @@ func (s *Shell) scholarCatalogButton(c *ui.Context, glyph, title string, selecte
 func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	if !l.connected {
+		if l.zoteroConnectJob == 0 && !p.busy {
+			s.connectScholarZotero(p)
+		}
+		if p.busy && l.zoteroConnectJob == p.job {
+			ui.Text(c.Key("connecting"), s.tr("scholarZoteroLoadingLibrary")).AlignSelf(ui.Center).
+				Margin(24, 12).TextColor(s.ch.muted).Wrap()
+			return
+		}
 		connectionPrompt := func() {
 			ui.Column(c.Key("connection-prompt")).FillWidth().MaxWidth(520).AlignSelf(ui.Center).
 				Padding(24, 20).Gap(8).Children(func() {
@@ -91,7 +99,7 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 				ui.Text(c, s.tr("scholarEnableZotero")).LineHeight(1.4).TextColor(s.ch.muted).Wrap()
 				if ui.PrimaryButton(c.Key("connect"), s.tr("scholarConnectZotero")).AlignSelf(ui.Start).
 					MinHeight(32).Margin(4, 0, 0, 0).Disabled(p.busy).Clicked() {
-					s.loadZotero(p, true, "", "", 0)
+					s.connectScholarZotero(p)
 				}
 				if ui.Button(c.Key("directory"), s.tr("scholarZoteroOpenDirectory")).AlignSelf(ui.Start).
 					MinHeight(32).Disabled(p.busy).Clicked() {
@@ -117,7 +125,7 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 	if !p.busy {
 		switch {
 		case !l.loaded && p.err == "":
-			s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
+			s.loadZotero(p, l.collection, l.remoteQuery, 0)
 		case l.libraries == nil:
 			z := l.zotero
 			s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
@@ -211,7 +219,7 @@ func (s *Shell) scholarCatalogScope(c *ui.Context, p *scholarState) {
 							l.zotero.Group = library.ID
 							l.recentOpen, l.scope, l.scopeOpen = false, scholar.ZoteroAll, false
 							s.revealScholarCatalog(p)
-							s.loadZotero(p, false, "", l.remoteQuery, 0)
+							s.loadZotero(p, "", l.remoteQuery, 0)
 						}
 					})
 					if active && (branch == nil || branch.open) {
@@ -236,7 +244,7 @@ func (s *Shell) scholarCatalogScope(c *ui.Context, p *scholarState) {
 								l.recentOpen, l.scopeOpen, l.fulltext = false, false, false
 								l.scope = scope.id
 								s.revealScholarCatalog(p)
-								s.loadZotero(p, false, "", l.remoteQuery, 0)
+								s.loadZotero(p, "", l.remoteQuery, 0)
 							}
 						}
 					}
@@ -271,7 +279,7 @@ func (s *Shell) scholarCatalogTags(c *ui.Context, p *scholarState) {
 							l.tag = tag
 						}
 						s.revealScholarCatalog(p)
-						s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
+						s.loadZotero(p, l.collection, l.remoteQuery, 0)
 					}
 				}
 			})
@@ -296,7 +304,7 @@ func (s *Shell) scholarCatalogTags(c *ui.Context, p *scholarState) {
 				if m.Item(s.tr("scholarClearTag")).Disabled(p.busy || l.tag == "").Chosen() {
 					l.tag = ""
 					s.revealScholarCatalog(p)
-					s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
+					s.loadZotero(p, l.collection, l.remoteQuery, 0)
 				}
 			})
 		})
@@ -328,7 +336,7 @@ func (s *Shell) scholarCatalogResults(c *ui.Context, p *scholarState) {
 		return
 	}
 	if !l.loaded && !p.busy && ui.Button(c.Key("refresh"), s.tr("refresh")).AlignSelf(ui.Start).Margin(6, 8).Clicked() {
-		s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
+		s.loadZotero(p, l.collection, l.remoteQuery, 0)
 	}
 	s.scholarZoteroResults(c, p)
 }
@@ -380,7 +388,7 @@ func (s *Shell) scholarZoteroMetadata(c *ui.Context, p *scholarState, tags, rela
 				l.zotero, l.mode, l.tag, l.recentOpen, l.fulltext = z, 1, tag, false, false
 				l.scope = scholar.ZoteroAll
 				s.showScholarCatalog(p)
-				s.loadZotero(p, false, "", "", 0)
+				s.loadZotero(p, "", "", 0)
 			}
 		}
 	})
@@ -729,7 +737,7 @@ func (s *Shell) scholarCollectionTree(c *ui.Context, p *scholarState, parent str
 				l.recentOpen, l.scope = false, scholar.ZoteroAll
 				l.scopeOpen = false
 				s.revealScholarCatalog(p)
-				s.loadZotero(p, false, collection.Key, l.remoteQuery, 0)
+				s.loadZotero(p, collection.Key, l.remoteQuery, 0)
 			}
 		})
 		s.scholarCollectionTree(ck.Key("children"), p, collection.Key, depth+1)

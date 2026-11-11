@@ -28,7 +28,9 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 	names := append([]string{p.project.Main}, p.bibNames...)
 	root := p.project.Root
 	priorZ := p.literature.zotero
-	probe := s.win != nil && !priorZ.ReadOnly() && (p.probeAt.IsZero() || !c.Now().Before(p.probeAt))
+	connectJob := p.literature.zoteroConnectJob
+	probe := s.win != nil && !priorZ.ReadOnly() && !(p.busy && connectJob == p.job) &&
+		(p.probeAt.IsZero() || !c.Now().Before(p.probeAt))
 	preview := s.compile
 	if preview != nil && (preview.project.Root == "" || preview.parkedPage != 0) {
 		preview = nil
@@ -89,13 +91,16 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 			}
 			p.watchSignature = value
 			l := &p.literature
-			if probe && l.zotero == priorZ {
+			if probe && l.zotero == priorZ && l.zoteroConnectJob == connectJob {
 				if err == nil && !z.SameSource(priorZ) && p.busy {
 					p.probeAt = time.Time{}
 					return
 				}
 				was := l.connected
 				l.connected = err == nil
+				if was && err != nil {
+					l.zoteroConnectJob = 0
+				}
 				if err == nil {
 					if !z.SameSource(priorZ) {
 						l.resetZoteroSource()

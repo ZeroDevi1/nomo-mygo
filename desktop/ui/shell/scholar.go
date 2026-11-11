@@ -278,7 +278,7 @@ func (s *Shell) updateScholar(c *ui.Context, tab *Tab) {
 		if l.fulltext {
 			start = 0
 		}
-		s.loadZotero(p, false, l.collection, l.sentQuery, start)
+		s.loadZotero(p, l.collection, l.sentQuery, start)
 	}
 	s.observeScholarChanges(c, p, tab)
 	s.scholarCitationDiagnostics(c, p, tab)

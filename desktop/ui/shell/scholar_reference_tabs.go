@@ -255,18 +255,6 @@ func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState) {
 			return 1
 		}
 	})
-	label := s.tr("scholarMoreCommands")
-	s.toolButton(c.Key("references"), "ellipsis", label, false).Label(label).Menu(func(m *ui.Menu) {
-		for _, t := range tabs {
-			if m.Item(t.title).Checked(r.focused == t && !r.catalog).Chosen() {
-				s.selectScholarPDF(p, t)
-			}
-		}
-		if r.focused != nil && !r.catalog {
-			m.Separator()
-			s.scholarReferenceActions(c, m, p, r.focused)
-		}
-	})
 	ui.Row(c.Key("attachment-tabs")).FillHeight().MinWidth(0).Shrink(1).Clip().Gap(1).AlignItems(ui.Stretch).Children(func() {
 		for _, t := range tabs {
 			ck := c.Key(t)

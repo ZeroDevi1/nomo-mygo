@@ -55,10 +55,10 @@ func (s *Shell) scholarZoteroCatalogActions(c *ui.Context, p *scholarState) {
 			l.tree, l.treeTried = nil, false
 			l.libraries = nil
 			l.tagPicker = scholarTagPicker{}
-			s.loadZotero(p, false, l.collection, l.sentQuery, 0)
+			s.loadZotero(p, l.collection, l.sentQuery, 0)
 		}
 		if m.Item(s.tr("scholarConnectZotero")).Disabled(p.busy).Chosen() {
-			s.loadZotero(p, true, "", "", 0)
+			s.connectScholarZotero(p)
 		}
 		if m.Item(s.tr("scholarZoteroOpenDirectory")).Disabled(p.busy).Chosen() {
 			s.chooseScholarZoteroDirectory(p)
