@@ -289,6 +289,10 @@ func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState) {
 func (s *Shell) scholarWorkspaceTab(c *ui.Context, glyph, title, closeLabel string, selected bool, activate, close func()) ui.Element {
 	cell := ui.Row(c).Width(140).MinWidth(94).Shrink(1).FillHeight().Padding(0, 6).Gap(4).AlignItems(ui.Center).
 		Border(1, s.ch.separator).BorderWidth(0, 0, 0, 1)
+	if s.pf.windows {
+		cell.Width(184).MinWidth(96).Padding(0, 4, 0, 12).BorderWidth(0)
+		s.ch.windowsTab(cell, selected)
+	}
 	if selected {
 		cell.Background(s.ch.tabActive)
 	} else if cell.Hovered() {
@@ -300,15 +304,29 @@ func (s *Shell) scholarWorkspaceTab(c *ui.Context, glyph, title, closeLabel stri
 		if selected {
 			label.Background(s.ch.tabActive)
 		}
+		if s.pf.windows {
+			label.Role(ui.RoleTab).Background(ui.Transparent)
+		}
 		label.Children(func() {
 			ui.Icon(c, s.icon(glyph)).FontSize(13).TextColor(s.ch.muted)
-			ui.Text(c, title).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.text)
+			text := ui.Text(c, title).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.text)
+			if s.pf.windows {
+				text.FontSize(c.Theme().FontSize)
+				if selected {
+					text.FontWeight(600)
+				} else {
+					text.TextColor(s.ch.muted)
+				}
+			}
 		})
 		if label.Clicked() {
 			label.Focus()
 			activate()
 		}
 		button := ui.ButtonBase(c.Key("close")).Size(18, 18).Radius(3).FocusRing(true).Label(closeLabel).Tooltip(closeLabel)
+		if s.pf.windows {
+			button.Size(24, 24).Radius(4)
+		}
 		if button.Hovered() {
 			button.Background(s.ch.hover)
 		}

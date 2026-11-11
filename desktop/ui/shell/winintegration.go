@@ -81,9 +81,9 @@ func (sw *settingsWindow) windowsIntegration(c *ui.Context) {
 		}()
 	}
 	sw.section(c, "windowsIntegration", func() {
-		f := ui.Field(c.Key("mdAssociation"), s.tr("bindMdDefaultApp"), func() {
+		f := sw.settingsPanel(c.Key("mdAssociation"), s.tr("bindMdDefaultApp"), func() {
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Row(c).Gap(8).Children(func() {
+				ui.Row(c).FillWidth().Wrap().Gap(8).Children(func() {
 					switch {
 					case st.assoc.Managed:
 						if ui.Button(c, s.tr("openWindowsDefaultApps")).Disabled(st.busy).Clicked() {
@@ -110,7 +110,7 @@ func (sw *settingsWindow) windowsIntegration(c *ui.Context) {
 			})
 		})
 		f.Description(s.tr("mdAssociationDefaultDescription"))
-		g := ui.Field(c.Key("contextMenu"), s.tr("registerMdContextMenu"), func() {
+		g := sw.settingsPanel(c.Key("contextMenu"), s.tr("registerMdContextMenu"), func() {
 			ui.Column(c).Gap(6).Children(func() {
 				on, off := s.tr("registerContextMenu"), s.tr("unregisterContextMenu")
 				if st.menu.Managed {

@@ -3,7 +3,7 @@ module nomo
 go 1.27.3
 
 require (
-	github.com/egoist/mygo v0.7.4
+	github.com/egoist/mygo v0.8.1
 	github.com/go-text/typesetting v0.3.5
 	github.com/pdfcpu/pdfcpu v0.16.4
 	go.yaml.in/yaml/v3 v3.0.5

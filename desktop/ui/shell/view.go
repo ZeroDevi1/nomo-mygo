@@ -35,12 +35,9 @@ func (s *Shell) view(c *ui.Context) {
 	}
 	s.applyTheme(c)
 	t := c.Theme()
-	s.ch = s.pf.chrome(t, c.Vibrancy())
+	s.ch = s.pf.chrome(t, c.Vibrancy() && !(s.pf.windows && c.Preferences().HighContrast))
 	svc := c.Services()
 	s.svc = &svc
-	if s.ch.material {
-		c.Root().Background(ui.Transparent)
-	}
 	tab := s.activeTab()
 	if tab != nil && tab.preview && tab.Dirty() {
 		tab.preview = false // 编辑后固定预览标签
@@ -55,6 +52,10 @@ func (s *Shell) view(c *ui.Context) {
 	s.updateScholar(c, tab)
 	s.syncEditorGroups()
 	s.applyDocumentAppearance(c, tab)
+	// 字体偏好可能再次 SetTheme，材质底层须在其后恢复透明。
+	if s.ch.material {
+		c.Root().Background(ui.Transparent)
+	}
 	s.autoSave(c)
 	s.trackWorkspace(c)
 	s.scheduleLint(c, s.activeTab())
@@ -111,12 +112,20 @@ func (s *Shell) applyTheme(c *ui.Context) {
 		dark = true
 	}
 	theme := s.pf.theme(dark, c.Preferences().Accent)
-	if selected := s.currentTheme(); selected.ID == themes.DefaultThemeID {
+	if selected := s.currentTheme(); !s.pf.windows && selected.ID == themes.DefaultThemeID {
 		tokens := selected.Tokens(dark)
 		accent := tokens("accent")
 		setAccent(theme, accent, accent)
 		theme.AccentText = tokens("onAccent")
 		theme.Focus = accent
+	}
+	if s.pf.windows {
+		if s.prefs.UIFontFamily != "" {
+			theme.Font = s.prefs.UIFontFamily
+		}
+		if c.Preferences().HighContrast {
+			theme.TextMuted, theme.Border, theme.Focus = theme.Text, theme.Text, theme.Text
+		}
 	}
 	c.SetTheme(theme)
 }
@@ -124,7 +133,12 @@ func (s *Shell) applyTheme(c *ui.Context) {
 // toolButton 是工具栏、标题栏的图标按钮：无底色，悬停时显示浅底，带提示。
 func (s *Shell) toolButton(c *ui.Context, icon, tip string, on bool) ui.Element {
 	b := ui.ButtonBase(c).Padding(5).Radius(c.Theme().Radius).Tooltip(tip)
+	if s.pf.windows {
+		b.Label(tip).FocusRing(true).Selected(on)
+	}
 	switch {
+	case s.pf.windows && b.Pressed():
+		b.Background(s.ch.pressed)
 	case on:
 		b.Background(s.ch.pressed)
 	case b.Hovered():
@@ -288,7 +302,10 @@ func (s *Shell) desktopLayout(c *ui.Context) {
 			if s.toolButton(c, "panel-left", s.tr(hide), false).Clicked() {
 				s.scholarToggleSidebar(c)
 			}
-			if p := s.scholarForTab(s.activeTab()); p != nil {
+			if s.pf.windows {
+				s.windowsAppTitle(c, config.AppName)
+				ui.Box(c).Width(8)
+			} else if p := s.scholarForTab(s.activeTab()); p != nil {
 				ui.Text(c, filepath.Base(p.project.Root)).FontSize(12).Bold().SingleLine().MaxWidth(160).Shrink(1).Padding(0, 6, 0, 4)
 			} else {
 				ui.Text(c, config.AppName).FontSize(12).Bold().Padding(0, 6, 0, 4)
@@ -315,7 +332,7 @@ func (s *Shell) desktopLayout(c *ui.Context) {
 				box := ui.Column(c).Grow(1).Fill().Background(s.ch.content)
 				if s.pf.windows {
 					// WinUI NavigationView 的内容区：左上圆角 8，细边框。
-					box.Radius(8, 0, 0, 0).Border(1, s.ch.separator).BorderWidth(1, 0, 0, 1).Clip()
+					box.MinWidth(0).MinHeight(0).Radius(8, 0, 0, 0).Border(1, s.ch.separator).BorderWidth(1, 0, 0, 1).Clip()
 				}
 				box.Children(func() {
 					if len(s.tabs) > 0 {
@@ -342,11 +359,15 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 	t := c.Theme()
 	p := s.scholarForTab(s.activeTab())
 	height := float32(tabBarH)
-	if s.scholar != nil && s.pf.windows {
-		height = 28
+	if s.pf.windows {
+		height = windowsTabBarH
 	}
-	ui.Row(c).Height(height).FillWidth().Padding(0, 8, 0, 8).Gap(2).AlignItems(ui.End).Children(func() {
-		ui.Row(c).Grow(1).FillHeight().Gap(2).Clip().AlignItems(ui.Stretch).Children(func() {
+	bar := ui.Row(c).Height(height).FillWidth().Padding(0, 8, 0, 8).Gap(2).AlignItems(ui.End)
+	if s.pf.windows {
+		bar.Background(s.ch.tabBar).Padding(4, 8, 0, 8)
+	}
+	bar.Children(func() {
+		ui.Row(c).Grow(1).MinWidth(0).FillHeight().Gap(2).Clip().AlignItems(ui.Stretch).Children(func() {
 			for _, tab := range s.barTabs() {
 				i := s.findTabIndex(tab.ID)
 				if i < 0 || s.tabHidden(tab) {
@@ -356,6 +377,10 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 				active := s.tabSelected(tab)
 				selected := active && (p == nil || !p.references.catalog && p.references.focused == nil)
 				box := ui.Row(ck).Height(height).Padding(0, 4, 0, 12).Gap(6).AlignItems(ui.Center).Radius(t.Radius*2, t.Radius*2, 0, 0).MaxWidth(240)
+				if s.pf.windows {
+					box.Height(height - 4).MinWidth(96).Shrink(1)
+					s.ch.windowsTab(box, selected)
+				}
 				switch {
 				case selected:
 					box.Background(s.ch.tabActive)
@@ -368,6 +393,12 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 					label := ui.ButtonBase(ck).Gap(6).Children(func() {
 						ui.Icon(ck, icons.ForFile(tab.Name(s.untitledName))).FontSize(14).TextColor(s.ch.muted)
 						txt := ui.Text(ck, s.tabLabel(tab)).FontSize(12).SingleLine()
+						if s.pf.windows {
+							txt.FontSize(t.FontSize).Grow(1).MinWidth(0).Shrink(1)
+							if selected {
+								txt.FontWeight(600)
+							}
+						}
 						if !selected {
 							txt.TextColor(s.ch.muted)
 						}
@@ -375,6 +406,10 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 							txt.Italic() // 预览标签（原版 DocumentTabs 的 .preview）
 						}
 					})
+					if s.pf.windows {
+						label.Grow(1).Shrink(1).MinWidth(0).FillHeight().Justify(ui.Start).FocusRing(true).
+							Role(ui.RoleTab).Selected(selected).Background(ui.Transparent).TextColor(s.ch.text).Label(s.tabLabel(tab))
+					}
 					if tab.Path != "" {
 						label.Tooltip(tab.Path)
 					}
@@ -397,7 +432,7 @@ func (s *Shell) desktopTabs(c *ui.Context) {
 			}
 		})
 		if tab := s.activeTab(); s.scholarForTab(tab) != nil {
-			ui.Row(c).Height(height).Gap(4).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).FillHeight().Gap(4).AlignItems(ui.Center).Children(func() {
 				s.editorSplitButtons(c.Key("split-buttons"), s.workspaceSelection())
 				s.documentTools(c)
 			})
@@ -498,6 +533,9 @@ func (s *Shell) moveTab(id, target int) {
 // closeButton 画标签的关闭按钮；有未保存修改时平时显示圆点，悬停时显示 ×（与原版一致）。
 func (s *Shell) closeButton(c *ui.Context, tab *Tab, visible bool) {
 	x := ui.ButtonBase(c).Size(18, 18).Radius(4).Tooltip(s.tr("closeTab"))
+	if s.pf.windows {
+		x.Size(24, 24).Label(s.tr("closeTab")).FocusRing(true)
+	}
 	hovered := x.Hovered()
 	if hovered {
 		x.Background(s.ch.pressed)
@@ -506,7 +544,7 @@ func (s *Shell) closeButton(c *ui.Context, tab *Tab, visible bool) {
 		switch {
 		case tab.Dirty() && !hovered:
 			ui.Box(c).Size(7, 7).Radius(4).Background(s.ch.muted)
-		case visible || hovered:
+		case visible || hovered || s.pf.windows && x.Focused():
 			ui.Icon(c, s.icon("x")).FontSize(12).TextColor(s.ch.muted)
 		}
 	})
@@ -956,7 +994,11 @@ func (s *Shell) outlineContent(c *ui.Context, tab *Tab, navigate func()) {
 
 func (s *Shell) statusBar(c *ui.Context, tab *Tab) {
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-	ui.Row(c).Height(statusH).FillWidth().Padding(0, 12).Gap(14).AlignItems(ui.Center).Children(func() {
+	row := ui.Row(c).Height(statusH).FillWidth().Padding(0, 12).Gap(14).AlignItems(ui.Center)
+	if s.pf.windows {
+		row.Background(c.Theme().Background)
+	}
+	row.Children(func() {
 		s.lintButton(c, tab)
 		st := tab.Stats()
 		muted := func(text string) ui.Element {

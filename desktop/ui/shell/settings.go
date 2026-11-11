@@ -96,42 +96,88 @@ func (s *Shell) openSettings() {
 func (sw *settingsWindow) view(c *ui.Context) {
 	s := sw.s
 	s.applyTheme(c)
-	ch := s.pf.chrome(c.Theme(), c.Vibrancy())
+	ch := s.pf.chrome(c.Theme(), c.Vibrancy() && !(s.pf.windows && c.Preferences().HighContrast))
 	if ch.material {
 		c.Root().Background(ui.Transparent)
 	}
 	bar := c.TitleBar()
-	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-		// 左侧分类：macOS 为 vibrancy 源列表（交通灯在其顶部），Windows 为 Mica 上的导航列表。
-		ui.Column(c).Width(200).FillHeight().Background(ch.paint(ch.sidebar, true)).Children(func() {
-			ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, 12, 0, bar.Left+12).AlignItems(ui.Center).DragWindow().Children(func() {
-				if !s.pf.mac {
-					ui.Text(c, s.tr("settingsTitle")).FontSize(12).Bold()
-				}
-			})
-			ui.Sidebar(c, &sw.cat, func() {
-				for _, cat := range s.settingsCategories() {
-					ui.SidebarItem(c, cat.id, s.icon(cat.icon), s.tr(cat.label))
-				}
-			}).Grow(1).FillWidth().Background(ui.Transparent)
-		})
-		ui.Box(c).Width(1).FillHeight().Background(ch.separator)
-		ui.Column(c).Grow(1).Fill().Background(ch.content).Children(func() {
-			ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, bar.Right+16, 0, 24).AlignItems(ui.Center).DragWindow().Children(func() {
-				for _, cat := range s.settingsCategories() {
-					if cat.id == sw.cat {
-						ui.Text(c, s.tr(cat.label)).FontSize(15).Bold()
+	if s.pf.windows {
+		sw.windowsView(c, ch)
+	} else {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+			// macOS 的分类侧栏顶部预留交通灯位置。
+			ui.Column(c).Width(200).FillHeight().Background(ch.paint(ch.sidebar, true)).Children(func() {
+				ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, 12, 0, bar.Left+12).AlignItems(ui.Center).DragWindow().Children(func() {
+					if !s.pf.mac {
+						ui.Text(c, s.tr("settingsTitle")).FontSize(12).Bold()
 					}
-				}
+				})
+				ui.Sidebar(c, &sw.cat, func() {
+					for _, cat := range s.settingsCategories() {
+						ui.SidebarItem(c, cat.id, s.icon(cat.icon), s.tr(cat.label))
+					}
+				}).Grow(1).FillWidth().Background(ui.Transparent)
 			})
-			ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Padding(4, 28, 28, 28).Gap(20).Children(func() { sw.page(c) })
+			ui.Box(c).Width(1).FillHeight().Background(ch.separator)
+			ui.Column(c).Grow(1).Fill().Background(ch.content).Children(func() {
+				ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, bar.Right+16, 0, 24).AlignItems(ui.Center).DragWindow().Children(func() {
+					for _, cat := range s.settingsCategories() {
+						if cat.id == sw.cat {
+							ui.Text(c, s.tr(cat.label)).FontSize(15).Bold()
+						}
+					}
+				})
+				ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+					ui.Column(c).FillWidth().Padding(4, 28, 28, 28).Gap(20).Children(func() { sw.page(c) })
+				})
 			})
 		})
-	})
+	}
 	if !c.Root().Pressed() {
 		sw.flush()
 	}
+}
+
+func (sw *settingsWindow) windowsView(c *ui.Context, ch chrome) {
+	s := sw.s
+	bar := c.TitleBar()
+	ui.Column(c).Fill().Background(ch.paint(ch.titlebar, true)).Children(func() {
+		ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, bar.Right+8, 0, bar.Left+16).
+			AlignItems(ui.Center).DragWindow().Children(func() {
+			ui.Text(c, s.tr("settingsTitle")).FontSize(12).SingleLine()
+		})
+		ui.Row(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			ui.Column(c).Width(196).Shrink(0).FillHeight().Padding(8).Gap(4).Children(func() {
+				for _, cat := range s.settingsCategories() {
+					if ch.windowsNavButton(c.Key(cat.id), s.icon(cat.icon), s.tr(cat.label), sw.cat == cat.id, true).Clicked() {
+						sw.cat = cat.id
+					}
+				}
+			})
+			ui.Column(c).Grow(1).FillHeight().MinWidth(0).MinHeight(0).Radius(8, 0, 0, 0).
+				Border(1, ch.separator).BorderWidth(1, 0, 0, 1).Clip().Background(ch.content).Children(func() {
+				sw.windowsContent(c, func() {
+					for _, cat := range s.settingsCategories() {
+						if cat.id == sw.cat {
+							ui.Text(c, s.tr(cat.label)).FontSize(28).FontWeight(600).SingleLine()
+						}
+					}
+				})
+			})
+		})
+	})
+}
+
+func (sw *settingsWindow) windowsContent(c *ui.Context, header func()) {
+	const maxWidth = 1000
+	ui.Column(c).Grow(1).FillWidth().MinHeight(0).AlignItems(ui.Center).Background(c.Theme().Background).Children(func() {
+		ui.Column(c).MaxWidth(maxWidth).FillWidth().Padding(20, 24, 16, 24).Children(header)
+		ui.Scroll(c.Key(sw.cat)).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Column(c).MaxWidth(maxWidth).FillWidth().Padding(4, 24, 24, 24).Gap(24).Children(func() { sw.page(c) })
+			})
+		})
+	})
 }
 
 // flush 写回拖动期间暂存的设置。
@@ -159,8 +205,9 @@ func (sw *settingsWindow) page(c *ui.Context) {
 		sw.section(c, "typesetProviders", func() {
 			for pr := range providers.All() {
 				enabled := !p.DisabledProviders[pr.ID]
-				ui.Field(c.Key("provider."+pr.ID), pr.Name, func() {
-					if ui.Switch(c, &enabled).Changed() {
+				sw.setting(c.Key("provider."+pr.ID), pr.Name, "", func() ui.Element {
+					toggle := ui.Switch(c, &enabled)
+					if toggle.Changed() {
 						if enabled {
 							delete(p.DisabledProviders, pr.ID)
 						} else {
@@ -171,6 +218,7 @@ func (sw *settingsWindow) page(c *ui.Context) {
 						}
 						s.setPref("disabledProviders")
 					}
+					return toggle
 				})
 			}
 			sw.toggle(c, "providerSyntax", "providerSyntax", &p.ProviderSyntax)
@@ -324,34 +372,73 @@ const (
 	originalRepoURL = "https://github.com/nomo-md/nomo"
 )
 
-// section 是一组设置：分组标题 + macOS 风格的两列表单（标签右对齐）。
+// section 在 Windows 上用分组标题和独立设置卡片，其他平台用两列表单。
 func (sw *settingsWindow) section(c *ui.Context, title string, fn func()) {
+	if sw.s.pf.windows {
+		ui.Column(c).FillWidth().Gap(4).Children(func() {
+			ui.Text(c, sw.s.tr(title)).FontWeight(600).Margin(0, 0, 4, 0)
+			fn()
+		})
+		return
+	}
 	ui.Column(c).FillWidth().Gap(10).Children(func() {
 		ui.Text(c, sw.s.tr(title)).FontSize(12).Bold().TextColor(c.Theme().TextMuted)
 		ui.Form(c, fn)
 	})
 }
 
+// setting 在宽卡片内把操作放在右侧，空间不足时随说明换行。
+func (sw *settingsWindow) setting(c *ui.Context, label, description string, control func() ui.Element) ui.Element {
+	if !sw.s.pf.windows {
+		return ui.Field(c, label, func() { control() }).Description(description)
+	}
+	t := c.Theme()
+	var input ui.Element
+	ui.Row(c).FillWidth().MinHeight(64).Wrap().Padding(12, 16).GapX(20).GapY(8).
+		AlignItems(ui.Center).Radius(4).Background(t.Surface).Border(1, t.Border).Children(func() {
+		ui.Column(c).Basis(240).Grow(1).MinWidth(0).Gap(4).Children(func() {
+			ui.Text(c, label).Wrap()
+			if description != "" {
+				ui.Text(c, description).FontSize(12).TextColor(t.TextMuted).Wrap()
+			}
+		})
+		ui.Column(c).Shrink(0).Gap(4).Children(func() {
+			input = control().Label(label).Description(description)
+		})
+	})
+	return input
+}
+
+func (sw *settingsWindow) settingsPanel(c *ui.Context, label string, controls func()) ui.Element {
+	field := ui.Field(c, label, controls)
+	if sw.s.pf.windows {
+		field.FillWidth().Padding(12, 16).Radius(4).Background(c.Theme().Surface).Border(1, c.Theme().Border)
+	}
+	return field
+}
+
 // descriptionKeys 是说明文案键不等于“标题键 + Description”的设置（沿用原版文案键）。
 var descriptionKeys = map[string]string{"typographyEnabled": "typographyDescription"}
 
-func (sw *settingsWindow) describe(f ui.Element, label string) {
+func (sw *settingsWindow) description(label string) string {
 	key := label + "Description"
 	if k, ok := descriptionKeys[label]; ok {
 		key = k
 	}
 	if d := sw.s.tr(key); d != key {
-		f.Description(d)
+		return d
 	}
+	return ""
 }
 
 func (sw *settingsWindow) toggle(c *ui.Context, label, key string, v *bool) {
-	f := ui.Field(c.Key(key), sw.s.tr(label), func() {
-		if ui.Switch(c, v).Changed() {
+	sw.setting(c.Key(key), sw.s.tr(label), sw.description(label), func() ui.Element {
+		toggle := ui.Switch(c, v)
+		if toggle.Changed() {
 			sw.s.setPref(key)
 		}
+		return toggle
 	})
-	sw.describe(f, label)
 }
 
 // choice 是枚举设置：values 为存储值，labels 为显示文案。
@@ -366,8 +453,9 @@ func (sw *settingsWindow) choiceDisabled(c *ui.Context, label, key string, v *st
 			cur = labels[i]
 		}
 	}
-	f := ui.Field(c.Key(label), sw.s.tr(label), func() {
-		if ui.Select(c, &cur, labels).Width(220).Disabled(disabled).Changed() {
+	sw.setting(c.Key(label), sw.s.tr(label), sw.description(label), func() ui.Element {
+		selectBox := ui.Select(c, &cur, labels).Width(220).Disabled(disabled)
+		if selectBox.Changed() {
 			for i, l := range labels {
 				if l == cur {
 					*v = values[i]
@@ -380,25 +468,34 @@ func (sw *settingsWindow) choiceDisabled(c *ui.Context, label, key string, v *st
 				sw.s.installMenu()
 			}
 		}
+		return selectBox
 	})
-	sw.describe(f, label)
 }
 
 // slider 是数值设置，按 step 取整；拖动中只改内存，松开后写盘（见 flush）。
 func (sw *settingsWindow) slider(c *ui.Context, label, key string, v *float64, lo, hi, step float64, format string, disabled bool) {
-	f := ui.Field(c.Key(key), sw.s.tr(label), func() {
+	sw.setting(c.Key(key), sw.s.tr(label), sw.description(label), func() ui.Element {
+		width, valueWidth := float32(220), float32(64)
+		if sw.s.pf.windows {
+			width, valueWidth = 154, 56
+		}
+		var slider ui.Element
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			if ui.Slider(c, v, lo, hi).Width(220).Disabled(disabled).Changed() {
+			slider = ui.Slider(c, v, lo, hi).Width(width).Disabled(disabled)
+			if slider.Changed() {
 				*v = math.Round(*v/step) * step
 				sw.pending[key] = true
 				if sw.s.win != nil {
 					sw.s.win.Update(func() {})
 				}
 			}
-			ui.Text(c, fmt.Sprintf(format, *v)).FontSize(12).TextColor(c.Theme().TextMuted).Width(64)
+			value := ui.Text(c, fmt.Sprintf(format, *v)).FontSize(12).TextColor(c.Theme().TextMuted).Width(valueWidth)
+			if sw.s.pf.windows {
+				value.TextAlign(ui.End)
+			}
 		})
+		return slider
 	})
-	sw.describe(f, label)
 }
 
 func trimmed(v string) (string, bool) { return strings.TrimSpace(v), true }
@@ -414,8 +511,12 @@ func (sw *settingsWindow) text(c *ui.Context, label, key string, v *string, plac
 		*d = *v
 		sw.drafts[id] = d
 	}
-	f := ui.Field(c.Key(id), sw.s.tr(label), func() {
-		in := ui.TextInput(c, d).Width(260).Placeholder(placeholder).Disabled(disabled)
+	f := sw.setting(c.Key(id), sw.s.tr(label), sw.description(label), func() ui.Element {
+		width := float32(260)
+		if sw.s.pf.windows {
+			width = 220
+		}
+		in := ui.TextInput(c, d).Width(width).Placeholder(placeholder).Disabled(disabled)
 		focused := in.Focused()
 		if !focused && !sw.focused[id] && *d != *v && !sw.invalid[id] {
 			*d = *v // 外部修改（如导入设置）时同步草稿
@@ -433,8 +534,11 @@ func (sw *settingsWindow) text(c *ui.Context, label, key string, v *string, plac
 			}
 		}
 		sw.focused[id] = focused
+		if sw.s.pf.windows && sw.invalid[id] && invalidKey != "" {
+			ui.Text(c, sw.s.tr(invalidKey)).FontSize(12).TextColor(c.Theme().Danger).MaxWidth(width).Wrap()
+		}
+		return in
 	})
-	sw.describe(f, label)
 	if sw.invalid[id] && invalidKey != "" {
 		f.Error(sw.s.tr(invalidKey))
 	}
@@ -452,7 +556,7 @@ func (sw *settingsWindow) colorTheme(c *ui.Context) {
 			sel = names[i]
 		}
 	}
-	ui.Field(c.Key("colorTheme"), s.tr("colorTheme"), func() {
+	sw.settingsPanel(c.Key("colorTheme"), s.tr("colorTheme"), func() {
 		ui.Column(c).Gap(8).Children(func() {
 			if ui.Select(c, &sel, names).Width(220).Changed() {
 				if i := slices.Index(names, sel); i >= 0 {
@@ -460,7 +564,11 @@ func (sw *settingsWindow) colorTheme(c *ui.Context) {
 					s.setPref("colorThemeId")
 				}
 			}
-			ui.Row(c).Gap(8).Children(func() {
+			actions := ui.Row(c).Gap(8)
+			if s.pf.windows {
+				actions.FillWidth().Wrap()
+			}
+			actions.Children(func() {
 				if ui.Button(c, s.tr("importUserTheme")).Clicked() {
 					s.importTheme()
 				}
@@ -482,7 +590,7 @@ func (sw *settingsWindow) colorTheme(c *ui.Context) {
 // connectionTest 测试图床连接（后台运行，结果显示在按钮旁）。
 func (sw *settingsWindow) connectionTest(c *ui.Context) {
 	s := sw.s
-	f := ui.Field(c.Key("connectionTest"), s.tr("connectionTest"), func() {
+	f := sw.settingsPanel(c.Key("connectionTest"), s.tr("connectionTest"), func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			label := s.tr("testConnection")
 			if sw.testing {
@@ -509,7 +617,7 @@ func (sw *settingsWindow) connectionTest(c *ui.Context) {
 			}
 		})
 	})
-	sw.describe(f, "connectionTest")
+	f.Description(sw.description("connectionTest"))
 }
 
 // shortcuts 是可自定义快捷键列表；提交后重建菜单使新快捷键生效。存储格式同原版（如 Ctrl+Shift+K，Ctrl 在 macOS 上

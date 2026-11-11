@@ -523,7 +523,7 @@ func (s *Shell) scholarToggleSidebarAt(width float32) {
 		if width >= scholarWindowsExpanded {
 			p.winRailCollapsed = !p.winRailCollapsed
 		} else {
-			p.winRailPopup = !p.winRailPopup
+			s.openScholarWindowsNavigation(p)
 		}
 		return
 	}
@@ -597,7 +597,7 @@ func (s *Shell) showScholarNavigation(p *scholarState, destination int, width fl
 	p.nav = destination
 	p.references.catalog = false
 	if s.pf.windows {
-		if width >= scholarWindowsExpanded {
+		if width >= scholarWindowsProjectMin {
 			p.winProjectOpen = true
 		} else {
 			p.winCompactProject = true
@@ -691,13 +691,19 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 	if s.pf.mac {
 		header.Padding(0, 8, 0, 16)
 	}
+	if s.pf.windows {
+		header.Height(windowsTabBarH).Padding(0, 6, 0, 12)
+	}
 	header.Children(func() {
 		title := s.tr(scholarDestinations[section].label)
 		if section == scholarFiles {
 			title = filepath.Base(p.project.Root)
 		}
-		ui.Text(c, title).FontSize(11).Bold().TextColor(s.ch.muted).
+		name := ui.Text(c, title).FontSize(11).Bold().TextColor(s.ch.muted).
 			SingleLine().Grow(1).MinWidth(0).Tooltip(p.project.Root)
+		if s.pf.windows {
+			name.FontSize(14).FontWeight(600).TextColor(s.ch.text)
+		}
 		if files != nil {
 			label := s.tr("scholarProjectActions")
 			s.toolButton(c.Key("project"), "ellipsis", label, false).Label(label).FocusRing(true).Menu(func(m *ui.Menu) {
@@ -933,9 +939,15 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 		gap = 5
 	}
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-	ui.Row(c).Height(statusH).FillWidth().Padding(0, 10).Gap(gap).AlignItems(ui.Center).Children(func() {
+	row := ui.Row(c).Height(statusH).FillWidth().Padding(0, 10).Gap(gap).AlignItems(ui.Center)
+	fontSize := float32(11)
+	if s.pf.windows {
+		row.Background(c.Theme().Background)
+		fontSize = 12
+	}
+	row.Children(func() {
 		part := func(label, channel string) {
-			ui.Text(c, label).FontSize(11).TextColor(scholarInk(c, channel)).SingleLine().MinWidth(0).Shrink(1)
+			ui.Text(c, label).FontSize(fontSize).TextColor(scholarInk(c, channel)).SingleLine().MinWidth(0).Shrink(1)
 		}
 		if pane := s.compile; pane != nil && pane.tab == tab && pane.parkedPage == 0 {
 			switch {
@@ -997,7 +1009,7 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 		ui.Spacer(c)
 		if width >= 860 && p.citations.tabID == tab.ID && p.citations.counted {
 			ui.Text(c, s.statsText(p.citations.words, p.citations.chars, tab.Source().Buffer.LineCount())).
-				FontSize(11).TextColor(s.ch.muted).SingleLine().MinWidth(0).Shrink(1)
+				FontSize(fontSize).TextColor(s.ch.muted).SingleLine().MinWidth(0).Shrink(1)
 		}
 		if tab.Dirty() {
 			part(s.tr("scholarManuscriptUnsaved"), "warning")

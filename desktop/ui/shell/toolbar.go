@@ -120,6 +120,9 @@ func (s *Shell) toolbar(c *ui.Context) {
 		return b
 	}
 	row := ui.Row(c).Height(toolbarH).FillWidth().Padding(0, 10).Gap(1).AlignItems(ui.Center)
+	if s.pf.windows {
+		row.Background(c.Theme().Background)
+	}
 	// 按上一帧的工具栏宽度决定显示哪些分组；收起的命令仍可从菜单、快捷键与快捷插入使用。
 	showCore, showMedium, showLow := toolbarFit(row.Bounds().W, s.loadEmoji != nil, !s.pf.mac)
 	row.Children(func() {

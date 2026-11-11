@@ -396,6 +396,9 @@ func (s *Shell) editorGroupView(c *ui.Context, p *scholarState, g *editorGroup, 
 	}
 	pane.Children(func() {
 		bar := ui.Row(c.Key("group-tabs")).Height(tabBarH - 4).FillWidth().AlignItems(ui.Stretch).Background(s.ch.tabBar)
+		if s.pf.windows {
+			bar.Height(windowsTabBarH).Padding(4, 4, 0, 4).Gap(2)
+		}
 		if _, over := ui.DragOver[tabDrag](bar); over {
 			bar.Background(s.ch.hover)
 		}
@@ -585,7 +588,11 @@ func (s *Shell) editorGroupsToolbar(c *ui.Context) {
 	if s.scholarForTab(s.activeTab()) == nil {
 		return
 	}
-	ui.Row(c).Height(tabBarH-4).FillWidth().Padding(0, 4).Gap(4).AlignItems(ui.Center).Background(s.ch.tabBar).Children(func() {
+	bar := ui.Row(c).Height(tabBarH-4).FillWidth().Padding(0, 4).Gap(4).AlignItems(ui.Center).Background(s.ch.tabBar)
+	if s.pf.windows {
+		bar.Height(windowsTabBarH)
+	}
+	bar.Children(func() {
 		ui.Spacer(c)
 		s.documentTools(c)
 	})

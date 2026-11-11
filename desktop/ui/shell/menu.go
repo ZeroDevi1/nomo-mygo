@@ -203,16 +203,29 @@ func (s *Shell) editCommand(id string) bool {
 // menus 画标题栏中的菜单按钮（Windows / Linux 上即应用菜单；macOS 另有系统菜单栏）。
 func (s *Shell) menus(c *ui.Context) {
 	t := c.Theme()
+	fontSize := float32(13)
+	if s.pf.windows {
+		fontSize = 14
+	}
 	for _, g := range s.menuGroups() {
 		if g.label == "scholarWorkspace" && s.scholarForTab(s.activeTab()) == nil {
 			continue
 		}
 		ck := c.Key(g.label)
 		b := ui.ButtonBase(ck).Padding(4, 10).Radius(6)
-		if b.Hovered() {
-			b.Background(t.SurfaceHover)
+		if s.pf.windows {
+			b.Radius(4).Label(s.tr(g.label)).FocusRing(true)
 		}
-		b.Children(func() { ui.Text(ck, s.tr(g.label)).FontSize(13) })
+		if s.pf.windows && b.Pressed() {
+			b.Background(s.ch.pressed)
+		} else if b.Hovered() {
+			if s.pf.windows {
+				b.Background(s.ch.hover)
+			} else {
+				b.Background(t.SurfaceHover)
+			}
+		}
+		b.Children(func() { ui.Text(ck, s.tr(g.label)).FontSize(fontSize) })
 		b.Menu(func(m *ui.Menu) {
 			for i, it := range g.items {
 				if it.sep && i > 0 {
