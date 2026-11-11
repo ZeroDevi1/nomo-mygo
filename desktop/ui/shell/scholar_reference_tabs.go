@@ -107,7 +107,7 @@ func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, pat
 	z := p.literature.zotero
 	z.Group = e.Library
 	for _, t := range r.tabs {
-		if (key != "" && t.key == key && t.zotero.ServerID == z.ServerID && t.zotero.Group == z.Group) ||
+		if (key != "" && t.key == key && t.zotero.SameSource(z) && t.zotero.Group == z.Group) ||
 			(key == "" && t.key == "" && samePath(t.path, path)) {
 			s.selectScholarPDF(p, t)
 			if key != "" {

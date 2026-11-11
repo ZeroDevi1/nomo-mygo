@@ -57,7 +57,7 @@ func (s *Shell) returnScholarAnnotationEntry(p *scholarState, view *scholarAnnot
 
 func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholarAnnotationView) {
 	ui.Column(c).FillWidth().Padding(8, 0, 12, 0).Gap(6).Children(func() {
-		currentLibrary := view.zotero.ServerID == p.literature.zotero.ServerID
+		currentLibrary := view.zotero.SameSource(p.literature.zotero)
 		if !view.loaded {
 			if p.busy {
 				scholarReaderText(c, s.tr("scholarLoadingAnnotations")).TextColor(s.ch.muted)

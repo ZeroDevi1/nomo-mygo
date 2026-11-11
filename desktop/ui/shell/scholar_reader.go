@@ -51,7 +51,7 @@ func (l *scholarLiteratureState) readerNote() *scholar.ZoteroNote {
 
 func (l *scholarLiteratureState) readerForm() *scholarZoteroForm {
 	f := l.zoteroForm
-	if f != nil && !f.catalog && f.z.ServerID == l.zotero.ServerID && f.z.Group == l.selected.Library &&
+	if f != nil && !f.catalog && f.z.SameSource(l.zotero) && f.z.Group == l.selected.Library &&
 		(f.key == l.selected.RemoteID || f.key == l.selectedNote) {
 		return f
 	}

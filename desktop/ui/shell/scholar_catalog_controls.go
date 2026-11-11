@@ -13,8 +13,12 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	ui.Row(c).FillWidth().Height(38).Padding(0, 7).Gap(5).AlignItems(ui.Center).Children(func() {
 		titles := []string{s.tr("scholarProject"), "Zotero", s.tr("scholarOnline")}
+		offline := l.zotero.ReadOnly()
+		if offline {
+			titles[1] = s.tr("scholarZoteroReadOnly")
+		}
 		glyph := [...]string{"folder", "book-open", "globe"}[l.mode]
-		showSource := l.mode != 1 || s.pf.windows && !l.connected
+		showSource := l.mode != 1 || offline || s.pf.windows && !l.connected
 		s.scholarMenuButton(c.Key("source"), glyph, titles[l.mode], showSource).Disabled(p.busy).Menu(func(m *ui.Menu) {
 			for i, title := range titles {
 				if m.Item(title).Radio(l.mode == i).Chosen() {
@@ -38,7 +42,7 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 		if s.scholarCompactIcon(c.Key("pdf"), glyph, label, false).Disabled(p.busy || l.selected.RemoteID == "").Clicked() {
 			s.openScholarReference(p, l.selected)
 		}
-		if s.scholarCompactIcon(c.Key("note"), "sticky-note", s.tr("scholarZoteroNewNote"), false).Disabled(p.busy || l.selected.Source != "Zotero" || l.selected.RemoteID == "" || l.detail.Deleted || l.detail.ItemType == "" || l.detail.ItemType == "note" || l.zotero.ServerID == "").Clicked() {
+		if !offline && s.scholarCompactIcon(c.Key("note"), "sticky-note", s.tr("scholarZoteroNewNote"), false).Disabled(p.busy || l.selected.Source != "Zotero" || l.selected.RemoteID == "" || l.detail.Deleted || l.detail.ItemType == "" || l.detail.ItemType == "note" || !l.zotero.CanWrite()).Clicked() {
 			s.startScholarZoteroNote(p)
 		}
 		if s.scholarCompactIcon(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(p.busy).Clicked() {
@@ -53,12 +57,19 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 			l.recentOpen = false
 			s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
 		}
-		s.scholarCompactIcon(c.Key("options"), "list-filter", s.tr("scholarSearchOptions"), l.fulltext).Menu(func(m *ui.Menu) {
-			if m.Item(s.tr("scholarFulltextPage")).Checked(l.fulltext).
-				Disabled(p.busy || l.scope != scholar.ZoteroAll || l.tag != "").Chosen() {
-				l.fulltext = !l.fulltext
+		if offline {
+			if p.busy && l.zoteroBrowseJob == p.job &&
+				s.scholarCompactIcon(c.Key("cancel"), "x", s.tr("scholarAgentCancelWork"), false).Clicked() {
+				p.cancelCurrent()
 			}
-		})
+		} else {
+			s.scholarCompactIcon(c.Key("options"), "list-filter", s.tr("scholarSearchOptions"), l.fulltext).Menu(func(m *ui.Menu) {
+				if m.Item(s.tr("scholarFulltextPage")).Checked(l.fulltext).
+					Disabled(p.busy || l.scope != scholar.ZoteroAll || l.tag != "").Chosen() {
+					l.fulltext = !l.fulltext
+				}
+			})
+		}
 	})
 }
 

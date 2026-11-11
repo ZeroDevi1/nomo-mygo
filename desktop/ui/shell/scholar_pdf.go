@@ -78,7 +78,7 @@ func (s *Shell) openScholarReference(p *scholarState, entry scholar.Entry) {
 
 func scholarBestAttachment(pdfs []scholar.Attachment) (link scholar.Attachment) {
 	for _, pdf := range pdfs {
-		if pdf.Key != "" && !pdf.LinkOnly {
+		if pdf.Key != "" && !pdf.LinkOnly && !pdf.Unavailable {
 			return pdf
 		}
 		if link.Key == "" && scholarWebURL(pdf.URL) != "" {
@@ -108,7 +108,8 @@ func (s *Shell) openScholarZoteroPDF(p *scholarState, entry scholar.Entry, pdf s
 
 func (s *Shell) scholarReferenceOpenLabel(p *scholarState, entry scholar.Entry) (glyph, label string) {
 	l := &p.literature
-	if strings.EqualFold(filepath.Ext(entry.File), ".pdf") || scholarSameCatalogItem(entry, l.detail.Entry) && len(l.detail.PDFs) > 0 && !scholarBestAttachment(l.detail.PDFs).LinkOnly {
+	attachment := scholarBestAttachment(l.detail.PDFs)
+	if strings.EqualFold(filepath.Ext(entry.File), ".pdf") || scholarSameCatalogItem(entry, l.detail.Entry) && attachment.Key != "" && !attachment.LinkOnly {
 		return "file-text", s.tr("scholarOpenPDF")
 	}
 	if scholarEntryWebURL(entry) != "" {
@@ -161,7 +162,7 @@ func (s *Shell) copyScholarBib(p *scholarState, e scholar.Entry, svc ui.Services
 	z := p.literature.zotero
 	z.Group = e.Library
 	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
-		if e.RemoteID != "" {
+		if e.RemoteID != "" && !(local && z.ReadOnly()) {
 			raw, err := z.ExportFor(ctx, e, "references.bib")
 			return func() {
 				if err == nil {

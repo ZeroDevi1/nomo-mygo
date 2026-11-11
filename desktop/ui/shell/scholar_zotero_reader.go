@@ -39,7 +39,7 @@ func (s *Shell) scholarReaderPane(c *ui.Context, p *scholarState, width float32,
 			case annotations != nil:
 				title, subtitle = s.tr("scholarReadAnnotations"), annotations.title
 				back = func() {
-					current := annotations.zotero.ServerID == l.zotero.ServerID
+					current := annotations.zotero.SameSource(l.zotero)
 					if s.scholarCompactIcon(c.Key("back"), "arrow-left", s.tr("scholarAnnotationEntry"), false).Disabled(p.busy || !current).Clicked() {
 						s.returnScholarAnnotationEntry(p, annotations)
 					}
@@ -60,7 +60,7 @@ func (s *Shell) scholarReaderPane(c *ui.Context, p *scholarState, width float32,
 			}
 			s.scholarReaderHeader(c.Key("title"), title, subtitle, back, func() {
 				if annotations != nil {
-					current := annotations.zotero.ServerID == l.zotero.ServerID
+					current := annotations.zotero.SameSource(l.zotero)
 					canRefresh := !p.busy && (current || !annotations.loaded)
 					if s.scholarCompactIcon(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(!canRefresh).Clicked() {
 						s.loadScholarAnnotations(p, annotations, annotations.start)

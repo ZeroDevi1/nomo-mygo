@@ -997,7 +997,11 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 				}
 			}
 			if p.literature.connected {
-				part("Zotero", "citation")
+				label := "Zotero"
+				if p.literature.zotero.ReadOnly() {
+					label = s.tr("scholarZoteroReadOnly")
+				}
+				part(label, "citation")
 			}
 			if p.library != nil && len(p.bibNames) > 0 {
 				part(fmt.Sprintf(s.tr("scholarReferenceCount"), p.library.Count()), "citation")

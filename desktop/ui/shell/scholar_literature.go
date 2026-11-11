@@ -38,6 +38,7 @@ type scholarLiteratureState struct {
 	visible                                            []scholar.Entry
 	target                                             int
 	zotero                                             scholar.Zotero
+	zoteroBrowseJob                                    uint64
 	zoteroForm                                         *scholarZoteroForm
 	connected                                          bool
 	collection                                         string
@@ -65,6 +66,22 @@ type scholarLiteratureState struct {
 	loaded, treeTried                                  bool
 	scope                                              scholar.ZoteroScope
 	tree                                               map[string]*scholarCollectionBranch
+}
+
+func (l *scholarLiteratureState) resetZoteroSource() {
+	l.loaded, l.refreshPending = false, false
+	l.pageData, l.page = scholar.ZoteroPage{}, 0
+	l.tree, l.treeTried, l.libraries = nil, false, nil
+	l.tag, l.tagPicker = "", scholarTagPicker{}
+	l.collection, l.remoteQuery, l.sentQuery = "", "", ""
+	l.scope, l.recentOpen, l.fulltext = scholar.ZoteroAll, false, false
+	l.fulltextEntries, l.recent = nil, nil
+	l.zoteroForm, l.annotations = nil, nil
+	l.inline.results.clear()
+	if l.selected.RemoteID != "" {
+		l.selected, l.detail = scholar.Entry{}, scholar.ZoteroDetail{}
+		l.selectedNote, l.openNotice = "", ""
+	}
 }
 
 func (l *scholarLiteratureState) rememberReading(entry scholar.Entry) {
@@ -297,8 +314,12 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 	}
 	l := &p.literature
 	z := l.zotero
+	offline := z.ReadOnly()
 	tag, scope := l.tag, l.scope
-	fulltext := l.fulltext && query != "" && scope == scholar.ZoteroAll && tag == ""
+	if connect {
+		tag, scope = "", scholar.ZoteroAll
+	}
+	fulltext := !connect && !offline && l.fulltext && query != "" && scope == scholar.ZoteroAll && tag == ""
 	if fulltext {
 		l.fulltextProgress = start
 		l.fulltextPaused = false
@@ -316,7 +337,9 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 		var err error
 		if connect {
 			z.Group = 0
-			z, err = z.Reconnect(ctx)
+			probe, stop := context.WithTimeout(ctx, 5*time.Second)
+			z, err = z.Reconnect(probe)
+			stop()
 		}
 		var page scholar.ZoteroPage
 		var full scholar.ZoteroFulltextResult
@@ -335,10 +358,7 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 			}
 		}
 		return func() {
-			if connect {
-				l.connected = err == nil
-				l.annotations = nil
-			}
+			l.zoteroBrowseJob = 0
 			if fulltext {
 				l.fulltextJob = 0
 				l.fulltextPaused = full.Interrupted
@@ -357,20 +377,24 @@ func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query stri
 				lo := min(l.fulltextPage*scholar.ZoteroPageSize, len(l.fulltextEntries))
 				page.Entries = l.fulltextEntries[lo:min(lo+scholar.ZoteroPageSize, len(l.fulltextEntries))]
 			}
-			if connect && l.selected.RemoteID != "" {
-				l.selected, l.detail = scholar.Entry{}, scholar.ZoteroDetail{}
-			}
 			if err != nil {
-				if connect {
-					l.zotero, l.pageData = scholar.Zotero{}, scholar.ZoteroPage{}
-					l.loaded = false
+				if connect && !offline {
+					l.resetZoteroSource()
+					l.zotero, l.connected = scholar.Zotero{}, false
 				}
 				return
+			}
+			if connect {
+				l.resetZoteroSource()
+				l.connected = true
 			}
 			l.zotero, l.pageData, l.collection, l.sentQuery, l.page = z, page, collection, query, start
 			l.loaded = true
 		}, err
 	})
+	if offline && !connect {
+		l.zoteroBrowseJob = p.job
+	}
 	if fulltext {
 		l.fulltextJob = p.job
 	}
@@ -501,7 +525,8 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 
 func (s *Shell) scholarReaderCitations(c *ui.Context, p *scholarState, e scholar.Entry) {
 	l := &p.literature
-	if s.scholarReaderCommand(c.Key("scholarCopyBib"), "copy", s.tr("scholarCopyBib"), false).Disabled(p.busy).Clicked() {
+	offlineItem := l.zotero.ReadOnly() && e.RemoteID != "" && !slices.Contains(p.bibNames, e.Source)
+	if !offlineItem && s.scholarReaderCommand(c.Key("scholarCopyBib"), "copy", s.tr("scholarCopyBib"), false).Disabled(p.busy).Clicked() {
 		s.copyScholarBib(p, e, c.Services())
 	}
 	if slices.Contains(p.bibNames, e.Source) {
@@ -511,7 +536,7 @@ func (s *Shell) scholarReaderCitations(c *ui.Context, p *scholarState, e scholar
 		if s.scholarReaderCommand(c.Key("scholarInsertCitation"), "quote", s.tr("scholarInsertCitation"), false).Clicked() {
 			s.insertScholarCitations(p, []string{e.Key}, "")
 		}
-	} else if e.RemoteID != "" || e.Source == "arXiv" || e.Source == "Crossref" {
+	} else if !offlineItem && (e.RemoteID != "" || e.Source == "arXiv" || e.Source == "Crossref") {
 		if len(p.bibNames) == 0 {
 			ui.Text(c, s.tr("scholarDeclareTarget")).FontSize(11).Wrap()
 		} else {
@@ -534,11 +559,11 @@ func (s *Shell) scholarReaderCitations(c *ui.Context, p *scholarState, e scholar
 		}
 		if e.RemoteID == "" {
 			label := s.tr("scholarSaveToZotero")
-			if !l.connected || l.zotero.ServerID == "" {
+			if !l.connected || !l.zotero.CanWrite() {
 				label = s.tr("scholarCopyForZotero")
 			}
 			if s.scholarReaderCommand(c.Key("save-zotero"), "book-open", label, false).Disabled(p.busy).Clicked() {
-				if !l.connected || l.zotero.ServerID == "" {
+				if !l.connected || !l.zotero.CanWrite() {
 					value, err := scholar.ExportBibTeX(e)
 					if err != nil {
 						p.err = err.Error()
@@ -672,6 +697,10 @@ func (s *Shell) insertScholarQuote(p *scholarState, key, page, quote string) {
 
 func (s *Shell) importScholarEntry(p *scholarState, target string, entry scholar.Entry) {
 	if p.busy {
+		return
+	}
+	if entry.RemoteID != "" && p.literature.zotero.ReadOnly() {
+		p.err = s.tr("scholarZoteroOnlineExport")
 		return
 	}
 	var paths []string

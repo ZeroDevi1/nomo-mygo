@@ -34,6 +34,7 @@ type Zotero struct {
 	ServerID string
 	Group    int
 	writeKey *zoteroWriteKey
+	diskDir  string
 }
 
 func (z Zotero) Reconnect(ctx context.Context) (Zotero, error) {
@@ -45,6 +46,9 @@ func (z Zotero) Reconnect(ctx context.Context) (Zotero, error) {
 		return Zotero{}, fmt.Errorf("Zotero Local API 版本不可用")
 	}
 	id := h.Get("Zotero-Server-ID")
+	if z.ReadOnly() {
+		z = Zotero{}
+	}
 	if z.ServerID == id {
 		return z, nil
 	}
@@ -60,6 +64,9 @@ func (z Zotero) request(ctx context.Context, method, path string, data []byte, k
 }
 
 func (z Zotero) requestWithToken(ctx context.Context, method, path string, data []byte, key, token string) (http.Header, []byte, error) {
+	if z.ReadOnly() {
+		return nil, nil, errZoteroReadOnly
+	}
 	if z.Group > 0 {
 		path = strings.Replace(path, "/api/users/0", fmt.Sprintf("/api/groups/%d", z.Group), 1)
 	}
@@ -102,8 +109,9 @@ type ZoteroPage struct {
 	More        bool
 }
 type zoteroItem struct {
-	Key  string
-	Meta struct {
+	Key            string
+	unavailablePDF bool
+	Meta           struct {
 		CreatorSummary string
 		NumChildren    int
 	}
@@ -154,6 +162,9 @@ func (z Zotero) CollectionsIn(ctx context.Context, parent string, start int) (Zo
 		}
 		path = "/api/users/0/collections/" + parent + "/collections"
 	}
+	if z.ReadOnly() {
+		return z.diskCollections(ctx, parent, start)
+	}
 	h, raw, err := z.request(ctx, "GET", paged(path, start, ""), nil, "")
 	if err != nil {
 		return page, err
@@ -188,6 +199,9 @@ func (z Zotero) Search(ctx context.Context, query, collection string, start int)
 }
 
 func (z Zotero) Tags(ctx context.Context, query string, start int) ([]string, bool, error) {
+	if z.ReadOnly() {
+		return z.diskTags(ctx, query, start)
+	}
 	params := url.Values{"limit": {strconv.Itoa(ZoteroPageSize)}, "start": {strconv.Itoa(start)}, "q": {query}}
 	h, raw, err := z.request(ctx, "GET", "/api/users/0/tags?"+params.Encode(), nil, "")
 	if err != nil {
@@ -221,6 +235,9 @@ func (z Zotero) Browse(ctx context.Context, query, collection, tag string, scope
 }
 
 func (z Zotero) search(ctx context.Context, query, collection, tag string, scope ZoteroScope, everything bool, start int) (ZoteroPage, error) {
+	if z.ReadOnly() {
+		return z.diskSearch(ctx, query, collection, tag, scope, everything, start)
+	}
 	var page ZoteroPage
 	path := "/api/users/0"
 	if collection != "" {
@@ -329,6 +346,9 @@ func (z Zotero) Entry(ctx context.Context, key string) (Entry, error) {
 	if !zoteroKey.MatchString(key) {
 		return Entry{}, fmt.Errorf("invalid Zotero item key")
 	}
+	if z.ReadOnly() {
+		return z.diskEntry(ctx, key)
+	}
 	_, raw, err := z.request(ctx, "GET", "/api/users/0/items/"+key, nil, "")
 	if err != nil {
 		return Entry{}, err
@@ -345,6 +365,9 @@ func (z Zotero) Entry(ctx context.Context, key string) (Entry, error) {
 }
 
 func (z Zotero) bbt(ctx context.Context, method string, params []any, target any) error {
+	if z.ReadOnly() {
+		return errZoteroReadOnly
+	}
 	payload, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params, "id": 1})
 	if err != nil {
 		return err
@@ -369,6 +392,9 @@ func (z Zotero) BibTeX(ctx context.Context, key string) (string, error) {
 // ExportFor imports a single full export. Better BibTeX is preferred for
 // its citekey, with the official Zotero translator as a fallback.
 func (z Zotero) ExportFor(ctx context.Context, entry Entry, target string) ([]byte, error) {
+	if z.ReadOnly() {
+		return nil, errZoteroReadOnly
+	}
 	if !zoteroKey.MatchString(entry.RemoteID) {
 		return nil, fmt.Errorf("无效 Zotero 条目键")
 	}
@@ -429,10 +455,12 @@ type ZoteroNote struct {
 type Attachment struct {
 	Key, Title, URL string
 	LinkOnly        bool
+	Unavailable     bool
 }
 
 func (item *zoteroItem) attachment() Attachment {
 	pdf := Attachment{Key: item.Key, Title: cleanField(item.Data.Title, 256), LinkOnly: item.Data.LinkMode == "linked_url"}
+	pdf.Unavailable = item.unavailablePDF && !pdf.LinkOnly
 	if pdf.LinkOnly {
 		link, err := url.Parse(strings.TrimSpace(item.Data.URL))
 		if err == nil && (link.Scheme == "http" || link.Scheme == "https") && link.Hostname() != "" && link.User == nil {
@@ -453,6 +481,9 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 	if !zoteroKey.MatchString(key) {
 		return detail, fmt.Errorf("无效 Zotero 条目键")
 	}
+	if z.ReadOnly() {
+		return z.diskDetail(ctx, key, start)
+	}
 	path := "/api/users/0/items/" + key
 	_, raw, err := z.request(ctx, "GET", path, nil, "")
 	if err != nil {
@@ -462,16 +493,7 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 	if err := json.Unmarshal(raw, &item); err != nil {
 		return detail, err
 	}
-	detail.Abstract = cleanField(item.Data.AbstractNote, 16<<10)
-	detail.Entry, _ = z.entry(item)
-	detail.ItemType, detail.Deleted = item.Data.ItemType, item.Data.Deleted
-	detail.Collections = item.Data.Collections
-	detail.Tags, detail.Related = z.itemMetadata(item)
-	detail.DateAdded, detail.DateModified = item.Data.DateAdded, item.Data.DateModified
-	for _, creator := range item.Data.Creators[:min(len(item.Data.Creators), 64)] {
-		detail.Creators = append(detail.Creators, ZoteroCreator{Type: cleanField(creator.CreatorType, 64),
-			FirstName: cleanField(creator.FirstName, 128), LastName: cleanField(creator.LastName, 128), Name: cleanField(creator.Name, 256)})
-	}
+	detail = z.detailMetadata(item)
 	if zoteroRegularItem(detail.ItemType) {
 		// Only the selected item's schema and bounded display values are retained.
 		// Missing schemas must not prevent reading notes or attachments.
@@ -551,6 +573,21 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 	return detail, nil
 }
 
+func (z Zotero) detailMetadata(item zoteroItem) ZoteroDetail {
+	d := &item.Data
+	detail := ZoteroDetail{
+		Abstract: cleanField(d.AbstractNote, 16<<10), ItemType: d.ItemType, Deleted: d.Deleted,
+		Collections: d.Collections, DateAdded: d.DateAdded, DateModified: d.DateModified,
+	}
+	detail.Entry, _ = z.entry(item)
+	detail.Tags, detail.Related = z.itemMetadata(item)
+	for _, creator := range d.Creators[:min(len(d.Creators), 64)] {
+		detail.Creators = append(detail.Creators, ZoteroCreator{Type: cleanField(creator.CreatorType, 64),
+			FirstName: cleanField(creator.FirstName, 128), LastName: cleanField(creator.LastName, 128), Name: cleanField(creator.Name, 256)})
+	}
+	return detail
+}
+
 func (z Zotero) note(item zoteroItem) ZoteroNote {
 	body := zoteroNoteText(item.Data.Note)
 	title, _, _ := strings.Cut(body, "\n")
@@ -628,6 +665,9 @@ func (z Zotero) Annotations(ctx context.Context, key string, start int) ([]Annot
 	if !zoteroKey.MatchString(key) {
 		return nil, false, fmt.Errorf("无效 Zotero 附件键")
 	}
+	if z.ReadOnly() {
+		return z.diskAnnotations(ctx, key, start)
+	}
 	h, raw, err := z.request(ctx, "GET", paged("/api/users/0/items/"+key+"/children", start, "")+"&itemType=annotation", nil, "")
 	if err != nil {
 		return nil, false, err
@@ -669,7 +709,10 @@ func PDFLink(key string, page int) string {
 }
 
 func (z Zotero) Save(ctx context.Context, e Entry) error {
-	if z.ServerID == "" {
+	if z.ReadOnly() {
+		return errZoteroReadOnly
+	}
+	if !z.CanWrite() {
 		return fmt.Errorf("该 Zotero 版本没有可用的本地写接口")
 	}
 	doi := NormalizeDOI(e.DOI)

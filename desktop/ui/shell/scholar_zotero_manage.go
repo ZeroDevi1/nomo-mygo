@@ -26,9 +26,13 @@ type scholarZoteroForm struct {
 
 func (s *Shell) scholarZoteroCatalogActions(c *ui.Context, p *scholarState) {
 	l := &p.literature
-	s.scholarMenuButton(c, "file-plus", s.tr("scholarZoteroManage"), false).Disabled(p.busy).Menu(func(m *ui.Menu) {
-		canWrite := l.zotero.ServerID != ""
-		if m.Item(s.tr("scholarZoteroNewItem")).Disabled(!canWrite || p.busy).Chosen() {
+	glyph := "file-plus"
+	if l.zotero.ReadOnly() {
+		glyph = "ellipsis"
+	}
+	s.scholarMenuButton(c, glyph, s.tr("scholarZoteroManage"), false).Disabled(p.busy).Menu(func(m *ui.Menu) {
+		canWrite := l.connected && l.zotero.CanWrite()
+		if canWrite && m.Item(s.tr("scholarZoteroNewItem")).Disabled(p.busy).Chosen() {
 			z, collection := l.zotero, l.collection
 			s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 				ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -41,10 +45,12 @@ func (s *Shell) scholarZoteroCatalogActions(c *ui.Context, p *scholarState) {
 				}, err
 			})
 		}
-		if m.Item(s.tr("scholarZoteroNewCollection")).Disabled(!canWrite || p.busy).Chosen() {
+		if canWrite && m.Item(s.tr("scholarZoteroNewCollection")).Disabled(p.busy).Chosen() {
 			s.startScholarZoteroCollection(p, scholar.Collection{}, "", "scholarZoteroNewCollection")
 		}
-		m.Separator()
+		if canWrite {
+			m.Separator()
+		}
 		if m.Item(s.tr("refresh")).Disabled(p.busy).Chosen() {
 			l.tree, l.treeTried = nil, false
 			l.libraries = nil
@@ -52,18 +58,17 @@ func (s *Shell) scholarZoteroCatalogActions(c *ui.Context, p *scholarState) {
 			s.loadZotero(p, false, l.collection, l.sentQuery, 0)
 		}
 		if m.Item(s.tr("scholarConnectZotero")).Disabled(p.busy).Chosen() {
-			l.zoteroForm = nil
-			l.tree, l.treeTried, l.libraries = nil, false, nil
-			l.tagPicker = scholarTagPicker{}
-			l.tag, l.scope, l.recentOpen, l.fulltext = "", scholar.ZoteroAll, false, false
 			s.loadZotero(p, true, "", "", 0)
+		}
+		if m.Item(s.tr("scholarZoteroOpenDirectory")).Disabled(p.busy).Chosen() {
+			s.chooseScholarZoteroDirectory(p)
 		}
 	})
 }
 
 func (s *Shell) scholarZoteroCollectionActions(m *ui.Menu, p *scholarState, collection scholar.Collection) {
 	l := &p.literature
-	if l.zotero.ServerID == "" || p.busy {
+	if !l.connected || !l.zotero.CanWrite() || p.busy {
 		return
 	}
 	if m.Item(s.tr("rename")).Chosen() {
@@ -95,9 +100,12 @@ func (s *Shell) scholarZoteroCollectionActions(m *ui.Menu, p *scholarState, coll
 }
 
 func (s *Shell) startScholarZoteroCollection(p *scholarState, collection scholar.Collection, parent, label string) {
-	s.revealScholarCatalog(p)
 	l := &p.literature
 	z := l.zotero
+	if !l.connected || !z.CanWrite() || p.busy {
+		return
+	}
+	s.revealScholarCatalog(p)
 	form := &scholarZoteroForm{z: z, catalog: true, key: collection.Key, parent: parent, token: rand.Text(), label: label}
 	if collection.Key == "" {
 		l.zoteroForm = form
@@ -143,7 +151,7 @@ func (s *Shell) scholarZoteroReaderActions(c *ui.Context, p *scholarState, entry
 		if m.Item(s.tr("refresh")).Disabled(p.busy || !l.connected).Chosen() {
 			s.loadScholarDetail(p, entry, l.attachmentPage)
 		}
-		if !l.connected || z.ServerID == "" || entry.Source != "Zotero" || l.detail.ItemType == "" {
+		if !l.connected || !z.CanWrite() || entry.Source != "Zotero" || l.detail.ItemType == "" {
 			return
 		}
 		m.Separator()
@@ -370,6 +378,9 @@ func (s *Shell) scholarZoteroItemFields(c *ui.Context, p *scholarState, form *sc
 }
 
 func (s *Shell) scholarZoteroWrite(p *scholarState, write func(context.Context) error, applied func()) {
+	if !p.literature.connected || !p.literature.zotero.CanWrite() {
+		return
+	}
 	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
@@ -416,6 +427,9 @@ func (s *Shell) scholarZoteroItemChanged(p *scholarState, z scholar.Zotero, key 
 func (s *Shell) startScholarZoteroNote(p *scholarState) {
 	l := &p.literature
 	z := l.zotero
+	if !l.connected || !z.CanWrite() || p.busy {
+		return
+	}
 	z.Group = l.selected.Library
 	l.zoteroForm = &scholarZoteroForm{z: z, key: l.selected.RemoteID, token: rand.Text(), label: "scholarZoteroNewNote"}
 	s.showScholarInspector(p, scholarReader)

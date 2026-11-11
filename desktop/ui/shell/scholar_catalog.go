@@ -47,7 +47,7 @@ func (s *Shell) scholarCatalogSidebar(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	ui.Row(c).FillWidth().Height(36).Padding(0, 7).Gap(4).AlignItems(ui.Center).Children(func() {
 		if s.toolButton(c.Key("collection"), "folder-plus", s.tr("scholarZoteroNewCollection"), false).
-			Disabled(p.busy || !l.connected || l.zotero.ServerID == "").Clicked() {
+			Disabled(p.busy || !l.connected || !l.zotero.CanWrite()).Clicked() {
 			s.startScholarZoteroCollection(p, scholar.Collection{}, "", "scholarZoteroNewCollection")
 		}
 		ui.Spacer(c)
@@ -92,6 +92,10 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 				if ui.PrimaryButton(c.Key("connect"), s.tr("scholarConnectZotero")).AlignSelf(ui.Start).
 					MinHeight(32).Margin(4, 0, 0, 0).Disabled(p.busy).Clicked() {
 					s.loadZotero(p, true, "", "", 0)
+				}
+				if ui.Button(c.Key("directory"), s.tr("scholarZoteroOpenDirectory")).AlignSelf(ui.Start).
+					MinHeight(32).Disabled(p.busy).Clicked() {
+					s.chooseScholarZoteroDirectory(p)
 				}
 			})
 		}
@@ -710,7 +714,7 @@ func (s *Shell) scholarCollectionTree(c *ui.Context, p *scholarState, parent str
 				})
 				ui.Text(ck, collection.Name).FontSize(12).SingleLine().MinWidth(0).Shrink(1).TextColor(s.ch.text)
 			})
-			if l.zotero.ServerID != "" {
+			if l.connected && l.zotero.CanWrite() {
 				b.ContextMenu(func(m *ui.Menu) {
 					s.scholarZoteroCollectionActions(m, p, collection)
 				})

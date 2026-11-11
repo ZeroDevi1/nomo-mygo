@@ -56,7 +56,12 @@ func (s *Shell) scholarInlineCitations(c *ui.Context, p *scholarState, t *Tab, e
 				q.results.clear()
 				q.selected = 0
 			}
-			if p.literature.connected && ui.Checkbox(c, &q.zotero, "Zotero").Changed() {
+			offline := p.literature.zotero.ReadOnly()
+			zoteroLabel := "Zotero"
+			if offline {
+				zoteroLabel = s.tr("scholarZoteroReadOnly")
+			}
+			if p.literature.connected && ui.Checkbox(c, &q.zotero, zoteroLabel).Changed() {
 				q.results.clear()
 				q.checked = nil
 				q.selected = 0
@@ -95,6 +100,9 @@ func (s *Shell) scholarInlineCitations(c *ui.Context, p *scholarState, t *Tab, e
 					key := scholarReferenceKey(p.library, items[q.selected])
 					if key == "" {
 						p.err = s.tr("scholarAltImport")
+						if offline {
+							p.err = s.tr("scholarZoteroOnlineExport")
+						}
 						return
 					}
 					keys = []string{key}
@@ -143,11 +151,13 @@ func (s *Shell) scholarInlineCitations(c *ui.Context, p *scholarState, t *Tab, e
 				}
 			}).Grow(1).FillWidth().MinHeight(0)
 			if q.zotero {
-				ui.Text(c, s.tr("scholarAltImport")).FontSize(11).Wrap()
+				if !offline {
+					ui.Text(c, s.tr("scholarAltImport")).FontSize(11).Wrap()
+				}
 				if p.err != "" {
 					ui.Text(c, p.err).FontSize(11).Wrap()
 				}
-				if len(p.bibNames) > 0 {
+				if !offline && len(p.bibNames) > 0 {
 					target := &p.literature.target
 					if len(p.bibNames) == 1 {
 						*target = 0
@@ -187,7 +197,8 @@ func (s *Shell) showScholarReference(st *editor.State, p *scholarState, e schola
 			if ui.Button(c, s.tr("scholarReferenceDetails")).Clicked() {
 				s.selectScholarEntry(p, e)
 			}
-			if ui.Button(c, s.tr("scholarCopyBib")).Disabled(p.busy).Clicked() {
+			canExport := !p.literature.zotero.ReadOnly() || e.RemoteID == "" || slices.Contains(p.bibNames, e.Source)
+			if canExport && ui.Button(c, s.tr("scholarCopyBib")).Disabled(p.busy).Clicked() {
 				s.copyScholarBib(p, e, c.Services())
 			}
 		})

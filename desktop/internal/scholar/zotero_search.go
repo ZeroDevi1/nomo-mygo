@@ -19,6 +19,9 @@ type ZoteroLibrary struct {
 }
 
 func (z Zotero) Libraries(ctx context.Context) ([]ZoteroLibrary, error) {
+	if z.ReadOnly() {
+		return z.diskLibraries(ctx)
+	}
 	// Group discovery always starts from the personal account endpoint.
 	personal := z
 	personal.Group = 0
@@ -89,6 +92,9 @@ type ZoteroFulltextResult struct {
 // pages. Next is a scan cursor, independent of result pagination. It remains
 // resumable when a deadline stops the batch.
 func (z Zotero) SearchFulltext(ctx context.Context, query, collection string, start int, progress func(int)) (ZoteroFulltextResult, error) {
+	if z.ReadOnly() {
+		return ZoteroFulltextResult{}, errZoteroReadOnly
+	}
 	result := ZoteroFulltextResult{Next: start}
 	interrupted := func(err error) bool {
 		var timeout net.Error
@@ -191,6 +197,9 @@ func (z Zotero) AttachmentPath(ctx context.Context, key string) (string, error) 
 	if !zoteroKey.MatchString(key) {
 		return "", fmt.Errorf("invalid attachment key")
 	}
+	if z.ReadOnly() {
+		return z.diskAttachmentPath(ctx, key)
+	}
 	_, raw, err := z.request(ctx, "GET", "/api/users/0/items/"+key+"/file/view/url", nil, "")
 	if err != nil {
 		return "", err
@@ -203,7 +212,10 @@ func (z Zotero) AttachmentPath(ctx context.Context, key string) (string, error) 
 	if runtime.GOOS == "windows" && len(rawPath) >= 4 && rawPath[0] == '/' && rawPath[2] == ':' && rawPath[3] == '/' {
 		rawPath = rawPath[1:]
 	}
-	path := filepath.FromSlash(rawPath)
+	return zoteroLocalPDF(filepath.FromSlash(rawPath))
+}
+
+func zoteroLocalPDF(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("attachment has no absolute local path")
 	}

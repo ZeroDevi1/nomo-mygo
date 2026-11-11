@@ -23,7 +23,10 @@ func (e zoteroHTTPError) Error() string {
 type zoteroWriteKey struct{ atomic.Pointer[string] }
 
 func (z Zotero) write(ctx context.Context, method, path string, value any, token string) ([]byte, error) {
-	if z.ServerID == "" || z.writeKey == nil {
+	if z.ReadOnly() {
+		return nil, errZoteroReadOnly
+	}
+	if !z.CanWrite() {
 		return nil, fmt.Errorf("该 Zotero 版本没有可用的本地写接口")
 	}
 	payload, err := json.Marshal(value)

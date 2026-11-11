@@ -27,8 +27,8 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 	p.watchPending = true
 	names := append([]string{p.project.Main}, p.bibNames...)
 	root := p.project.Root
-	probe := s.win != nil && (p.probeAt.IsZero() || !c.Now().Before(p.probeAt))
 	priorZ := p.literature.zotero
+	probe := s.win != nil && !priorZ.ReadOnly() && (p.probeAt.IsZero() || !c.Now().Before(p.probeAt))
 	preview := s.compile
 	if preview != nil && (preview.project.Root == "" || preview.parkedPage != 0) {
 		preview = nil
@@ -90,24 +90,15 @@ func (s *Shell) observeScholarSources(c *ui.Context, p *scholarState) {
 			p.watchSignature = value
 			l := &p.literature
 			if probe && l.zotero == priorZ {
-				if err == nil && z.ServerID != priorZ.ServerID && p.busy {
+				if err == nil && !z.SameSource(priorZ) && p.busy {
 					p.probeAt = time.Time{}
 					return
 				}
 				was := l.connected
 				l.connected = err == nil
 				if err == nil {
-					if z.ServerID != priorZ.ServerID {
-						l.loaded = false
-						l.pageData = scholar.ZoteroPage{}
-						l.tree, l.treeTried, l.libraries = nil, false, nil
-						l.tag, l.tagPicker = "", scholarTagPicker{}
-						l.collection, l.scope, l.fulltext = "", scholar.ZoteroAll, false
-						l.zoteroForm, l.annotations = nil, nil
-						if l.selected.RemoteID != "" {
-							l.selected, l.detail = scholar.Entry{}, scholar.ZoteroDetail{}
-						}
-						l.recent, l.recentOpen = nil, false
+					if !z.SameSource(priorZ) {
+						l.resetZoteroSource()
 						z.Group = 0
 					}
 					l.zotero = z
