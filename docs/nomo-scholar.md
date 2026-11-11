@@ -205,3 +205,13 @@ macOS 的常规项目预览仅在本次编译完全使用磁盘输入、发布�
 
 - macOS arm64 实测 Zotero 的 arXiv 网页和项目样本 PDF 可同时在不同组渲染。阅读时左侧分类和标签仍显示，点击分类返回列表后可切回网页。项目书目搜索、重读、引用勾选和样本 PDF 全文检索均已核对。
 - 实测关闭右栏最后一个网页标签后恢复单栏。最终版 macOS arm64 构建和相关 Go 文件的 LSP 检查通过。嵌套分栏自动收起及收起后的焦点切换尚未在最终构建上复验。
+
+### 2026-11-11 Windows Zotero 本地库离线读取验证
+
+Zotero 退出后，可以直接从主库读取已落盘的文献和附件。以下结果来自独立的 SQLite 探测，Nomo 的离线接入尚未实现。
+
+- **环境与方法。** Windows 下使用 Python 3.13 自带的 SQLite 3.50.4。测试前后 Zotero 进程数均为 0，开始时本地 API 端口 23119 无监听。以 URI 参数 `mode=ro` 打开 `%USERPROFILE%\Zotero\zotero.sqlite`，设置 `PRAGMA query_only=ON`，在同一读事务内查询。库使用 WAL 模式，`version` 表中 `userdata=131`、`system=32`、`globalSchema=44`、`compatibility=9`。主库和 WAL 的大小及修改时间在测试前后均一致，本次 WAL 为 0 字节。
+- **文献与检索。** 在 1 个个人库中读到 83 条未删除的文献、15 个分类、78 个文献标签和 26 条正文非空的笔记。83 条文献有题名，26 条有引用键，21 条有 DOI。题名从 `itemData`、`itemDataValues`、`fieldsCombined` 关联读取，作者从 `itemCreators`、`creators` 关联读取。各取一条实际数据做子串搜索，均命中预期文献。分类归属见 `collectionItems`，标签归属见 `itemTags`，回收站状态见 `deletedItems` 和 `deletedCollections`。
+- **PDF 附件。** 从 `itemAttachments` 查得 36 条未删除的 PDF 附件记录。5 条 `storage:<文件名>` 路径解析为 `storage/<附件条目键>/<文件名>` 后可读取，且文件头有效。其余 31 条的路径字段为空。PDF 渲染、链接附件和自定义数据目录尚待验证。
+- **运行中的数据库。** 同机 Zotero 运行时，主库的只读查询曾返回 `database is locked`，同目录的 `zotero.sqlite.bak` 可只读查询。接入时可在遇锁后使用已启用的 Local API，或由用户选择有时间戳提示的备份。备份可能落后于主库。读取 WAL 模式的主库时应由 SQLite 协调锁和 WAL，单独复制 `zotero.sqlite` 可能遗漏 WAL 中的提交。本次尚未覆盖非空 WAL。 [Zotero 数据目录](https://www.zotero.org/support/zotero_data) · [SQLite WAL](https://www.sqlite.org/wal.html)
+- **后续开发。** 首版可从选择数据目录、可取消的分页搜索和本地 PDF 路径解析开始，查询按需执行。当前样本没有群组库和 PDF 批注，群组隔离、`itemAnnotations` 与附件的关联及实际跳页需补样本验证。现有 `ExportFor` 通过 Better BibTeX 或 Zotero 接口导出，离线生成项目书目需另行实现。 [导出实现](../desktop/internal/scholar/zotero.go)
