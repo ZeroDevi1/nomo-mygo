@@ -103,10 +103,15 @@ type ZoteroPage struct {
 }
 type zoteroItem struct {
 	Key  string
+	Meta struct {
+		CreatorSummary string
+		NumChildren    int
+	}
 	Data struct {
 		Key, ItemType, Title, Date, PublicationTitle, DOI, CitationKey, AbstractNote, ContentType string
 		CaseName, Subject, NameOfAct                                                              string
 		URL, LinkMode                                                                             string
+		DateAdded, DateModified                                                                   string
 		AnnotationText, AnnotationComment, AnnotationPageLabel, AnnotationType                    string
 		AnnotationPosition                                                                        string
 		Note                                                                                      string
@@ -316,7 +321,8 @@ func (z Zotero) entry(item zoteroItem) (Entry, bool) {
 	return Entry{Key: cleanField(d.CitationKey, 256), Title: cleanField(title, 1024),
 		Author: cleanField(strings.Join(creators, " and "), 512), Year: yearOf(d.Date),
 		Venue: cleanField(d.PublicationTitle, 256), DOI: cleanField(d.DOI, 256), Source: "Zotero", RemoteID: item.Key,
-		Abstract: cleanField(d.AbstractNote, 4096), Library: z.Group, ZoteroNote: d.ItemType == "note"}, true
+		Abstract: cleanField(d.AbstractNote, 4096), URL: cleanField(d.URL, 2048), Library: z.Group, ZoteroNote: d.ItemType == "note",
+		ItemType: cleanField(d.ItemType, 64), CreatorSummary: cleanField(item.Meta.CreatorSummary, 256), NumChildren: item.Meta.NumChildren}, true
 }
 
 func (z Zotero) Entry(ctx context.Context, key string) (Entry, error) {
@@ -396,17 +402,24 @@ func (z Zotero) ExportFor(ctx context.Context, entry Entry, target string) ([]by
 }
 
 type ZoteroDetail struct {
-	Entry       Entry
-	Abstract    string
-	ItemType    string
-	Deleted     bool
-	PDFs        []Attachment
-	Notes       []ZoteroNote
-	Tags        []string
-	Collections []string
-	Related     []string
-	More        bool
+	Entry                   Entry
+	Abstract                string
+	ItemType                string
+	ItemTypeLabel           string
+	Deleted                 bool
+	PDFs                    []Attachment
+	Notes                   []ZoteroNote
+	Tags                    []string
+	Collections             []string
+	CollectionInfo          []Collection
+	Related                 []string
+	More                    bool
+	Fields                  []ZoteroField
+	Creators                []ZoteroCreator
+	DateAdded, DateModified string
 }
+
+type ZoteroField struct{ Name, Label, Value string }
 
 type ZoteroNote struct {
 	Key, Title, Text string
@@ -430,8 +443,9 @@ func (item *zoteroItem) attachment() Attachment {
 }
 
 type Annotation struct {
-	Quote, Note, Label, Kind string
-	Page                     int
+	Key, Quote, Note, Label, Kind string
+	// Page is the one-based attachment page (zero if unknown); Label is printed page text.
+	Page int
 }
 
 func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail, error) {
@@ -453,6 +467,60 @@ func (z Zotero) Detail(ctx context.Context, key string, start int) (ZoteroDetail
 	detail.ItemType, detail.Deleted = item.Data.ItemType, item.Data.Deleted
 	detail.Collections = item.Data.Collections
 	detail.Tags, detail.Related = z.itemMetadata(item)
+	detail.DateAdded, detail.DateModified = item.Data.DateAdded, item.Data.DateModified
+	for _, creator := range item.Data.Creators[:min(len(item.Data.Creators), 64)] {
+		detail.Creators = append(detail.Creators, ZoteroCreator{Type: cleanField(creator.CreatorType, 64),
+			FirstName: cleanField(creator.FirstName, 128), LastName: cleanField(creator.LastName, 128), Name: cleanField(creator.Name, 256)})
+	}
+	if zoteroRegularItem(detail.ItemType) {
+		// Only the selected item's schema and bounded display values are retained.
+		// Missing schemas must not prevent reading notes or attachments.
+		fields, fieldErr := z.itemFields(ctx, detail.ItemType)
+		if types, typeErr := z.ItemTypes(ctx); typeErr == nil {
+			for _, kind := range types {
+				if kind.ItemType == detail.ItemType {
+					detail.ItemTypeLabel = cleanField(kind.Localized, 128)
+					break
+				}
+			}
+		}
+		var data struct{ Data map[string]json.RawMessage }
+		if fieldErr == nil && json.Unmarshal(raw, &data) == nil {
+			remaining := 32 << 10
+			for _, field := range fields[:min(len(fields), 64)] {
+				if field.Field == "abstractNote" {
+					continue
+				}
+				var value string
+				_ = json.Unmarshal(data.Data[field.Field], &value)
+				value = cleanField(value, min(8192, remaining))
+				remaining -= len(value)
+				detail.Fields = append(detail.Fields, ZoteroField{cleanField(field.Field, 64), cleanField(field.Localized, 128), value})
+				if remaining <= 0 {
+					break
+				}
+			}
+		}
+	}
+	// Resolve only a bounded set of memberships; no whole-library metadata cache.
+	for _, key := range detail.Collections[:min(len(detail.Collections), 8)] {
+		if !zoteroKey.MatchString(key) {
+			continue
+		}
+		_, collectionRaw, collectionErr := z.request(ctx, "GET", "/api/users/0/collections/"+key, nil, "")
+		var collection struct {
+			Data struct {
+				Name             string
+				ParentCollection json.RawMessage
+			}
+		}
+		if collectionErr == nil && json.Unmarshal(collectionRaw, &collection) == nil {
+			var parent string
+			_ = json.Unmarshal(collection.Data.ParentCollection, &parent)
+			detail.CollectionInfo = append(detail.CollectionInfo, Collection{key, cleanField(collection.Data.Name, 256), parent})
+		}
+	}
+
 	if item.Data.ItemType == "note" {
 		detail.Notes = []ZoteroNote{z.note(item)}
 		return detail, nil
@@ -581,6 +649,7 @@ func (z Zotero) Annotations(ctx context.Context, key string, start int) ([]Annot
 			page = *pos.PageIndex + 1
 		}
 		result = append(result, Annotation{
+			Key:   item.Key,
 			Quote: cleanField(d.AnnotationText, 2048), Note: cleanField(d.AnnotationComment, 2048),
 			Label: cleanField(d.AnnotationPageLabel, 32), Kind: cleanField(d.AnnotationType, 32), Page: page,
 		})

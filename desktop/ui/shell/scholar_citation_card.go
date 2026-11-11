@@ -201,8 +201,9 @@ func (s *Shell) showScholarReference(st *editor.State, p *scholarState, e schola
 			p.agent.parts[2] = fmt.Sprintf("%s\n%s\n%s\n%s", e.Key, e.Title, e.Author, e.Abstract)
 			p.agent.include[2] = true
 		}
-		if ui.Button(c, s.tr("scholarOpenPDF")).Clicked() {
-			s.openScholarPDF(p, e, c.Services())
+		glyph, label := s.scholarReferenceOpenLabel(p, e)
+		if s.scholarReaderCommand(c.Key("open-reference"), glyph, label, false).Disabled(p.busy).Clicked() {
+			s.openScholarReference(p, e)
 		}
 	})
 }

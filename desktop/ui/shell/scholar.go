@@ -127,7 +127,9 @@ func (s *Shell) closeScholar() {
 		p.cancel()
 		p.agent.trial.close()
 		p.closeWindowsSettings()
-		p.references.visible(false, true)
+		for _, t := range p.references.tabs {
+			t.releaseContent(false)
+		}
 		s.persistScholarDrawer(p)
 		s.clearScholarEditor(p)
 		go p.library.Close()
@@ -629,9 +631,21 @@ func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
 	ui.Column(c.Key("project-content")).Grow(1).MinHeight(0).FillWidth().Children(func() {
 		if p.nav != scholarLiterature {
 			s.scholarProjectPane(c, p)
+		} else if s.scholarCatalogInSidebar(c, p) {
+			s.scholarCatalogSidebar(c.Key("catalog-sidebar"), p)
 		}
 	})
 	ui.Column(c.Key("writing-assistant")).FillWidth().Padding(0, 8, 8, 8).Gap(5).Children(func() {
+		if s.scholarCatalogInSidebar(c, p) {
+			b := s.scholarReaderCommand(c, "message-square-text", s.tr("scholarWritingAssistant"), false)
+			if p.drawer == scholarCodex {
+				b.Background(s.ch.pressed).Selected(true)
+			}
+			if b.Clicked() {
+				s.openScholarAgent(p)
+			}
+			return
+		}
 		ui.Box(c).FillWidth().Height(1).Background(s.ch.separator)
 		if s.scholarSidebarItem(c, "message-square-text", s.tr("scholarWritingAssistant"), p.drawer == scholarCodex).Clicked() {
 			s.openScholarAgent(p)
@@ -641,7 +655,7 @@ func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
 
 func (s *Shell) scholarSidebarItem(c *ui.Context, glyph, label string, selected bool) ui.Element {
 	row := ui.ButtonBase(c).FillWidth().Height(28).Padding(0, 8).Gap(7).Radius(6).
-		Justify(ui.Start).AlignItems(ui.Center).Label(label).FocusRing(true).Selected(selected)
+		Justify(ui.Start).AlignItems(ui.Center).Label(label).FocusRing(true).Selected(selected).TextColor(s.ch.text)
 	ink := s.ch.muted
 	if selected {
 		row.Background(s.ch.pressed)
@@ -653,7 +667,7 @@ func (s *Shell) scholarSidebarItem(c *ui.Context, glyph, label string, selected 
 		ui.Box(c).Size(16, 16).Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			ui.Icon(c, s.icon(glyph)).FontSize(14).TextColor(ink)
 		})
-		ui.Text(c, label).FontSize(12).SingleLine().MinWidth(0).Shrink(1)
+		ui.Text(c, label).FontSize(12).SingleLine().MinWidth(0).Shrink(1).TextColor(s.ch.text)
 	})
 	return row
 }
@@ -771,6 +785,9 @@ func (s *Shell) storeScholarProject(p *scholarState) {
 }
 
 func (s *Shell) scholarInspectorVisible(p *scholarState, width float32) bool {
+	if p.references.catalog && p.literature.catalogForm() != nil {
+		return false
+	}
 	return p.drawer != scholarClosed && !(width < scholarCompactWidth && p.compactNav)
 }
 
@@ -874,9 +891,16 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 			s.persistScholarDrawer(p)
 		}
 	}
+	if p.drawer == scholarReader && p.references.catalog && p.literature.mode == 1 {
+		s.scholarZoteroInspector(c, p, width, singlePane)
+		return
+	}
 	ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.content).Children(func() {
 		ui.Row(c).Height(s.pf.scholarNavHeight()).FillWidth().Padding(0, 8).Gap(4).AlignItems(ui.Center).Children(func() {
 			label := [...]string{"", "scholarLiterature", "scholarWritingAssistant", "scholarDiagnostics"}[p.drawer]
+			if p.drawer == scholarReader {
+				label = "scholarReferenceDetails"
+			}
 			ui.Text(c, s.tr(label)).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
 			label = s.tr("scholarCloseDrawer")
 			if singlePane && p.drawer == scholarCodex {
@@ -1122,7 +1146,7 @@ func (s *Shell) scholarWorkspaceWidthAt(width float32) float32 {
 			return width - p.windowsRailWidth(width) - p.windowsProjectWidth(width)
 		}
 		if !s.scholarSidebarHiddenAt(width) {
-			return width - s.sidebarW
+			return width - *s.scholarSidebarWidth()
 		}
 	}
 	return width

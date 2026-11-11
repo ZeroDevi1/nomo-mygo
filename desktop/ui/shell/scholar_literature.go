@@ -49,11 +49,19 @@ type scholarLiteratureState struct {
 	annotations                                        *scholarAnnotationView
 	attachmentPage                                     int
 	selectedNote                                       string
+	openNotice                                         string
 	tag                                                string
 	tagPicker                                          scholarTagPicker
 	recent                                             []scholar.Entry
 	recentOpen                                         bool
 	expanded, scopeOpen                                bool
+	readerCollapsed                                    uint16
+	readerJump                                         int
+	readerActive                                       uint
+	readerAllCreators                                  bool
+	catalogWidth                                       float32
+	collectionFilter                                   string
+	collectionSearch                                   bool
 	loaded, treeTried                                  bool
 	scope                                              scholar.ZoteroScope
 	tree                                               map[string]*scholarCollectionBranch
@@ -161,74 +169,86 @@ func (s *Shell) scholarLiteratureResults(c *ui.Context, p *scholarState) []schol
 
 func (s *Shell) scholarLibraryView(c *ui.Context, p *scholarState) {
 	l := &p.literature
-	ui.Column(c).FillWidth().Grow(1).MinHeight(0).Padding(8).Gap(5).Children(func() {
-		ui.Row(c).FillWidth().Gap(4).Children(func() {
-			for i, title := range []string{s.tr("scholarProject"), "Zotero", s.tr("scholarOnline")} {
-				if ui.Button(c.Key(i), title).Disabled(p.busy).Clicked() {
-					l.mode = i
+	ui.Column(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+		s.scholarLibraryToolbar(c.Key("library-toolbar"), p)
+		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+		padding := float32(0)
+		if l.mode == 2 {
+			padding = 8
+		}
+		ui.Column(c.Key("source-content")).FillWidth().Grow(1).MinHeight(0).Padding(padding).Gap(5).Children(func() {
+			width, _ := c.Size()
+			if p.err != "" && !(p.drawer == scholarReader && s.scholarInspectorVisible(p, width)) {
+				s.scholarReaderNotice(c.Key("error"), p.err, nil)
+			}
+			switch l.mode {
+			case 0:
+				s.scholarProjectCatalog(c, p)
+			case 1:
+				s.scholarZoteroCatalog(c, p)
+			case 2:
+				ui.Text(c, s.tr("scholarOnlineDisclosure")).FontSize(11).Wrap()
+				in := ui.TextInput(c, &l.remoteQuery).FillWidth().Placeholder(s.tr("scholarMetadataSearch"))
+				if ui.Button(c, s.tr("scholarOnlineSearch")).Disabled(p.busy).Clicked() || in.Submitted() {
+					query := l.remoteQuery
+					s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
+						items, err := scholar.Lookup(ctx, query)
+						return func() {
+							l.results = items
+							if err == nil && len(items) == 0 {
+								p.err = s.tr("scholarNoMetadata")
+							}
+						}, err
+					})
 				}
+				s.scholarCatalogRows(c, p, l.results, false)
 			}
 		})
-		if p.err != "" {
-			ui.Text(c, p.err).FontSize(11).Wrap().TextColor(scholarInk(c, "warning"))
-		}
-		switch l.mode {
-		case 0:
-			if s.scholarLocalSearchView(c, p) {
-				return
-			}
-			input := ui.TextInput(c, &l.query).FillWidth().Placeholder(s.tr("scholarCitationSearch"))
-			if len(l.checked) > 0 && (ui.Button(c, fmt.Sprintf(s.tr("scholarInsertCount"), len(l.checked))).Clicked() || input.Submitted()) {
-				s.insertScholarCitations(p, l.checked, "")
-				l.checked = nil
-			}
-			if ui.Button(c, s.tr("scholarReloadReferences")).Disabled(p.busy).Clicked() {
-				s.loadScholarLibrary(p, true)
-			}
-			if p.libraryError != "" {
-				ui.Text(c, p.libraryError).FontSize(11).Wrap()
-			}
-			if len(p.bibNames) == 0 && p.libraryReady {
-				ui.Text(c, s.tr("scholarNoBibliography")).FontSize(11).Wrap()
-			}
-			s.scholarEntries(c, p, s.scholarLiteratureResults(c, p), true)
-			if len(l.visible) == 100 {
-				ui.Text(c, s.tr("scholarFirstHundred")).FontSize(11).Wrap()
-			}
-		case 1:
-			s.scholarZoteroCatalog(c, p)
-		case 2:
-			ui.Text(c, s.tr("scholarOnlineDisclosure")).FontSize(11).Wrap()
-			in := ui.TextInput(c, &l.remoteQuery).FillWidth().Placeholder(s.tr("scholarMetadataSearch"))
-			if ui.Button(c, s.tr("scholarOnlineSearch")).Disabled(p.busy).Clicked() || in.Submitted() {
-				query := l.remoteQuery
-				s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
-					items, err := scholar.Lookup(ctx, query)
-					return func() {
-						l.results = items
-						if err == nil && len(items) == 0 {
-							p.err = s.tr("scholarNoMetadata")
-						}
-					}, err
-				})
-			}
-			s.scholarEntries(c, p, l.results, false)
-		}
 	})
+}
+
+func (s *Shell) scholarProjectCatalog(c *ui.Context, p *scholarState) {
+	l := &p.literature
+	if p.libraryError != "" {
+		s.scholarReaderNotice(c.Key("library-error"), p.libraryError, nil)
+	} else if len(p.bibNames) == 0 && p.libraryReady {
+		ui.Text(c, s.tr("scholarNoBibliography")).Margin(4, 8).FontSize(11).TextColor(s.ch.muted).Wrap()
+	}
+	var entries []scholar.Entry
+	if l.local.enabled {
+		entries = s.scholarLocalSearchResults(c.Key("fulltext"), p)
+	} else {
+		entries = s.scholarLiteratureResults(c, p)
+	}
+	s.scholarCatalogRows(c, p, entries, true)
+	limited := !l.local.enabled && len(entries) == 100
+	if len(l.checked) > 0 || limited {
+		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+		ui.Row(c.Key("project-footer")).FillWidth().MinHeight(32).Padding(3, 8).Gap(6).AlignItems(ui.Center).
+			Background(s.ch.tabBar).Children(func() {
+			if limited {
+				ui.Text(c, s.tr("scholarFirstHundred")).FontSize(11).TextColor(s.ch.muted).Wrap().Grow(1).MinWidth(0)
+			} else {
+				ui.Spacer(c)
+			}
+			if len(l.checked) > 0 && ui.Button(c.Key("cite"), fmt.Sprintf(s.tr("scholarInsertCount"), len(l.checked))).
+				Height(25).FontSize(12).Padding(0, 7).Shrink(0).Disabled(p.busy).Clicked() {
+				s.insertScholarProjectSelection(p)
+			}
+		})
+	}
+}
+
+func (s *Shell) insertScholarProjectSelection(p *scholarState) {
+	s.insertScholarCitations(p, p.literature.checked, "")
+	p.literature.checked = nil
 }
 
 func (s *Shell) scholarZoteroResults(c *ui.Context, p *scholarState) {
 	l := &p.literature
-	ui.Checkbox(c, &l.fulltext, s.tr("scholarFulltextPage")).Disabled(p.busy || l.scope != scholar.ZoteroAll || l.tag != "")
 	if l.fulltext {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextScope"), l.fulltextScanned, l.fulltextPDFs, l.fulltextUnavailable)).FontSize(11).Wrap()
+		ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextScope"), l.fulltextScanned, l.fulltextPDFs, l.fulltextUnavailable)).Padding(0, 8).FontSize(11).Wrap()
 	}
-	in := ui.TextInput(c, &l.remoteQuery).FillWidth().Placeholder(s.tr("scholarSearchZotero"))
-	ui.Row(c).Gap(4).FillWidth().Children(func() {
-		if ui.Button(c, s.tr("scholarSearch")).Disabled(p.busy).Clicked() || in.Submitted() {
-			s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
-		}
-	})
 	scanning := p.busy && l.fulltextJob != 0 && l.fulltextJob == p.job
 	if l.fulltext && (scanning || l.sentQuery != "") {
 		ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextProgress"), l.fulltextProgress, l.fulltextTotal, len(l.fulltextEntries))).FontSize(11).Wrap()
@@ -245,81 +265,11 @@ func (s *Shell) scholarZoteroResults(c *ui.Context, p *scholarState) {
 		if scanning && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() && p.cancelJob != nil {
 			p.cancelJob()
 		}
-		ui.Row(c).Gap(4).Children(func() {
-			if ui.Button(c, s.tr("scholarPreviousPage")).Disabled(l.fulltextPage == 0).Clicked() {
-				l.fulltextPage--
-			}
-			if ui.Button(c, s.tr("scholarNextPage")).Disabled((l.fulltextPage+1)*scholar.ZoteroPageSize >= len(l.fulltextEntries)).Clicked() {
-				l.fulltextPage++
-			}
-		})
 		lo := min(l.fulltextPage*scholar.ZoteroPageSize, len(l.fulltextEntries))
 		l.pageData.Entries = l.fulltextEntries[lo:min(lo+scholar.ZoteroPageSize, len(l.fulltextEntries))]
-	} else {
-		ui.Row(c).FillWidth().Gap(4).Children(func() {
-			if ui.Button(c, s.tr("scholarPreviousPage")).Disabled(p.busy || l.page == 0).Clicked() {
-				s.loadZotero(p, false, l.collection, l.sentQuery, l.page-scholar.ZoteroPageSize)
-			}
-			if ui.Button(c, s.tr("scholarNextPage")).Disabled(p.busy || !l.pageData.More).Clicked() {
-				s.loadZotero(p, false, l.collection, l.sentQuery, l.page+scholar.ZoteroPageSize)
-			}
-			ui.Text(c, fmt.Sprint(l.page/scholar.ZoteroPageSize+1)).FontSize(11)
-		})
 	}
-	s.scholarEntries(c, p, l.pageData.Entries, false)
-}
-
-func (s *Shell) scholarEntries(c *ui.Context, p *scholarState, entries []scholar.Entry, local bool) {
-	l := &p.literature
-	if p.references.catalog {
-		s.scholarCatalogRows(c, p, entries, local)
-		return
-	}
-	ui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Gap(2).Children(func() {
-			for i, entry := range entries {
-				ck := c.Key(i)
-				ui.Row(ck).FillWidth().AlignItems(ui.Center).Gap(2).Children(func() {
-					b := ui.ButtonBase(ck).Grow(1).Padding(4).Justify(ui.Start).Tooltip(entry.Title).Disabled(p.busy)
-					if b.Hovered() {
-						b.Background(s.ch.hover)
-					}
-					b.Children(func() {
-						ui.Column(ck).FillWidth().Children(func() {
-							key := entry.Key
-							if key == "" {
-								key = entry.Source
-							}
-							if local {
-								if n := p.citations.counts[entry.Key]; n > 0 {
-									key += fmt.Sprintf(s.tr("scholarCitedCount"), n)
-								}
-							}
-							ui.Text(ck, key).FontSize(11).TextColor(scholarInk(c, "citation")).SingleLine()
-							ui.Text(ck, entry.Title).FontSize(12).SingleLine()
-							ui.Text(ck, entry.Author+" "+entry.Year).FontSize(11).TextColor(s.ch.muted).SingleLine()
-						})
-					})
-					if b.Clicked() {
-						if l.picker {
-							l.picker = false
-						}
-						s.selectScholarEntry(p, entry)
-					}
-					if local {
-						checked := slices.Contains(l.checked, entry.Key)
-						label := "+"
-						if checked {
-							label = "✓"
-						}
-						if ui.Button(ck, label).Tooltip(s.tr("scholarMultiCite")).Clicked() {
-							toggleScholarCitation(l, entry.Key)
-						}
-					}
-				})
-			}
-		})
-	})
+	s.scholarCatalogRows(c, p, l.pageData.Entries, false)
+	s.scholarZoteroPagination(c.Key("pagination"), p)
 }
 
 func (s *Shell) loadZotero(p *scholarState, connect bool, collection, query string, start int) {
@@ -419,7 +369,8 @@ func (s *Shell) setScholarEntry(p *scholarState, entry scholar.Entry) {
 		l.zoteroForm = nil
 	}
 	l.selected, l.detail, l.attachmentPage = entry, scholar.ZoteroDetail{}, 0
-	l.selectedNote = ""
+	l.selectedNote, l.openNotice = "", ""
+	l.readerAllCreators, l.readerJump, l.readerActive = false, 1, 0
 	l.expanded = true
 	l.annotations = nil
 	if entry.RemoteID != "" {
@@ -441,6 +392,9 @@ func (s *Shell) loadScholarDetail(p *scholarState, entry scholar.Entry, start in
 			}
 			if err == nil {
 				l.detail, l.attachmentPage = detail, start
+				if !slices.ContainsFunc(detail.Notes, func(note scholar.ZoteroNote) bool { return note.Key == l.selectedNote }) {
+					l.selectedNote = ""
+				}
 				if entry.Source == "Zotero" && detail.Entry.RemoteID == entry.RemoteID {
 					if detail.Entry.Key == "" {
 						detail.Entry.Key = entry.Key
@@ -456,7 +410,10 @@ func (s *Shell) loadScholarDetail(p *scholarState, entry scholar.Entry, start in
 func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	if p.err != "" {
-		ui.Text(c, p.err).Wrap().FontSize(11).TextColor(scholarInk(c, "warning"))
+		s.scholarReaderNotice(c.Key("error"), p.err, nil)
+	}
+	if l.openNotice != "" && l.readerNote() == nil && l.annotations == nil && l.readerForm() == nil {
+		s.scholarReaderNotice(c.Key("open-notice"), l.openNotice, func() { l.openNotice = "" })
 	}
 	if view := l.annotations; view != nil {
 		s.scholarAnnotations(c.Key(view), p, view)
@@ -464,58 +421,125 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 	}
 	e := l.selected
 	if e == (scholar.Entry{}) {
-		ui.Text(c, s.tr("scholarSelectPaper")).Wrap()
+		ui.Column(c).FillWidth().Padding(20, 8).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, s.icon("book-open")).FontSize(28).TextColor(s.ch.muted)
+			ui.Text(c, s.tr("scholarSelectPaper")).FontSize(12).LineHeight(1.5).Wrap().TextColor(s.ch.muted)
+		})
 		return
 	}
-	if form := l.zoteroForm; form != nil && !form.catalog && form.z.ServerID == l.zotero.ServerID &&
-		form.z.Group == e.Library && (form.key == e.RemoteID || form.key == l.selectedNote) {
+	if form := l.readerForm(); form != nil {
 		s.scholarZoteroForm(c.Key("zotero-form"), p, form)
 		return
 	}
 	if l.detail.Deleted {
-		ui.Text(c, e.Title).Bold().Wrap()
-		s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, nil)
+		if !p.references.catalog || l.mode != 1 {
+			ui.Text(c, e.Title).FontSize(13).Bold().Wrap()
+			s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, nil)
+		}
 		return
 	}
-	for _, note := range l.detail.Notes {
-		if e.ZoteroNote || note.Key == l.selectedNote {
-			s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, &note)
-			s.scholarNoteDetails(c, p, note, e.ZoteroNote)
-			return
+	if note := l.readerNote(); note != nil {
+		if !p.references.catalog || l.mode != 1 {
+			s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, note)
 		}
+		s.scholarNoteDetails(c, p, *note, e.ZoteroNote)
+		return
+	}
+	zoteroLayout := p.references.catalog && l.mode == 1
+	if !zoteroLayout {
+		ui.Text(c, e.Title).FontSize(13).Bold().LineHeight(1.3).Wrap()
 	}
 	if e.ZoteroNote {
-		ui.Text(c, e.Title).Bold().Wrap()
+		if !zoteroLayout {
+			s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, nil)
+		}
 		return
 	}
-	ui.Text(c, e.Key).FontSize(12).TextColor(scholarInk(c, "citation"))
-	ui.Text(c, e.Title).Bold().Wrap()
-	ui.Text(c, strings.TrimSpace(e.Author+" "+e.Year+" "+e.Venue)).Wrap()
-	ui.Text(c, e.Source+" "+e.DOI).FontSize(11).Wrap()
-	s.scholarZoteroReaderActions(c.Key("zotero-actions"), p, e, nil)
-	if ui.Button(c, s.tr("scholarOpenPDF")).Disabled(p.busy).Clicked() {
-		s.openScholarPDF(p, e, c.Services())
+	if !zoteroLayout {
+		ui.Row(c.Key("actions")).FillWidth().Gap(5).Children(func() {
+			glyph, label := s.scholarReferenceOpenLabel(p, e)
+			if s.scholarReaderCommand(c.Key("pdf"), glyph, label, false).Grow(1).Basis(0).Disabled(p.busy).Clicked() {
+				s.openScholarReference(p, e)
+			}
+			s.scholarZoteroReaderActions(c.Key("zotero"), p, e, nil)
+		})
 	}
-	if ui.Button(c, s.tr("scholarCopyBib")).Disabled(p.busy).Clicked() {
+	s.scholarReaderSection(c, p, 0, "file-pen-line", s.tr("scholarItemInfo"), "", func(c *ui.Context) {
+		if len(l.detail.Fields) > 0 {
+			s.scholarZoteroFields(c, p)
+		} else {
+			s.scholarReaderField(c, s.tr("scholarItemCreator"), e.Author)
+			s.scholarReaderField(c, s.tr("scholarItemYear"), e.Year)
+			s.scholarReaderField(c, s.tr("scholarItemVenue"), e.Venue)
+			s.scholarReaderField(c, "DOI", e.DOI)
+			s.scholarReaderField(c, s.tr("scholarCitationKey"), e.Key)
+			s.scholarReaderField(c, s.tr("scholarItemSource"), e.Source)
+		}
+	})
+	abstract := l.detail.Abstract
+	if abstract == "" {
+		abstract = e.Abstract
+	}
+	if abstract != "" || zoteroLayout {
+		s.scholarReaderSection(c, p, 1, "notebook-tabs", s.tr("scholarItemAbstract"), "", func(c *ui.Context) {
+			ui.Text(c, abstract).FontSize(12).LineHeight(1.5).Wrap().Selectable()
+		})
+	}
+	childCount := func(count int) string {
+		if l.detail.More || l.attachmentPage > 0 {
+			return fmt.Sprintf(s.tr("scholarPageItemCount"), count)
+		}
+		return fmt.Sprint(count)
+	}
+	s.scholarReaderSection(c, p, 2, "paperclip", s.tr("scholarItemAttachments"), childCount(len(l.detail.PDFs)), func(c *ui.Context) {
+		s.scholarReaderAttachments(c, p, e)
+	})
+	s.scholarReaderSection(c, p, 3, "sticky-note", s.tr("scholarItemNotes"), childCount(len(l.detail.Notes)), func(c *ui.Context) {
+		for _, note := range l.detail.Notes {
+			if s.scholarReaderLink(c.Key(note.Key), "sticky-note", scholarNoteTitle(s, note)).Disabled(p.busy).Clicked() {
+				l.selectedNote, l.readerActive, l.readerJump = note.Key, 3, 4
+			}
+		}
+	})
+	if e.RemoteID != "" {
+		s.scholarReaderCollections(c, p)
+	}
+	s.scholarZoteroMetadata(c, p, l.detail.Tags, l.detail.Related)
+	s.scholarReaderSection(c, p, 4, "quote", s.tr("scholarCitationsWriting"), "", func(c *ui.Context) {
+		s.scholarReaderCitations(c, p, e)
+	})
+}
+
+func (s *Shell) scholarReaderCitations(c *ui.Context, p *scholarState, e scholar.Entry) {
+	l := &p.literature
+	if s.scholarReaderCommand(c.Key("scholarCopyBib"), "copy", s.tr("scholarCopyBib"), false).Disabled(p.busy).Clicked() {
 		s.copyScholarBib(p, e, c.Services())
 	}
-
 	if slices.Contains(p.bibNames, e.Source) {
-		if ui.Button(c, s.tr("scholarOpenBibliography")).Clicked() {
+		if s.scholarReaderCommand(c.Key("scholarOpenBibliography"), "file-text", s.tr("scholarOpenBibliography"), false).Clicked() {
 			s.OpenFiles([]string{filepath.Join(p.project.Root, e.Source)})
 		}
-		if ui.Button(c, s.tr("scholarInsertCitation")).Clicked() {
+		if s.scholarReaderCommand(c.Key("scholarInsertCitation"), "quote", s.tr("scholarInsertCitation"), false).Clicked() {
 			s.insertScholarCitations(p, []string{e.Key}, "")
 		}
 	} else if e.RemoteID != "" || e.Source == "arXiv" || e.Source == "Crossref" {
 		if len(p.bibNames) == 0 {
 			ui.Text(c, s.tr("scholarDeclareTarget")).FontSize(11).Wrap()
 		} else {
-			scholarSelectIndex(c, &l.target, p.bibNames, false)
+			if l.target < 0 || l.target >= len(p.bibNames) {
+				l.target = 0
+			}
+			s.scholarReaderCommand(c.Key("bibliography"), "file-text", p.bibNames[l.target], true).Menu(func(m *ui.Menu) {
+				for i, name := range p.bibNames {
+					if m.Item(fmt.Sprintf("%d. %s", i+1, name)).Radio(l.target == i).Chosen() {
+						l.target = i
+					}
+				}
+			})
 			if ext := strings.ToLower(filepath.Ext(p.bibNames[l.target])); ext == ".yml" || ext == ".yaml" {
 				ui.Text(c, s.tr("scholarHayagrivaFields")).FontSize(11).Wrap()
 			}
-			if ui.Button(c, s.tr("scholarImportAndCite")).Disabled(p.busy || p.library == nil).Clicked() {
+			if s.scholarReaderCommand(c.Key("scholarImportAndCite"), "quote", s.tr("scholarImportAndCite"), false).Disabled(p.busy || p.library == nil).Clicked() {
 				s.importScholarEntry(p, p.bibNames[l.target], e)
 			}
 		}
@@ -524,7 +548,7 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 			if !l.connected || l.zotero.ServerID == "" {
 				label = s.tr("scholarCopyForZotero")
 			}
-			if ui.Button(c, label).Disabled(p.busy).Clicked() {
+			if s.scholarReaderCommand(c.Key("save-zotero"), "book-open", label, false).Disabled(p.busy).Clicked() {
 				if !l.connected || l.zotero.ServerID == "" {
 					value, err := scholar.ExportBibTeX(e)
 					if err != nil {
@@ -540,7 +564,7 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 					}, func() { s.scholarZoteroItemChanged(p, z, "", false) })
 				}
 			}
-		} else if e.Library == 0 && e.Key != "" && ui.Button(c, s.tr("scholarCopyBBT")).Disabled(p.busy).Clicked() {
+		} else if e.Library == 0 && e.Key != "" && s.scholarReaderCommand(c.Key("scholarCopyBBT"), "copy", s.tr("scholarCopyBBT"), false).Disabled(p.busy).Clicked() {
 			z, svc := l.zotero, c.Services()
 			s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -554,22 +578,7 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 			})
 		}
 	}
-	abstract := l.detail.Abstract
-	if abstract == "" {
-		abstract = e.Abstract
-	}
-	if abstract != "" {
-		ui.Text(c, abstract).FontSize(13).Wrap()
-	}
-	s.scholarZoteroMetadata(c, p, l.detail.Tags, l.detail.Related)
-	if !p.references.catalog {
-		for _, note := range l.detail.Notes {
-			if ui.Button(c.Key(note.Key), scholarNoteTitle(s, note)).Clicked() {
-				l.selectedNote = note.Key
-			}
-		}
-	}
-	if isManuscript(s.activeTab()) && ui.Button(c, s.tr("scholarDiscussPaper")).Disabled(p.busy || p.agent.patch != nil || p.agent.batch != nil).Clicked() {
+	if isManuscript(s.activeTab()) && s.scholarReaderCommand(c.Key("scholarDiscussPaper"), "message-square-text", s.tr("scholarDiscussPaper"), false).Disabled(p.busy || p.agent.patch != nil || p.agent.batch != nil).Clicked() {
 		s.captureScholarTarget(p)
 		s.showScholarInspector(p, scholarCodex)
 		if p.agent.target.tabID == 0 {
@@ -582,35 +591,45 @@ func (s *Shell) scholarReaderView(c *ui.Context, p *scholarState) {
 			p.agent.instruction = s.tr("scholarPaperInstruction")
 		}
 	}
+}
+
+func (s *Shell) scholarReaderAttachments(c *ui.Context, p *scholarState, e scholar.Entry) {
+	l := &p.literature
 	for _, pdf := range l.detail.PDFs {
 		ck := c.Key(pdf.Key)
-		ui.Text(ck, pdf.Title).Wrap()
-		ui.Row(ck).Gap(4).Children(func() {
+		title := pdf.Title
+		if title == "" {
+			title = s.tr("scholarOpenPDF")
+		}
+		ui.Row(ck).FillWidth().Gap(3).Children(func() {
+			glyph := "file-text"
 			if pdf.LinkOnly {
-				if ui.Button(ck, s.tr("scholarOpenExternalPDF")).Disabled(pdf.URL == "").Clicked() {
-					s.openScholarZoteroPDF(p, e, pdf, c.Services())
-				}
+				glyph = "external-link"
+			}
+			if s.scholarReaderCommand(ck.Key("open"), glyph, title, false).Grow(1).Basis(0).Disabled(p.busy || pdf.LinkOnly && pdf.URL == "").Clicked() {
+				s.openScholarZoteroPDF(p, e, pdf)
+			}
+			if pdf.LinkOnly {
 				return
 			}
-			if ui.Button(ck, s.tr("scholarOpenPDF")).Clicked() {
-				s.openScholarZoteroPDF(p, e, pdf, c.Services())
-			}
-			if s.pf.mac && ui.Button(ck, "Quick Look · Space").Disabled(p.busy).Clicked() {
-				s.quickLookScholarAttachment(p, pdf.Key)
-			}
-			if ui.Button(ck, s.tr("scholarReadAnnotations")).Disabled(p.busy).Clicked() {
-				z := l.zotero
-				z.Group = e.Library
-				s.openScholarAnnotations(p, e, z, pdf.Key, pdf.Title)
-			}
+			s.scholarCompactIcon(ck.Key("actions"), "ellipsis", s.tr("scholarAttachmentActions"), false).Disabled(p.busy).Menu(func(m *ui.Menu) {
+				if s.pf.mac && m.Item("Quick Look · Space").Chosen() {
+					s.quickLookScholarAttachment(p, pdf.Key)
+				}
+				if m.Item(s.tr("scholarReadAnnotations")).Chosen() {
+					z := l.zotero
+					z.Group = e.Library
+					s.openScholarAnnotations(p, e, z, pdf.Key, pdf.Title)
+				}
+			})
 		})
 	}
 	if l.detail.More || l.attachmentPage != 0 {
-		ui.Row(c).Gap(4).Children(func() {
-			if ui.Button(c, s.tr("scholarPreviousAttachments")).Disabled(p.busy || l.attachmentPage == 0).Clicked() {
+		ui.Row(c).FillWidth().Gap(4).Children(func() {
+			if s.scholarCompactIcon(c.Key("previous"), "chevron-left", s.tr("scholarPreviousAttachments"), false).Disabled(p.busy || l.attachmentPage == 0).Clicked() {
 				s.loadScholarDetail(p, e, l.attachmentPage-scholar.ZoteroPageSize)
 			}
-			if ui.Button(c, s.tr("scholarNextAttachments")).Disabled(p.busy || !l.detail.More).Clicked() {
+			if s.scholarCompactIcon(c.Key("next"), "chevron-right", s.tr("scholarNextAttachments"), false).Disabled(p.busy || !l.detail.More).Clicked() {
 				s.loadScholarDetail(p, e, l.attachmentPage+scholar.ZoteroPageSize)
 			}
 		})
@@ -645,11 +664,11 @@ func (s *Shell) insertScholarQuote(p *scholarState, key, page, quote string) {
 	var text string
 	if strings.EqualFold(filepath.Ext(tab.Path), ".typ") {
 		quote = strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(quote)
-		text = fmt.Sprintf("\n#quote(block: true)[#text(\"%s\")] @%s[p. %s]\n", quote, key, page)
+		text = fmt.Sprintf("\n#quote(block: true)[#text(\"%s\")] @%s[%s]\n", quote, key, scholarCitationLocator(page, true))
 	} else {
 		quote = strings.NewReplacer("\\", `\textbackslash{}`, "{", `\{`, "}", `\}`, "%", `\%`, "&", `\&`,
 			"#", `\#`, "_", `\_`, "$", `\$`, "~", `\textasciitilde{}`, "^", `\textasciicircum{}`).Replace(quote)
-		text = fmt.Sprintf("\n\\begin{quote}\n%s\n\\end{quote}\n\\cite[p.~%s]{%s}\n", quote, page, key)
+		text = fmt.Sprintf("\n\\begin{quote}\n%s\n\\end{quote}\n\\cite[%s]{%s}\n", quote, scholarCitationLocator(page, false), key)
 	}
 	st := tab.Source()
 	sel := st.Selection()
@@ -763,12 +782,12 @@ func (s *Shell) insertScholarCitations(p *scholarState, keys []string, page stri
 	} else if typst {
 		value = "@" + strings.Join(keys, " @")
 		if page != "" {
-			value += "[p. " + page + "]"
+			value += "[" + scholarCitationLocator(page, true) + "]"
 		}
 	} else {
 		value = `\cite{` + strings.Join(keys, ", ") + "}"
 		if page != "" {
-			value = `\autocite[p.~` + page + "]{" + strings.Join(keys, ", ") + "}"
+			value = `\autocite[` + scholarCitationLocator(page, false) + "]{" + strings.Join(keys, ", ") + "}"
 		}
 	}
 	if tab.typesetMode == typesetPreview {
@@ -782,6 +801,19 @@ func (s *Shell) insertScholarCitations(p *scholarState, keys []string, page stri
 	caret := start + len(value)
 	st.Select(caret, caret)
 	s.focusEditor = true
+}
+
+// Page labels are Zotero text, not manuscript markup. Keep printed labels
+// separate from the physical page used to open the attachment.
+func scholarCitationLocator(page string, typst bool) string {
+	page = strings.Join(strings.Fields(page), " ")
+	if typst {
+		page = strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(page)
+		return "p. #text(\"" + page + "\")"
+	}
+	page = strings.NewReplacer("\\", `\textbackslash{}`, "{", `\{`, "}", `\}`, "%", `\%`, "&", `\&`,
+		"#", `\#`, "_", `\_`, "$", `\$`, "~", `\textasciitilde{}`, "^", `\textasciicircum{}`).Replace(page)
+	return "p.~{" + page + "}"
 }
 
 func scholarCitationTail(snap editor.Snapshot, offset int, typst bool) (int, bool) {

@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -46,92 +47,109 @@ func (s *Shell) loadScholarAnnotations(p *scholarState, view *scholarAnnotationV
 	})
 }
 
+func (s *Shell) returnScholarAnnotationEntry(p *scholarState, view *scholarAnnotationView) {
+	p.literature.annotations, p.literature.selectedNote = nil, ""
+	p.literature.readerActive, p.literature.readerJump = 0, 1
+	if !scholarSameCatalogItem(p.literature.selected, view.entry) {
+		s.setScholarEntry(p, view.entry)
+	}
+}
+
 func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholarAnnotationView) {
-	currentLibrary := view.zotero.ServerID == p.literature.zotero.ServerID
-	if ui.Button(c.Key("details"), s.tr("scholarAnnotationEntry")).Disabled(p.busy || !currentLibrary).Clicked() {
-		p.literature.annotations = nil
-		p.literature.selectedNote = ""
-		if !scholarSameCatalogItem(p.literature.selected, view.entry) {
-			s.setScholarEntry(p, view.entry)
-		}
-		return
-	}
-	ui.Text(c, s.tr("scholarReadAnnotations")).Bold()
-	ui.Text(c, view.title).FontSize(12).Wrap()
-	if !view.loaded {
-		if p.busy {
-			ui.Text(c, s.tr("scholarLoadingAnnotations")).Wrap()
-		} else if ui.Button(c.Key("retry"), s.tr("refresh")).Clicked() {
-			s.loadScholarAnnotations(p, view, 0)
-		}
-		return
-	}
-	if len(view.items) == 0 {
-		ui.Text(c, s.tr("scholarNoAnnotations")).FontSize(12).Wrap()
-	}
-	projectKey := ""
-	if len(view.items) > 0 && isManuscript(s.activeTab()) {
-		projectKey = scholarReferenceKey(p.library, view.entry)
-	}
-	for i, annotation := range view.items {
-		ck := c.Key(i)
-		ui.Box(ck).FillWidth().Height(1).Background(s.ch.separator)
-		ui.Row(ck).Gap(6).AlignItems(ui.Center).Children(func() {
-			kind := "scholarReadAnnotations"
-			switch annotation.Kind {
-			case "highlight":
-				kind = "scholarAnnotationHighlight"
-			case "underline":
-				kind = "scholarAnnotationUnderline"
-			case "note", "text":
-				kind = "scholarAnnotationComment"
-			case "image", "ink":
-				kind = "scholarAnnotationArea"
-			}
-			ui.Text(ck, s.tr(kind)).FontSize(11).TextColor(s.ch.muted)
-			if annotation.Page <= 0 {
+	ui.Column(c).FillWidth().Padding(8, 4).Gap(6).FontSize(12).LineHeight(1.5).Children(func() {
+		currentLibrary := view.zotero.ServerID == p.literature.zotero.ServerID
+		framed := p.references.catalog && p.literature.mode == 1
+		if !framed {
+			if s.scholarReaderCommand(c.Key("details"), "arrow-left", s.tr("scholarAnnotationEntry"), false).Disabled(p.busy || !currentLibrary).Clicked() {
+				s.returnScholarAnnotationEntry(p, view)
 				return
 			}
-			label := annotation.Label
-			if label == "" {
-				label = strconv.Itoa(annotation.Page)
+			ui.Text(c, s.tr("scholarReadAnnotations")).FontSize(13).Bold().LineHeight(1.3).Wrap()
+			ui.Text(c, view.title).FontSize(12).LineHeight(1.5).TextColor(s.ch.muted).Wrap()
+			if view.loaded && s.scholarReaderCommand(c.Key("refresh"), "refresh-cw", s.tr("refresh"), false).Disabled(p.busy || !currentLibrary).Clicked() {
+				s.loadScholarAnnotations(p, view, view.start)
 			}
-			if ui.Button(ck.Key("page"), "PDF · "+label).Disabled(p.busy || !currentLibrary).Clicked() {
-				s.openScholarAttachment(p, view.entry, view.key, "", view.title, annotation.Page)
-				width, _ := c.Size()
-				if p.err == "" && !s.scholarSinglePane(width) {
-					s.showScholarInspector(p, scholarReader)
-				}
+		}
+		if !view.loaded {
+			if p.busy {
+				ui.Text(c, s.tr("scholarLoadingAnnotations")).FontSize(12).Padding(8, 4).Wrap()
+			} else if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("refresh"), false).Clicked() {
+				s.loadScholarAnnotations(p, view, 0)
 			}
-		})
-		if annotation.Quote != "" {
-			ui.Text(ck, annotation.Quote).Wrap()
+			return
 		}
-		if annotation.Note != "" {
-			ui.Text(ck, annotation.Note).Wrap().TextColor(s.ch.muted)
+		if len(view.items) == 0 {
+			ui.Text(c, s.tr("scholarNoAnnotations")).FontSize(12).LineHeight(1.5).TextColor(s.ch.muted).Padding(12, 4).Wrap()
 		}
-		if projectKey != "" && annotation.Page > 0 {
-			page := strconv.Itoa(annotation.Page)
-			ui.Row(ck.Key("cite-actions")).Gap(4).Children(func() {
-				if ui.Button(ck.Key("cite"), s.tr("scholarCitePage")).Disabled(p.busy).Clicked() {
-					s.selectScholarPDF(p, nil)
-					s.insertScholarCitations(p, []string{projectKey}, page)
+		projectKey := ""
+		if len(view.items) > 0 && isManuscript(s.activeTab()) {
+			projectKey = scholarReferenceKey(p.library, view.entry)
+		}
+		for i, annotation := range view.items {
+			ck := c
+			ui.Column(c.Key(i)).FillWidth().Padding(6, 0).Gap(5).Children(func() {
+				label := strings.TrimSpace(annotation.Label)
+				if label == "" && annotation.Page > 0 {
+					label = strconv.Itoa(annotation.Page)
 				}
-				if annotation.Quote != "" && ui.Button(ck.Key("quote"), s.tr("scholarInsertQuote")).Disabled(p.busy).Clicked() {
-					s.selectScholarPDF(p, nil)
-					s.insertScholarQuote(p, projectKey, page, annotation.Quote)
+				ui.Box(ck).FillWidth().Height(1).Background(s.ch.separator)
+				ui.Row(ck).Gap(6).AlignItems(ui.Center).Children(func() {
+					kind := "scholarReadAnnotations"
+					switch annotation.Kind {
+					case "highlight":
+						kind = "scholarAnnotationHighlight"
+					case "underline":
+						kind = "scholarAnnotationUnderline"
+					case "note", "text":
+						kind = "scholarAnnotationComment"
+					case "image", "ink":
+						kind = "scholarAnnotationArea"
+					}
+					ui.Text(ck, s.tr(kind)).FontSize(11).TextColor(s.ch.muted)
+					if s.scholarCompactIcon(ck.Key("zotero"), "external-link", s.tr("scholarOpenZoteroAnnotation"), false).
+						Disabled(!currentLibrary).Clicked() {
+						c.Services().OpenURL(view.zotero.AnnotationLink(view.key, annotation))
+					}
+					if annotation.Page <= 0 {
+						return
+					}
+					if s.scholarReaderCommand(ck.Key("page"), "file-text", "PDF · "+label, false).Grow(1).Basis(0).Disabled(p.busy || !currentLibrary).Clicked() {
+						s.openScholarAttachment(p, view.entry, view.key, "", view.title, annotation.Page)
+						width, _ := c.Size()
+						if p.err == "" && !s.scholarSinglePane(width) {
+							s.showScholarInspector(p, scholarReader)
+						}
+					}
+				})
+				if annotation.Quote != "" {
+					ui.Text(ck, annotation.Quote).FontSize(12).LineHeight(1.5).Wrap().Selectable()
+				}
+				if annotation.Note != "" {
+					ui.Text(ck, annotation.Note).FontSize(12).LineHeight(1.5).Wrap().Selectable().TextColor(s.ch.muted)
+				}
+				if projectKey != "" && label != "" {
+					ui.Row(ck.Key("cite-actions")).Gap(4).Children(func() {
+						if s.scholarReaderCommand(ck.Key("cite"), "quote", s.tr("scholarCitePage"), false).Grow(1).Basis(0).Disabled(p.busy).Clicked() {
+							s.selectScholarPDF(p, nil)
+							s.insertScholarCitations(p, []string{projectKey}, label)
+						}
+						if annotation.Quote != "" && s.scholarReaderCommand(ck.Key("quote"), "copy", s.tr("scholarInsertQuote"), false).Grow(1).Basis(0).Disabled(p.busy).Clicked() {
+							s.selectScholarPDF(p, nil)
+							s.insertScholarQuote(p, projectKey, label, annotation.Quote)
+						}
+					})
 				}
 			})
 		}
-	}
-	if view.start > 0 || view.more {
-		ui.Row(c.Key("pagination")).Gap(4).Children(func() {
-			if ui.Button(c.Key("previous"), s.tr("scholarPreviousAnnotations")).Disabled(p.busy || view.start == 0).Clicked() {
-				s.loadScholarAnnotations(p, view, view.start-scholar.ZoteroPageSize)
-			}
-			if ui.Button(c.Key("next"), s.tr("scholarNextAnnotations")).Disabled(p.busy || !view.more).Clicked() {
-				s.loadScholarAnnotations(p, view, view.start+scholar.ZoteroPageSize)
-			}
-		})
-	}
+		if view.start > 0 || view.more {
+			ui.Row(c.Key("pagination")).Gap(4).Children(func() {
+				if s.scholarCompactIcon(c.Key("previous"), "chevron-left", s.tr("scholarPreviousAnnotations"), false).Disabled(p.busy || view.start == 0).Clicked() {
+					s.loadScholarAnnotations(p, view, view.start-scholar.ZoteroPageSize)
+				}
+				if s.scholarCompactIcon(c.Key("next"), "chevron-right", s.tr("scholarNextAnnotations"), false).Disabled(p.busy || !view.more).Clicked() {
+					s.loadScholarAnnotations(p, view, view.start+scholar.ZoteroPageSize)
+				}
+			})
+		}
+	})
 }

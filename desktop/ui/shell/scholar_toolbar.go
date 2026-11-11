@@ -28,7 +28,6 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 	p.changes.compare = false
 	p.agent.trial.close()
 	p.agent.reviewHidden = true
-	p.references.right = nil
 	p.references.selectTab(nil)
 	s.closeScholarInspector(p)
 	if tab.typesetMode != mode {
@@ -44,12 +43,6 @@ func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int
 		return typesetSplit
 	}
 	review := s.scholarReviewPatch(p, tab) != nil
-	if p.references.right != nil && !p.references.catalog && !s.scholarSinglePane(width) {
-		if review {
-			return typesetSource
-		}
-		return typesetPreview
-	}
 	if p.drawer != scholarClosed && (p.drawer != scholarCodex || s.scholarInspectorPrimary(p, width)) {
 		return typesetSource
 	}
@@ -74,7 +67,7 @@ func (s *Shell) revealScholarSource(tab *Tab) {
 	if p := s.scholar; p != nil {
 		p.dismissWindowsPage()
 		p.references.catalog = false
-		p.references.focused, p.references.left, p.references.right = nil, nil, nil
+		p.references.focused = nil
 		if s.win != nil {
 			width, _ := s.win.ContentSize()
 			if p.activeTabID != tab.ID || s.scholarSinglePane(float32(width)) {
@@ -116,7 +109,7 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 		label := s.tr(scholarViewLabels[mode])
 		icon := [...]string{"code-xml", "book-open-text", "columns-2"}[mode]
 		compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
-		if p.references.catalog || p.references.focused != nil || p.references.right != nil && !compact {
+		if p.references.catalog || p.references.focused != nil {
 			label = s.tr("scholarManuscriptLayout")
 		} else if compact && mode == typesetSplit && p.drawer == scholarClosed && !p.agent.trial.show {
 			label = s.tr(compactLabels[shown])
@@ -126,7 +119,7 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 				icon = "code-xml"
 			}
 		}
-		s.scholarMenuButton(c.Key("layout"), icon, label, width >= 400).Menu(func(m *ui.Menu) {
+		s.scholarMenuButton(c.Key("layout"), icon, label, width >= 400).Disabled(s.groups.root != nil).Menu(func(m *ui.Menu) {
 			for i, key := range scholarViewLabels {
 				if m.Item(s.tr(key)).Radio(i == mode).Disabled(!preview && i != typesetSource).Chosen() {
 					s.setTypesetView(p, tab, i)
@@ -162,7 +155,27 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 	label := s.tr("scholarToggleInspector")
 	width, _ := c.Size()
 	visible := (p.drawer == scholarReader || p.drawer == scholarDiagnostics) && s.scholarInspectorVisible(p, width)
-	if s.toolButton(c.Key("inspector"), "panel-right", label, visible).Label(label).FocusRing(true).Clicked() {
+	var inspector ui.Element
+	if p.references.catalog && p.literature.mode == 1 {
+		label = s.tr("scholarShowDetails")
+		if visible {
+			label = s.tr("scholarHideDetails")
+		}
+		// Continue the detail rail through the tab bar without a second active tile.
+		slot := ui.Box(c.Key("inspector-slot")).Width(30).Shrink(0).FillHeight().AlignItems(ui.Center).Justify(ui.Center)
+		if visible && p.drawer == scholarReader {
+			slot.Background(s.ch.sidebar).Border(1, s.ch.separator).BorderWidth(0, 0, 0, 1)
+		}
+		slot.Children(func() {
+			inspector = s.scholarCompactIcon(c.Key("inspector"), "panel-right", label, false)
+		})
+	} else {
+		inspector = s.toolButton(c.Key("inspector"), "panel-right", label, visible).Label(label).FocusRing(true)
+	}
+	if p.references.catalog && p.literature.catalogForm() != nil {
+		inspector.Disabled(true)
+	}
+	if inspector.Clicked() {
 		if visible {
 			s.closeScholarInspector(p)
 		} else if reading := p.references.focused; reading != nil && !p.references.catalog && !p.busy {

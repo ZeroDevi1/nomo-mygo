@@ -23,13 +23,15 @@ const (
 // A nil tab represents the active manuscript. Attachments never become editable
 // documents or acquire entries in the regular save and workspace recovery paths.
 type scholarReferenceTabs struct {
-	tabs                 []*scholarPDFTab
-	left, right, focused *scholarPDFTab
-	catalog              bool
+	tabs        []*scholarReferenceTab
+	focused     *scholarReferenceTab
+	catalog     bool
+	catalogOpen bool
 }
 
-type scholarPDFTab struct {
+type scholarReferenceTab struct {
 	entry            scholar.Entry
+	web              *scholarWebTab
 	zotero           scholar.Zotero
 	key, path, title string
 	page, pages      int
@@ -41,7 +43,7 @@ type scholarPDFTab struct {
 	generation       uint64
 }
 
-func (t *scholarPDFTab) releasePage() {
+func (t *scholarReferenceTab) releasePage() {
 	if t.cancel != nil {
 		t.cancel()
 		t.cancel = nil
@@ -50,55 +52,41 @@ func (t *scholarPDFTab) releasePage() {
 	t.bitmap = nil
 }
 
-func (r *scholarReferenceTabs) selectTab(t *scholarPDFTab) {
-	r.catalog = false
-	r.focused = t
-	if r.right == nil || t != r.right {
-		r.left = t
+func (r *scholarReferenceTabs) selectTab(t *scholarReferenceTab) {
+	r.catalog, r.focused = false, t
+}
+
+func (t *scholarReferenceTab) releaseContent(remember bool) {
+	if t.web != nil {
+		t.web.stop(remember)
+	} else if t.bitmap != nil || t.cancel != nil {
+		t.releasePage()
 	}
 }
 
-func (r *scholarReferenceTabs) split(t *scholarPDFTab) {
-	if r.left == t {
-		r.left = r.right
-		if r.left == t {
-			r.left = nil
-		}
-	}
-	r.right = t
-	r.selectTab(t)
-}
-
-func (r *scholarReferenceTabs) close(t *scholarPDFTab) {
-	t.releasePage()
-	r.tabs = slices.DeleteFunc(r.tabs, func(candidate *scholarPDFTab) bool { return candidate == t })
-	if r.left == t {
-		r.left = nil
-	}
-	if r.right == t {
-		r.right = nil
-	}
+func (r *scholarReferenceTabs) close(t *scholarReferenceTab) {
+	t.releaseContent(false)
+	r.tabs = slices.DeleteFunc(r.tabs, func(candidate *scholarReferenceTab) bool { return candidate == t })
 	if r.focused == t {
-		r.focused = r.left
+		r.focused = nil
 	}
 }
 
-func (r *scholarReferenceTabs) visible(split, covered bool) (left, right *scholarPDFTab) {
+func (r *scholarReferenceTabs) visible(covered bool) (shown *scholarReferenceTab) {
 	if !covered && !r.catalog {
-		left = r.focused
-		if split && r.right != nil {
-			left, right = r.left, r.right
-		}
+		shown = r.focused
 	}
+	r.releaseHidden(shown)
+	return shown
+}
+
+func (r *scholarReferenceTabs) releaseHidden(shown ...*scholarReferenceTab) {
 	for _, t := range r.tabs {
-		if t != left && t != right {
+		if !slices.Contains(shown, t) {
 			t.pageNavigation.open = false
-			if t.bitmap != nil || t.cancel != nil {
-				t.releasePage()
-			}
+			t.releaseContent(true)
 		}
 	}
-	return left, right
 }
 
 func (s *Shell) showScholarCatalog(p *scholarState) {
@@ -107,7 +95,7 @@ func (s *Shell) showScholarCatalog(p *scholarState) {
 	if p.nav != scholarLiterature {
 		p.lastProjectNav = p.nav
 	}
-	p.references.catalog = true
+	p.references.catalog, p.references.catalogOpen = true, true
 	p.accountOpen, p.winRailPopup, p.winCompactProject = false, false, false
 	p.nav, p.drawer, p.compactNav = scholarLiterature, scholarClosed, false
 }
@@ -137,7 +125,7 @@ func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, pat
 		title = e.Title
 	}
 	e.Raw, e.Record = "", nil
-	t := &scholarPDFTab{entry: e, zotero: z, key: key, path: path, title: title}
+	t := &scholarReferenceTab{entry: e, zotero: z, key: key, path: path, title: title}
 	t.setPage(max(page, 1))
 	r.tabs = append(r.tabs, t)
 	s.selectScholarPDF(p, t)
@@ -146,7 +134,7 @@ func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, pat
 	}
 }
 
-func (s *Shell) selectScholarPDF(p *scholarState, t *scholarPDFTab) {
+func (s *Shell) selectScholarPDF(p *scholarState, t *scholarReferenceTab) {
 	s.closeScholarInspector(p)
 	if t == nil && p.nav == scholarLiterature {
 		p.nav = p.lastProjectNav
@@ -157,7 +145,7 @@ func (s *Shell) selectScholarPDF(p *scholarState, t *scholarPDFTab) {
 	p.err = ""
 }
 
-func (t *scholarPDFTab) setPage(page int) {
+func (t *scholarReferenceTab) setPage(page int) {
 	if t.pages > 0 {
 		page = min(page, t.pages)
 	}
@@ -169,7 +157,7 @@ func (t *scholarPDFTab) setPage(page int) {
 	t.page = page
 }
 
-func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarPDFTab) {
+func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab) {
 	if t.cancel != nil || t.bitmap != nil || t.err != "" {
 		return
 	}
@@ -219,22 +207,29 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarPDFTab) {
 }
 
 func (r *scholarReferenceTabs) hasTabs() bool {
-	return r.catalog || len(r.tabs) > 0
+	return r.catalogOpen || r.catalog || len(r.tabs) > 0
 }
 
-func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState, split bool) {
+func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState) {
 	r := &p.references
 	if !r.hasTabs() {
 		return
 	}
-	if s.scholarTabButton(c.Key("catalog"), "book-open", s.tr("scholarCatalog"), r.catalog).Clicked() {
-		s.showScholarCatalog(p)
+	if r.catalogOpen || r.catalog {
+		b := s.scholarWorkspaceTab(c.Key("catalog"), "book-open", s.tr("scholarCatalog"), s.tr("scholarCloseCatalog"), r.catalog,
+			func() { s.showScholarCatalog(p) }, func() {
+				r.catalogOpen = false
+				if r.catalog {
+					s.selectScholarPDF(p, nil)
+				}
+			})
+		b.ContextMenu(func(m *ui.Menu) { s.editorGroupMenu(m, workspaceItem{catalog: true}) })
 	}
 	if len(r.tabs) == 0 {
 		return
 	}
 	tabs := slices.Clone(r.tabs)
-	slices.SortStableFunc(tabs, func(a, b *scholarPDFTab) int {
+	slices.SortStableFunc(tabs, func(a, b *scholarReferenceTab) int {
 		switch {
 		case a.pinned == b.pinned:
 			return 0
@@ -253,29 +248,73 @@ func (s *Shell) scholarReferenceTabItems(c *ui.Context, p *scholarState, split b
 		}
 		if r.focused != nil && !r.catalog {
 			m.Separator()
-			s.scholarReferenceActions(m, p, r.focused, split)
+			s.scholarReferenceActions(m, p, r.focused)
 		}
 	})
-	ui.Row(c.Key("attachment-tabs")).Grow(1).MinWidth(0).Clip().Gap(4).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("attachment-tabs")).FillHeight().MinWidth(0).Shrink(1).Clip().Gap(1).AlignItems(ui.Stretch).Children(func() {
 		for _, t := range tabs {
 			ck := c.Key(t)
 			glyph := "file-text"
+			if t.web != nil {
+				glyph = "globe"
+			}
 			if t.pinned {
 				glyph = "pin"
 			}
-			b := s.scholarTabButton(ck, glyph, t.title, !r.catalog && r.focused == t)
-			if b.Clicked() {
-				s.selectScholarPDF(p, t)
-			}
+			b := s.scholarWorkspaceTab(ck, glyph, t.title, s.tr("closeTab"), !r.catalog && r.focused == t,
+				func() { s.selectScholarPDF(p, t) }, func() { s.closeScholarPDF(p, t) })
 			b.ContextMenu(func(m *ui.Menu) {
-				s.scholarReferenceActions(m, p, t, split)
+				s.scholarReferenceActions(m, p, t)
 			})
 		}
 	})
 }
 
+func (s *Shell) scholarWorkspaceTab(c *ui.Context, glyph, title, closeLabel string, selected bool, activate, close func()) ui.Element {
+	cell := ui.Row(c).Width(140).MinWidth(94).Shrink(1).FillHeight().Padding(0, 6).Gap(4).AlignItems(ui.Center).
+		Border(1, s.ch.separator).BorderWidth(0, 0, 0, 1)
+	if selected {
+		cell.Background(s.ch.tabActive)
+	} else if cell.Hovered() {
+		cell.Background(s.ch.hover)
+	}
+	cell.Children(func() {
+		label := ui.ButtonBase(c.Key("activate")).Grow(1).MinWidth(0).FillHeight().Gap(5).Justify(ui.Start).
+			Selected(selected).TextColor(s.ch.text).FocusRing(true).Label(title).Tooltip(title)
+		if selected {
+			label.Background(s.ch.tabActive)
+		}
+		label.Children(func() {
+			ui.Icon(c, s.icon(glyph)).FontSize(13).TextColor(s.ch.muted)
+			ui.Text(c, title).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.text)
+		})
+		if label.Clicked() {
+			label.Focus()
+			activate()
+		}
+		button := ui.ButtonBase(c.Key("close")).Size(18, 18).Radius(3).FocusRing(true).Label(closeLabel).Tooltip(closeLabel)
+		if button.Hovered() {
+			button.Background(s.ch.hover)
+		}
+		button.Children(func() { ui.Icon(c, s.icon("x")).FontSize(12).TextColor(s.ch.muted) })
+		if button.Clicked() {
+			close()
+		}
+	})
+	return cell
+}
+
+func (s *Shell) closeScholarPDF(p *scholarState, t *scholarReferenceTab) {
+	active := !p.references.catalog && p.references.focused == t
+	p.references.close(t)
+	if active {
+		s.selectScholarPDF(p, nil)
+	}
+}
+
 func (s *Shell) scholarTabButton(c *ui.Context, glyph, title string, selected bool) ui.Element {
-	b := ui.ButtonBase(c).Height(27).MaxWidth(190).Padding(0, 8).Gap(5).FocusRing(true).Selected(selected).Tooltip(title)
+	b := ui.ButtonBase(c).Height(27).MaxWidth(190).Padding(0, 8).Gap(5).Justify(ui.Start).FocusRing(true).
+		Selected(selected).TextColor(s.ch.text).Tooltip(title)
 	if selected {
 		b.Background(s.ch.tabActive)
 	} else if b.Hovered() {
@@ -283,35 +322,27 @@ func (s *Shell) scholarTabButton(c *ui.Context, glyph, title string, selected bo
 	}
 	b.Children(func() {
 		ui.Icon(c, s.icon(glyph)).FontSize(13).TextColor(s.ch.muted)
-		ui.Text(c, title).FontSize(12).SingleLine().MinWidth(0).Shrink(1)
+		ui.Text(c, title).FontSize(12).SingleLine().MinWidth(0).Shrink(1).TextColor(s.ch.text)
 	})
 	return b
 }
 
-func (s *Shell) scholarReferenceActions(m *ui.Menu, p *scholarState, t *scholarPDFTab, split bool) {
-	r := &p.references
+func (s *Shell) scholarReferenceActions(m *ui.Menu, p *scholarState, t *scholarReferenceTab) {
 	if m.Item(s.tr("scholarPinPDF")).Checked(t.pinned).Chosen() {
 		t.pinned = !t.pinned
 	}
-	if r.right == t {
-		if m.Item(s.tr("scholarEndPDFSplit")).Chosen() {
-			r.right = nil
-			r.selectTab(r.focused)
-		}
-	} else if m.Item(s.tr("scholarSplitPDF")).Disabled(!split).Chosen() {
-		r.split(t)
-		s.closeScholarInspector(p)
-	}
+	s.editorGroupMenu(m, workspaceItem{reference: t})
 	if m.Item(s.tr("scholarClose")).Chosen() {
-		r.close(t)
-		if r.focused == nil && r.right == nil {
-			s.selectScholarPDF(p, nil)
-		}
+		s.closeScholarPDF(p, t)
 	}
 }
 
-func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarPDFTab, right bool) {
+func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
 	c = c.Key(t)
+	if t.web != nil {
+		s.scholarWebPage(c, t)
+		return
+	}
 	s.loadScholarPDFPage(p, t)
 	ui.Column(c).Grow(1).Fill().MinWidth(0).Clip().Children(func() {
 		ui.Row(c).Height(sidebarHd).FillWidth().Padding(0, 7).Gap(4).AlignItems(ui.Center).Background(s.ch.content).Children(func() {
@@ -326,15 +357,21 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarP
 			if t.key != "" && ui.Button(c.Key("annotations"), s.tr("scholarReadAnnotations")).Disabled(p.busy).Clicked() {
 				s.openScholarAnnotations(p, t.entry, t.zotero, t.key, t.title)
 			}
-			if right && s.toolButton(c.Key("unsplit"), "x", s.tr("scholarEndPDFSplit"), false).Clicked() {
-				p.references.right = nil
-				p.references.selectTab(p.references.focused)
-			}
 		})
 		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 		if t.err != "" {
-			ui.Text(c, t.err).Wrap()
-			if ui.Button(c, s.tr("refresh")).Clicked() {
+			s.scholarReaderNotice(c.Key("pdf-error"), t.err, nil)
+			if address := scholarEntryWebURL(t.entry); address != "" && s.scholarReaderCommand(c.Key("web-fallback"), "globe", s.tr("scholarOpenWeb"), false).Clicked() {
+				s.openScholarWeb(p, t.entry, address)
+			}
+			if t.key != "" {
+				ui.Text(c, s.tr("scholarPDFZoteroHelp")).FontSize(12).Wrap()
+				if s.scholarReaderCommand(c.Key("locate"), "external-link", s.tr("scholarShowInZotero"), false).Clicked() {
+					c.Services().OpenURL(t.zotero.ItemLink(t.key))
+				}
+			}
+			if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("scholarRetryPDF"), false).Clicked() {
+				t.releasePage()
 				t.err = ""
 				t.pages = 0
 				if t.key != "" {

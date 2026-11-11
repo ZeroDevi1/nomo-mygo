@@ -56,6 +56,29 @@ func (z Zotero) PDFLink(key string, page int) string {
 	return link
 }
 
+func (z Zotero) ItemLink(key string) string {
+	if !zoteroKey.MatchString(key) {
+		return ""
+	}
+	library := "library"
+	if z.Group > 0 {
+		library = fmt.Sprintf("groups/%d", z.Group)
+	}
+	return "zotero://select/" + library + "/items/" + key
+}
+
+func (z Zotero) AnnotationLink(attachment string, annotation Annotation) string {
+	link := z.PDFLink(attachment, annotation.Page)
+	if link == "" || !zoteroKey.MatchString(annotation.Key) {
+		return link
+	}
+	separator := "?"
+	if annotation.Page > 0 {
+		separator = "&"
+	}
+	return link + separator + "annotation=" + annotation.Key
+}
+
 type ZoteroFulltextResult struct {
 	Entries                                 []Entry
 	Scanned, PDFs, Unavailable, Next, Total int

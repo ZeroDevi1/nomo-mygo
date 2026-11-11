@@ -18,35 +18,32 @@ type scholarLocalSearch struct {
 	library                          *scholar.Library
 }
 
-func (s *Shell) scholarLocalSearchView(c *ui.Context, p *scholarState) bool {
+func (s *Shell) scholarLocalSearchResults(c *ui.Context, p *scholarState) []scholar.Entry {
 	l := &p.literature
 	v := &l.local
-	ui.Checkbox(c, &v.enabled, s.tr("scholarLocalFulltext")).Disabled(p.busy)
-	if !v.enabled {
-		return false
-	}
-	ui.Text(c, s.tr("scholarLocalFulltextScope")).FontSize(11).Wrap()
-	ui.TextInput(c, &l.query).FillWidth().Placeholder(s.tr("scholarCitationSearch"))
 	fresh := v.query != l.query || v.library != p.library
 	if fresh {
 		v.entries = nil
 		v.more = false
 	}
-	if ui.Button(c, s.tr("scholarSearch")).Disabled(p.busy || l.query == "").Clicked() {
-		s.searchScholarLocal(p, true)
-	}
-	if !fresh {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextScope"), v.scanned, v.pdfs, v.unavailable)).FontSize(11).Wrap()
-		if ui.Button(c, s.tr("scholarContinueScan")).Disabled(p.busy || !v.more).Clicked() {
+	ui.Row(c).FillWidth().MinHeight(30).Padding(3, 8).Gap(6).AlignItems(ui.Center).Children(func() {
+		status := s.tr("scholarLocalFulltextScope")
+		if !fresh {
+			status = fmt.Sprintf(s.tr("scholarFulltextScope"), v.scanned, v.pdfs, v.unavailable)
+		}
+		ui.Text(c, status).FontSize(11).TextColor(s.ch.muted).Wrap().Grow(1).MinWidth(0)
+		if p.busy {
+			if s.scholarCompactIcon(c.Key("cancel"), "x", s.tr("scholarAgentCancelWork"), false).Clicked() {
+				p.cancelCurrent()
+			}
+		} else if v.more && ui.Button(c.Key("continue"), s.tr("scholarContinueScan")).
+			Height(25).FontSize(12).Padding(0, 7).Shrink(0).Clicked() {
 			s.searchScholarLocal(p, false)
 		}
-	}
-	if p.busy && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() {
-		p.cancelCurrent()
-	}
-	s.scholarEntries(c, p, v.entries, true)
-	return true
+	})
+	return v.entries
 }
+
 func (s *Shell) searchScholarLocal(p *scholarState, fresh bool) {
 	v := &p.literature.local
 	if fresh || len(v.entries) >= 100 {
@@ -55,6 +52,7 @@ func (s *Shell) searchScholarLocal(p *scholarState, fresh bool) {
 	if fresh {
 		v.next, v.scanned, v.pdfs, v.unavailable = 0, 0, 0, 0
 		v.query, v.library = p.literature.query, p.library
+		v.more = false
 	}
 	start, query, library, project := v.next, v.query, v.library, p.project
 	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {

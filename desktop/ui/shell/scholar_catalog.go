@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -19,10 +20,58 @@ type scholarCollectionBranch struct {
 }
 
 type scholarTagPicker struct {
-	open, more  bool
-	query, sent string
-	start       int
-	tags        []string
+	open, more, tried bool
+	query, sent       string
+	start             int
+	tags              []string
+}
+
+func (s *Shell) scholarCatalogInSidebar(c *ui.Context, p *scholarState) bool {
+	return s.scholarUsesZoteroSidebar(p) && !s.scholarSidebarHidden(c)
+}
+
+func (s *Shell) revealScholarCatalog(p *scholarState) {
+	if !p.references.catalog && (!s.editorGroupsVisible(p) || !s.editorGroupsShowCatalog()) {
+		s.showScholarCatalog(p)
+	}
+}
+
+func (s *Shell) scholarCatalogSidebar(c *ui.Context, p *scholarState) {
+	l := &p.literature
+	ui.Row(c).FillWidth().Height(36).Padding(0, 7).Gap(4).AlignItems(ui.Center).Children(func() {
+		if s.toolButton(c.Key("collection"), "folder-plus", s.tr("scholarZoteroNewCollection"), false).
+			Disabled(p.busy || !l.connected || l.zotero.ServerID == "").Clicked() {
+			s.startScholarZoteroCollection(p, scholar.Collection{}, "", "scholarZoteroNewCollection")
+		}
+		ui.Spacer(c)
+		if s.toolButton(c.Key("search"), "search", s.tr("scholarFilterCollections"), l.collectionSearch).Clicked() {
+			l.collectionSearch = !l.collectionSearch
+			if !l.collectionSearch {
+				l.collectionFilter = ""
+			}
+		}
+	})
+	if l.collectionSearch {
+		ui.TextInput(c.Key("filter"), &l.collectionFilter).FillWidth().Placeholder(s.tr("scholarFilterCollections"))
+	}
+	s.scholarCatalogScope(c.Key("scope"), p)
+}
+
+func (s *Shell) scholarCatalogButton(c *ui.Context, glyph, title string, selected bool) ui.Element {
+	b := ui.ButtonBase(c).FillWidth().MinWidth(0).Height(28).Padding(0, 6).Gap(5).Radius(4).
+		Justify(ui.Start).AlignItems(ui.Center).FocusRing(true).Selected(selected).TextColor(s.ch.text).Tooltip(title)
+	if selected {
+		b.Background(scholarZoteroSelection(c))
+	} else if b.Hovered() {
+		b.Background(s.ch.hover)
+	}
+	b.Children(func() {
+		ui.Box(c).Size(16, 16).Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+			ui.Icon(c, s.icon(glyph)).FontSize(15).TextColor(s.scholarZoteroIconColor(c, glyph))
+		})
+		ui.Text(c, title).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.text)
+	})
+	return b
 }
 
 func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
@@ -33,19 +82,18 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 			s.loadZotero(p, true, "", "", 0)
 		}
 		if l.recentOpen {
-			s.scholarEntries(c, p, l.recent, false)
+			s.scholarCatalogRows(c, p, l.recent, false)
 		}
 		return
 	}
-	if form := l.zoteroForm; form != nil && form.catalog && form.z == l.zotero {
+	if form := l.catalogForm(); form != nil {
 		ui.Scroll(c.Key("zotero-form")).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Padding(0, 8, 8, 0).Gap(5).Children(func() {
+			ui.Column(c).FillWidth().Padding(8, 12).Gap(8).Children(func() {
 				s.scholarZoteroForm(c, p, form)
 			})
 		})
 		return
 	}
-	s.scholarZoteroCatalogActions(c.Key("zotero-actions"), p)
 	if !p.busy {
 		switch {
 		case !l.loaded && p.err == "":
@@ -66,14 +114,24 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 		case !l.treeTried:
 			l.treeTried = true
 			s.loadScholarCollectionBranch(p, "", 0)
+		case !l.tagPicker.tried:
+			l.tagPicker.tried = true
+			s.loadScholarTags(p, "", 0)
 		}
 	}
 	width := s.scholarWorkspaceWidth(c)
-	if p.drawer == scholarReader {
+	if s.groups.paneWidth > 0 {
+		width = s.groups.paneWidth
+	}
+	if s.groups.paneWidth == 0 && p.drawer == scholarReader {
 		width -= s.scholarInspectorWidth(p, width)
 	}
+	if s.scholarCatalogInSidebar(c, p) {
+		s.scholarCatalogResults(c, p)
+		return
+	}
 	if width < 600 {
-		if ui.Button(c.Key("collections"), s.tr("scholarCollections")).Clicked() {
+		if s.scholarTabButton(c.Key("collections"), "folder", s.tr("scholarCollections"), l.scopeOpen).Clicked() {
 			l.scopeOpen = !l.scopeOpen
 		}
 		if l.scopeOpen {
@@ -83,12 +141,12 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 		}
 		return
 	}
-	ui.Row(c).FillWidth().Grow(1).MinHeight(0).Gap(7).Children(func() {
-		ui.Column(c.Key("collections")).Width(180).FillHeight().MinHeight(0).Children(func() {
-			s.scholarCatalogScope(c, p)
+	ui.Row(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+		ui.Column(c.Key("collections")).Width(210).Shrink(0).FillHeight().MinHeight(0).Background(s.ch.sidebar).Children(func() {
+			s.scholarCatalogSidebar(c, p)
 		})
 		ui.Box(c).Width(1).FillHeight().Background(s.ch.separator)
-		ui.Column(c.Key("catalog-results")).Grow(1).MinWidth(0).FillHeight().MinHeight(0).Gap(5).Children(func() {
+		ui.Column(c.Key("catalog-results")).Grow(1).MinWidth(0).FillHeight().MinHeight(0).Children(func() {
 			s.scholarCatalogResults(c, p)
 		})
 	})
@@ -96,96 +154,129 @@ func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 
 func (s *Shell) scholarCatalogScope(c *ui.Context, p *scholarState) {
 	l := &p.literature
-	ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
-		ui.Column(c).FillWidth().Gap(3).Children(func() {
-			for _, library := range l.libraries {
-				ck := c.Key(library.ID)
-				name := library.Name
-				if library.ID == 0 {
-					name = s.tr("scholarPersonalLibrary")
-				}
-				if s.scholarTabButton(ck, "book-open", name, l.zotero.Group == library.ID && l.scope == scholar.ZoteroAll && l.collection == "" && !l.recentOpen).
-					Disabled(p.busy).Clicked() {
-					if l.zotero.Group != library.ID {
-						l.tree, l.treeTried = nil, false
-						l.tag = ""
-						l.tagPicker = scholarTagPicker{}
+	ui.Column(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
+		ui.Scroll(c.Key("collections")).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			ui.Column(c).FillWidth().Padding(0, 6).Gap(0).Children(func() {
+				for _, library := range l.libraries {
+					ck := c.Key(library.ID)
+					name := library.Name
+					if library.ID == 0 {
+						name = s.tr("scholarPersonalLibrary")
 					}
-					l.zotero.Group = library.ID
-					l.recentOpen, l.scope, l.scopeOpen = false, scholar.ZoteroAll, false
-					s.loadZotero(p, false, "", l.remoteQuery, 0)
+					active := l.zotero.Group == library.ID
+					selected := active && l.scope == scholar.ZoteroAll && l.collection == "" && !l.recentOpen
+					branch := l.tree[""]
+					root := ui.Row(ck).FillWidth().Height(28).Radius(4).AlignItems(ui.Center)
+					if selected {
+						root.Background(scholarZoteroSelection(c))
+					}
+					root.Children(func() {
+						glyph := "chevron-right"
+						if active && branch != nil && branch.open {
+							glyph = "chevron-down"
+						}
+						if s.toolButton(ck.Key("expand"), glyph, s.tr("scholarCollections"), false).Width(16).Padding(1).Disabled(!active || p.busy).Clicked() {
+							if branch != nil {
+								branch.open = !branch.open
+							} else {
+								s.loadScholarCollectionBranch(p, "", 0)
+							}
+						}
+						if s.scholarCatalogButton(ck.Key("select"), "landmark", name, selected).Grow(1).MinWidth(0).Disabled(p.busy).Clicked() {
+							if !active {
+								l.tree, l.treeTried = nil, false
+								l.tag = ""
+								l.tagPicker = scholarTagPicker{}
+							}
+							l.zotero.Group = library.ID
+							l.recentOpen, l.scope, l.scopeOpen = false, scholar.ZoteroAll, false
+							s.revealScholarCatalog(p)
+							s.loadZotero(p, false, "", l.remoteQuery, 0)
+						}
+					})
+					if active && (branch == nil || branch.open) {
+						if s.scholarCatalogButton(ck.Key("recent"), "clock", s.tr("scholarRecentReading"), l.recentOpen).Padding(0, 6, 0, 31).Clicked() {
+							l.recentOpen, l.scopeOpen = true, false
+							s.revealScholarCatalog(p)
+						}
+						s.scholarCollectionTree(ck, p, "", 1)
+						for _, scope := range []struct {
+							id           scholar.ZoteroScope
+							label, glyph string
+						}{
+							{scholar.ZoteroPublications, "scholarPublications", "file-text"},
+							{scholar.ZoteroUnfiled, "scholarUnfiled", "folder-open"},
+							{scholar.ZoteroTrash, "scholarZoteroTrash", "trash"},
+						} {
+							if scope.id == scholar.ZoteroPublications && l.zotero.Group != 0 {
+								continue
+							}
+							if s.scholarCatalogButton(ck.Key(scope.id), scope.glyph, s.tr(scope.label), !l.recentOpen && l.scope == scope.id).
+								Padding(0, 6, 0, 31).Disabled(p.busy).Clicked() {
+								l.recentOpen, l.scopeOpen, l.fulltext = false, false, false
+								l.scope = scope.id
+								s.revealScholarCatalog(p)
+								s.loadZotero(p, false, "", l.remoteQuery, 0)
+							}
+						}
+					}
 				}
-				if l.zotero.Group == library.ID {
-					s.scholarCollectionTree(ck, p, "", 1)
-				}
-			}
-			if s.scholarTabButton(c.Key("recent"), "clock", s.tr("scholarRecentReading"), l.recentOpen).Clicked() {
-				l.recentOpen, l.scopeOpen = true, false
-			}
-			for _, scope := range []struct {
-				id           scholar.ZoteroScope
-				label, glyph string
-			}{
-				{scholar.ZoteroUnfiled, "scholarUnfiled", "folder"},
-				{scholar.ZoteroPublications, "scholarPublications", "file-text"},
-				{scholar.ZoteroTrash, "scholarZoteroTrash", "trash"},
-			} {
-				if scope.id == scholar.ZoteroPublications && l.zotero.Group != 0 {
-					continue
-				}
-				if s.scholarTabButton(c.Key(scope.id), scope.glyph, s.tr(scope.label), !l.recentOpen && l.scope == scope.id).
-					Disabled(p.busy).Clicked() {
-					l.recentOpen, l.scopeOpen, l.fulltext = false, false, false
-					l.scope = scope.id
-					s.loadZotero(p, false, "", l.remoteQuery, 0)
-				}
-			}
-			if l.tag != "" {
-				ui.Text(c, fmt.Sprintf(s.tr("scholarTagFilter"), l.tag)).FontSize(11).Wrap()
-				if ui.Button(c, s.tr("scholarClearTag")).Disabled(p.busy).Clicked() {
-					l.tag = ""
-					s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
-				}
-			}
-			s.scholarCatalogTags(c.Key("tag-picker"), p)
+			})
 		})
+		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+		s.scholarCatalogTags(c.Key("tags"), p)
 	})
 }
 
 func (s *Shell) scholarCatalogTags(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	picker := &l.tagPicker
-	label := s.tr("scholarSearchTags")
-	button := s.scholarTabButton(c, "tag", label, picker.open).Disabled(p.busy)
-	if button.Clicked() {
-		picker.open = !picker.open
-		if picker.open {
-			s.loadScholarTags(p, picker.query, 0)
-		}
-	}
-	ui.Popover(c, button, &picker.open, func() {
-		ui.Column(c).Width(240).Padding(8).Gap(5).Children(func() {
-			input := ui.TextInput(c, &picker.query).FillWidth().Placeholder(label)
-			if (input.Submitted() || ui.Button(c, s.tr("scholarSearch")).Disabled(p.busy).Clicked()) && !p.busy {
+	ui.Column(c).FillWidth().MinHeight(0).Children(func() {
+		ui.Scroll(c.Key("cloud")).FillWidth().Height(154).Shrink(1).Children(func() {
+			ui.Row(c).FillWidth().Wrap().Padding(6, 8).Gap(2).Children(func() {
+				for i, tag := range picker.tags {
+					b := ui.ButtonBase(c.Key(i)).Padding(2, 3).Radius(3).MaxWidth(190).Label(tag).Tooltip(tag).
+						Selected(tag == l.tag).TextColor(s.ch.text).Disabled(p.busy)
+					if tag == l.tag {
+						b.Background(scholarZoteroSelection(c))
+					} else if b.Hovered() {
+						b.Background(s.ch.hover)
+					}
+					b.Children(func() { ui.Text(c, tag).FontSize(11).SingleLine().MinWidth(0) })
+					if b.Clicked() {
+						l.recentOpen, l.fulltext, l.scopeOpen = false, false, false
+						if l.tag == tag {
+							l.tag = ""
+						} else {
+							l.tag = tag
+						}
+						s.revealScholarCatalog(p)
+						s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
+					}
+				}
+			})
+		})
+		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+		ui.Row(c).FillWidth().Height(32).Padding(3, 8).Gap(4).AlignItems(ui.Center).Children(func() {
+			in := ui.TextInput(c.Key("query"), &picker.query).Grow(1).MinWidth(0).Height(24).FontSize(11).
+				Padding(3, 6).Radius(4).Background(s.ch.content).Placeholder(s.tr("scholarSearchTags"))
+			if in.Submitted() && !p.busy {
 				s.loadScholarTags(p, picker.query, 0)
 			}
-			ui.Scroll(c).Height(200).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().Gap(2).Children(func() {
-					for i, tag := range picker.tags {
-						if s.scholarTabButton(c.Key(i), "tag", tag, tag == l.tag).Disabled(p.busy).Clicked() {
-							picker.open, l.recentOpen, l.fulltext, l.scopeOpen = false, false, false, false
-							l.tag = tag
-							s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
-						}
-					}
-				})
-			})
-			ui.Row(c).Gap(5).Children(func() {
-				if s.toolButton(c.Key("prev"), "chevron-left", s.tr("scholarPreviousPage"), false).Disabled(p.busy || picker.start == 0).Clicked() {
+			s.scholarCompactIcon(c.Key("options"), "list-filter", s.tr("scholarSearchTags"), l.tag != "").Menu(func(m *ui.Menu) {
+				if m.Item(s.tr("scholarSearch")).Disabled(p.busy).Chosen() {
+					s.loadScholarTags(p, picker.query, 0)
+				}
+				if m.Item(s.tr("scholarPreviousPage")).Disabled(p.busy || picker.start == 0).Chosen() {
 					s.loadScholarTags(p, picker.sent, picker.start-scholar.ZoteroPageSize)
 				}
-				if s.toolButton(c.Key("next"), "chevron-right", s.tr("scholarNextPage"), false).Disabled(p.busy || !picker.more).Clicked() {
+				if m.Item(s.tr("scholarNextPage")).Disabled(p.busy || !picker.more).Chosen() {
 					s.loadScholarTags(p, picker.sent, picker.start+scholar.ZoteroPageSize)
+				}
+				if m.Item(s.tr("scholarClearTag")).Disabled(p.busy || l.tag == "").Chosen() {
+					l.tag = ""
+					s.revealScholarCatalog(p)
+					s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
 				}
 			})
 		})
@@ -213,7 +304,7 @@ func (s *Shell) scholarCatalogResults(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	if l.recentOpen {
 		ui.Text(c, s.tr("scholarRecentReading")).Bold().FontSize(12)
-		s.scholarEntries(c, p, l.recent, false)
+		s.scholarCatalogRows(c, p, l.recent, false)
 		return
 	}
 	if !l.loaded && !p.busy && ui.Button(c, s.tr("refresh")).Clicked() {
@@ -229,24 +320,46 @@ func scholarNoteTitle(s *Shell, note scholar.ZoteroNote) string {
 	return s.tr("scholarChildNote")
 }
 
+func scholarNoteContent(s *Shell, note scholar.ZoteroNote) (title, body string) {
+	body = strings.TrimSpace(note.Text)
+	first, rest, multiline := strings.Cut(body, "\n")
+	if multiline && strings.TrimSpace(first) == note.Title {
+		return scholarNoteTitle(s, note), strings.TrimSpace(rest)
+	}
+	if body == "" {
+		return scholarNoteTitle(s, note), body
+	}
+	// A generated summary of a single paragraph is not a removable heading.
+	return s.tr("scholarChildNote"), body
+}
+
 func (s *Shell) scholarNoteDetails(c *ui.Context, p *scholarState, note scholar.ZoteroNote, standalone bool) {
 	l := &p.literature
-	if !standalone && ui.Button(c, s.tr("scholarParentItem")).Clicked() {
-		l.selectedNote = ""
+	framed := p.references.catalog && l.mode == 1
+	title, body := scholarNoteContent(s, note)
+	if l.readerJump == 4 {
+		ui.Box(c.Key("note-top")).Height(1).FillWidth().ScrollIntoView()
+		l.readerJump = 0
 	}
-	ui.Text(c, scholarNoteTitle(s, note)).Bold().Wrap()
-	if body := strings.TrimSpace(strings.TrimPrefix(note.Text, note.Title)); body != "" {
-		ui.Text(c, body).Wrap()
-	}
+	ui.Column(c.Key("note-body")).FillWidth().Padding(8, 4, 12, 4).Gap(8).Children(func() {
+		if !framed {
+			if !standalone && s.scholarReaderCommand(c.Key("parent"), "arrow-left", s.tr("scholarParentItem"), false).Clicked() {
+				l.selectedNote, l.readerActive, l.readerJump = "", 0, 1
+			}
+			ui.Text(c, title).FontSize(13).Bold().LineHeight(1.3).Wrap()
+		}
+		if body != "" {
+			ui.Text(c, body).FontSize(12).LineHeight(1.5).Wrap().Selectable()
+		}
+	})
 	s.scholarZoteroMetadata(c, p, note.Tags, note.Related)
 }
 
 func (s *Shell) scholarZoteroMetadata(c *ui.Context, p *scholarState, tags, related []string) {
 	l := &p.literature
-	if len(tags) > 0 {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarTagsCount"), len(tags))).Bold().FontSize(11)
+	s.scholarReaderSection(c, p, 5, "tag", s.tr("scholarItemTags"), fmt.Sprint(len(tags)), func(c *ui.Context) {
 		for i, tag := range tags {
-			if ui.Button(c.Key(i), tag).Disabled(!l.connected || p.busy).Clicked() {
+			if s.scholarReaderLink(c.Key(i), "tag", tag).Disabled(!l.connected || p.busy).Clicked() {
 				z := l.zotero
 				z.Group = l.selected.Library
 				if z.Group != l.zotero.Group {
@@ -259,9 +372,8 @@ func (s *Shell) scholarZoteroMetadata(c *ui.Context, p *scholarState, tags, rela
 				s.loadZotero(p, false, "", "", 0)
 			}
 		}
-	}
-	if len(related) > 0 {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarRelatedCount"), len(related))).Bold().FontSize(11)
+	})
+	s.scholarReaderSection(c, p, 6, "link", s.tr("scholarItemRelated"), fmt.Sprint(len(related)), func(c *ui.Context) {
 		for i, key := range related {
 			label := key
 			for _, e := range l.pageData.Entries {
@@ -270,7 +382,7 @@ func (s *Shell) scholarZoteroMetadata(c *ui.Context, p *scholarState, tags, rela
 					break
 				}
 			}
-			if ui.Button(c.Key(i), label).Disabled(p.busy).Clicked() {
+			if s.scholarReaderLink(c.Key(i), "link", label).Disabled(p.busy).Clicked() {
 				z := l.zotero
 				z.Group = l.selected.Library
 				s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
@@ -285,7 +397,7 @@ func (s *Shell) scholarZoteroMetadata(c *ui.Context, p *scholarState, tags, rela
 				})
 			}
 		}
-	}
+	})
 }
 
 func scholarSameCatalogItem(a, b scholar.Entry) bool {
@@ -297,27 +409,50 @@ func scholarSameCatalogItem(a, b scholar.Entry) bool {
 
 func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []scholar.Entry, local bool) {
 	l := &p.literature
-	ui.Row(c.Key("columns")).FillWidth().Height(25).Padding(0, 8, 0, 26).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, s.tr("scholarItemTitle")).FontSize(11).TextColor(s.ch.muted).Grow(1)
-		ui.Text(c, s.tr("scholarItemCreator")).FontSize(11).TextColor(s.ch.muted).Width(104).SingleLine()
+	creator, year := s.scholarCatalogColumns(c, p)
+	ui.Row(c.Key("columns")).FillWidth().Height(29).Padding(0, scholarCatalogInset).AlignItems(ui.Center).Background(s.ch.content).Children(func() {
+		ui.Box(c).Width(scholarCatalogDisclosure).Shrink(0)
+		scholarCatalogLine(ui.Row(c)).Children(func() {
+			ui.Box(c).Width(scholarCatalogGlyphWidth).Shrink(0)
+			ui.Text(c, s.tr("scholarItemTitle")).FontSize(11).TextColor(s.ch.muted).SingleLine().Grow(1).MinWidth(0)
+			if creator > 0 {
+				ui.Text(c, s.tr("scholarItemCreator")).FontSize(11).TextColor(s.ch.muted).Width(creator).Shrink(0).SingleLine()
+			}
+			if year > 0 {
+				ui.Text(c, s.tr("scholarItemYear")).FontSize(11).TextColor(s.ch.muted).Width(year).Shrink(0).SingleLine()
+			}
+			ui.Row(c).Width(scholarCatalogAttachment).Shrink(0).Justify(ui.Center).Children(func() {
+				ui.Icon(c, s.icon("paperclip")).FontSize(13).TextColor(s.ch.muted).Tooltip(s.tr("scholarItemAttachments"))
+			})
+		})
+		if local {
+			ui.Box(c).Width(scholarCatalogCitation).Shrink(0)
+		}
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 	ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
-		ui.Column(c).FillWidth().Gap(1).Children(func() {
+		ui.Column(c).FillWidth().Padding(3, scholarCatalogInset).Children(func() {
 			if len(entries) == 0 && !p.busy {
-				ui.Text(c, s.tr("scholarCatalogEmpty")).Padding(8).Wrap()
+				ui.Text(c, s.tr("scholarCatalogEmpty")).Padding(8).FontSize(12).TextColor(s.ch.muted).Wrap()
 			}
 			for i, e := range entries {
 				ck := c.Key(i)
 				selected := scholarSameCatalogItem(s.scholarLinkedEntry(p, e), l.selected)
 				expanded := selected && l.expanded && !e.ZoteroNote
-				ui.Row(ck).FillWidth().AlignItems(ui.Center).Children(func() {
-					if e.RemoteID != "" && !e.ZoteroNote {
+				row := ui.Row(ck).FillWidth().Radius(4).AlignItems(ui.Center)
+				if selected && l.selectedNote == "" {
+					row.Background(scholarZoteroSelection(c))
+				} else if i%2 != 0 {
+					row.Background(ui.RGBA(128, 128, 128, 0.08))
+				}
+				row.Children(func() {
+					if e.RemoteID != "" && !e.ZoteroNote && (e.NumChildren > 0 || selected && len(l.detail.PDFs)+len(l.detail.Notes) > 0) {
 						glyph := "chevron-right"
 						if expanded {
 							glyph = "chevron-down"
 						}
-						if s.toolButton(ck.Key("expand"), glyph, s.tr("scholarItemChildren"), false).Disabled(p.busy).Clicked() {
+						if s.toolButton(ck.Key("expand"), glyph, s.tr("scholarItemChildren"), false).
+							Width(scholarCatalogDisclosure).Shrink(0).Padding(1).Disabled(p.busy).Clicked() {
 							if selected {
 								l.expanded = !l.expanded
 							} else {
@@ -326,23 +461,35 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 							}
 						}
 					} else {
-						ui.Box(ck).Width(24)
+						ui.Box(ck).Width(scholarCatalogDisclosure).Shrink(0)
 					}
-					b := ui.ButtonBase(ck.Key("item")).Grow(1).MinWidth(0).Height(28).Padding(0, 5).Gap(6).Justify(ui.Start).
-						Selected(selected && l.selectedNote == "").FocusRing(true).Tooltip(e.Title).Disabled(p.busy)
+					b := scholarCatalogLine(ui.ButtonBase(ck.Key("item"))).Height(27).Justify(ui.Start).
+						Selected(selected && l.selectedNote == "").TextColor(s.ch.text).FocusRing(true).Tooltip(e.Title).Disabled(p.busy)
 					if selected && l.selectedNote == "" {
-						b.Background(s.ch.pressed)
+						b.Background(scholarZoteroSelection(c))
 					} else if b.Hovered() {
 						b.Background(s.ch.hover)
 					}
 					b.Children(func() {
-						glyph := "file-text"
-						if e.ZoteroNote {
-							glyph = "notebook-pen"
+						glyph := scholarCatalogGlyph(e)
+						ink := s.ch.muted
+						if glyph != "file-text" && glyph != "file-pen-line" {
+							ink = s.scholarZoteroIconColor(c, glyph)
 						}
-						ui.Icon(ck, s.icon(glyph)).FontSize(13).TextColor(s.ch.muted)
-						ui.Text(ck, e.Title).FontSize(12).SingleLine().Grow(1).MinWidth(0)
-						ui.Text(ck, strings.TrimSpace(e.Author+" "+e.Year)).FontSize(11).Width(104).SingleLine().TextColor(s.ch.muted)
+						ui.Icon(ck, s.icon(glyph)).FontSize(14).Width(scholarCatalogGlyphWidth).Shrink(0).TextColor(ink)
+						ui.Text(ck, e.Title).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.text)
+						if creator > 0 {
+							ui.Text(ck, s.scholarCreatorSummary(e)).FontSize(12).Width(creator).Shrink(0).SingleLine().TextColor(s.ch.text)
+						}
+						if year > 0 {
+							ui.Text(ck, e.Year).FontSize(11).Width(year).Shrink(0).SingleLine().TextColor(s.ch.muted)
+						}
+						ui.Row(ck.Key("attachment-status")).Width(scholarCatalogAttachment).Shrink(0).Justify(ui.Center).Children(func() {
+							hasPDF := local && !filepath.IsAbs(e.File) && strings.EqualFold(filepath.Ext(e.File), ".pdf")
+							if hasPDF || selected && len(l.detail.PDFs) > 0 {
+								ui.Icon(ck, s.icon("file-text")).FontSize(12).TextColor(s.ch.muted).Tooltip(s.tr("scholarItemAttachments"))
+							}
+						})
 					})
 					if b.Clicked() {
 						if !selected || e.Source == "Zotero" && l.selected.Source != e.Source {
@@ -355,11 +502,12 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 					}
 					if local {
 						checked := slices.Contains(l.checked, e.Key)
-						label := "+"
+						glyph := "plus"
 						if checked {
-							label = "✓"
+							glyph = "check"
 						}
-						if ui.Button(ck.Key("cite"), label).Tooltip(s.tr("scholarMultiCite")).Clicked() {
+						if s.scholarCompactIcon(ck.Key("cite"), glyph, s.tr("scholarMultiCite"), checked).
+							Size(scholarCatalogCitation, 24).Shrink(0).Checked(checked).Disabled(p.busy).Clicked() {
 							toggleScholarCitation(l, e.Key)
 						}
 					}
@@ -384,13 +532,17 @@ func (s *Shell) scholarCatalogChildren(c *ui.Context, p *scholarState) {
 			if pdf.LinkOnly {
 				icon = "external-link"
 			}
-			if s.scholarTabButton(c.Key(pdf.Key), icon, title, false).Disabled(pdf.LinkOnly && pdf.URL == "").Clicked() {
-				s.openScholarZoteroPDF(p, l.selected, pdf, c.Services())
+			if s.scholarReaderCommand(c.Key(pdf.Key), icon, title, false).Disabled(pdf.LinkOnly && pdf.URL == "").Clicked() {
+				s.openScholarZoteroPDF(p, l.selected, pdf)
 			}
 		}
 		for _, note := range l.detail.Notes {
-			if s.scholarTabButton(c.Key(note.Key), "notebook-pen", scholarNoteTitle(s, note), l.selectedNote == note.Key).Clicked() {
-				l.selectedNote = note.Key
+			b := s.scholarReaderLink(c.Key(note.Key), "sticky-note", scholarNoteTitle(s, note))
+			if l.selectedNote == note.Key {
+				b.Selected(true).Background(scholarZoteroSelection(c))
+			}
+			if b.Clicked() {
+				l.selectedNote, l.readerActive, l.readerJump = note.Key, 3, 4
 				l.annotations = nil
 				s.showScholarInspector(p, scholarReader)
 			}
@@ -442,28 +594,38 @@ func (s *Shell) scholarCollectionTree(c *ui.Context, p *scholarState, parent str
 	for _, collection := range branch.page.Collections {
 		ck := c.Key(collection.Key)
 		child := l.tree[collection.Key]
-		ui.Row(ck).FillWidth().Padding(0, 0, 0, float32(depth)*12).AlignItems(ui.Center).Children(func() {
+		if l.collectionFilter != "" && !strings.Contains(strings.ToLower(collection.Name), strings.ToLower(l.collectionFilter)) && child == nil {
+			continue
+		}
+		selected := l.collection == collection.Key && !l.recentOpen
+		row := ui.Row(ck).FillWidth().Height(28).Padding(0, 0, 0, float32(depth)*16).AlignItems(ui.Center).Radius(4)
+		if selected {
+			row.Background(scholarZoteroSelection(c))
+		}
+		row.Children(func() {
 			glyph := "chevron-right"
 			if child != nil && child.open {
 				glyph = "chevron-down"
 			}
-			if s.toolButton(ck.Key("expand"), glyph, s.tr("scholarSubcollections"), false).Disabled(p.busy).Clicked() {
+			if s.toolButton(ck.Key("expand"), glyph, s.tr("scholarSubcollections"), false).Width(16).Padding(1).Disabled(p.busy).Clicked() {
 				if child == nil {
 					s.loadScholarCollectionBranch(p, collection.Key, 0)
 				} else {
 					child.open = !child.open
 				}
 			}
-			b := ui.ButtonBase(ck.Key("select")).Grow(1).MinWidth(0).Height(26).Gap(4).Justify(ui.Start).
-				Selected(l.collection == collection.Key && !l.recentOpen).Disabled(p.busy).Tooltip(collection.Name)
-			if l.collection == collection.Key && !l.recentOpen {
-				b.Background(s.ch.pressed)
+			b := ui.ButtonBase(ck.Key("select")).Grow(1).MinWidth(0).FillHeight().Gap(5).Justify(ui.Start).
+				Selected(selected).TextColor(s.ch.text).Disabled(p.busy).Tooltip(collection.Name)
+			if selected {
+				b.Background(scholarZoteroSelection(c))
 			} else if b.Hovered() {
 				b.Background(s.ch.hover)
 			}
 			b.Children(func() {
-				ui.Icon(ck, s.icon("folder")).FontSize(13).TextColor(s.ch.accent)
-				ui.Text(ck, collection.Name).FontSize(12).SingleLine().MinWidth(0).Shrink(1)
+				ui.Box(ck).Size(16, 16).Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+					ui.Icon(ck, s.icon("folder")).FontSize(15).TextColor(s.scholarZoteroIconColor(c, "folder"))
+				})
+				ui.Text(ck, collection.Name).FontSize(12).SingleLine().MinWidth(0).Shrink(1).TextColor(s.ch.text)
 			})
 			if l.zotero.ServerID != "" {
 				b.ContextMenu(func(m *ui.Menu) {
@@ -479,13 +641,14 @@ func (s *Shell) scholarCollectionTree(c *ui.Context, p *scholarState, parent str
 			if b.Clicked() {
 				l.recentOpen, l.scope = false, scholar.ZoteroAll
 				l.scopeOpen = false
+				s.revealScholarCatalog(p)
 				s.loadZotero(p, false, collection.Key, l.remoteQuery, 0)
 			}
 		})
 		s.scholarCollectionTree(ck.Key("children"), p, collection.Key, depth+1)
 	}
 	if branch.start > 0 || branch.page.More {
-		ui.Row(c.Key("pagination")).Padding(0, 0, 0, float32(depth)*12).Gap(2).Children(func() {
+		ui.Row(c.Key("pagination")).Padding(0, 0, 0, float32(depth)*16).Gap(2).Children(func() {
 			if s.toolButton(c.Key("prev"), "chevron-left", s.tr("scholarPreviousPage"), false).Disabled(p.busy || branch.start == 0).Clicked() {
 				s.loadScholarCollectionBranch(p, parent, branch.start-scholar.ZoteroPageSize)
 			}

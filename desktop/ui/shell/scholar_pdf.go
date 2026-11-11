@@ -27,24 +27,28 @@ func (s *Shell) scholarLinkedEntry(p *scholarState, e scholar.Entry) scholar.Ent
 	return e
 }
 
-func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, services ui.Services) {
+func (s *Shell) openScholarReference(p *scholarState, entry scholar.Entry) {
 	e := s.scholarLinkedEntry(p, entry)
+	l := &p.literature
+	l.openNotice, p.err = "", ""
 	if e.RemoteID == "" {
-		file := e.File
-		if strings.EqualFold(filepath.Ext(file), ".pdf") && !filepath.IsAbs(file) {
-			if path, err := p.project.Path(file); err == nil {
+		if strings.EqualFold(filepath.Ext(e.File), ".pdf") && !filepath.IsAbs(e.File) {
+			if path, err := p.project.Path(e.File); err == nil {
 				s.openScholarAttachment(p, e, "", path, e.Title, 0)
 				return
 			}
 		}
-		if slices.Contains(p.bibNames, e.Source) {
-			p.err = s.tr("scholarNoPDF")
-			return
-		}
-		p.err = s.tr("scholarNoPDF")
+		s.openScholarZoteroPDF(p, e, scholar.Attachment{})
 		return
 	}
-	z := p.literature.zotero
+	if scholarSameCatalogItem(e, l.detail.Entry) && l.attachmentPage == 0 && !l.detail.More {
+		if l.detail.Entry.URL != "" {
+			e.URL = l.detail.Entry.URL
+		}
+		s.openScholarZoteroPDF(p, e, scholarBestAttachment(l.detail.PDFs))
+		return
+	}
+	z := l.zotero
 	z.Group = e.Library
 	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -53,35 +57,64 @@ func (s *Shell) openScholarPDF(p *scholarState, entry scholar.Entry, services ui
 		for start := 0; start < 500; start += scholar.ZoteroPageSize {
 			detail, err := z.Detail(ctx, e.RemoteID, start)
 			if err != nil {
-				return nil, err
-			}
-			for _, pdf := range detail.PDFs {
-				if !pdf.LinkOnly || attachment.Key == "" && pdf.URL != "" {
-					attachment = pdf
-				}
-				if !pdf.LinkOnly {
+				if scholarEntryWebURL(e) != "" {
 					break
 				}
+				return nil, err
+			}
+			if detail.Entry.URL != "" {
+				e.URL = detail.Entry.URL
+			}
+			if pdf := scholarBestAttachment(detail.PDFs); pdf.Key != "" && (attachment.Key == "" || !pdf.LinkOnly) {
+				attachment = pdf
 			}
 			if !detail.More || attachment.Key != "" && !attachment.LinkOnly {
 				break
 			}
 		}
-		return func() {
-			s.openScholarZoteroPDF(p, e, attachment, services)
-		}, nil
+		return func() { s.openScholarZoteroPDF(p, e, attachment) }, nil
 	})
 }
 
-func (s *Shell) openScholarZoteroPDF(p *scholarState, entry scholar.Entry, pdf scholar.Attachment, services ui.Services) {
+func scholarBestAttachment(pdfs []scholar.Attachment) (link scholar.Attachment) {
+	for _, pdf := range pdfs {
+		if pdf.Key != "" && !pdf.LinkOnly {
+			return pdf
+		}
+		if link.Key == "" && scholarWebURL(pdf.URL) != "" {
+			link = pdf
+		}
+	}
+	return link
+}
+
+func (s *Shell) openScholarZoteroPDF(p *scholarState, entry scholar.Entry, pdf scholar.Attachment) {
 	switch {
-	case pdf.URL != "" && pdf.LinkOnly:
-		services.OpenURL(pdf.URL)
 	case pdf.Key != "" && !pdf.LinkOnly:
 		s.openScholarAttachment(p, entry, pdf.Key, "", pdf.Title, 0)
+	case pdf.LinkOnly && scholarWebURL(pdf.URL) != "":
+		s.openScholarWeb(p, entry, pdf.URL)
+	case scholarEntryWebURL(entry) != "":
+		s.openScholarWeb(p, entry, scholarEntryWebURL(entry))
 	default:
-		p.err = s.tr("scholarNoPDF")
+		if !scholarSameCatalogItem(p.literature.selected, entry) {
+			s.status = s.tr("scholarNoReadableReference")
+			return
+		}
+		p.literature.openNotice = s.tr("scholarNoReadableReference")
+		s.showScholarInspector(p, scholarReader)
 	}
+}
+
+func (s *Shell) scholarReferenceOpenLabel(p *scholarState, entry scholar.Entry) (glyph, label string) {
+	l := &p.literature
+	if strings.EqualFold(filepath.Ext(entry.File), ".pdf") || scholarSameCatalogItem(entry, l.detail.Entry) && len(l.detail.PDFs) > 0 && !scholarBestAttachment(l.detail.PDFs).LinkOnly {
+		return "file-text", s.tr("scholarOpenPDF")
+	}
+	if scholarEntryWebURL(entry) != "" {
+		return "globe", s.tr("scholarOpenWeb")
+	}
+	return "book-open", s.tr("scholarReadReference")
 }
 
 func (s *Shell) showScholarReferenceAt(st *editor.State, p *scholarState, ref scholar.Citation, pin bool) {

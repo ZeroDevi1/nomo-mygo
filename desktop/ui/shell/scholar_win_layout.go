@@ -68,13 +68,13 @@ func (s *Shell) desktopScholarLayout(c *ui.Context, p *scholarState) {
 			ui.Column(c.Key("workspace")).Grow(1).FillHeight().MinWidth(0).MinHeight(0).Radius(8, 0, 0, 0).
 				Border(1, s.ch.separator).BorderWidth(1, 0, 0, 1).Clip().Background(s.ch.content).Children(func() {
 				if p.winSettings != nil {
-					p.references.visible(false, true)
+					p.references.releaseHidden()
 					s.hideTypesetPreview(p, s.activeTab())
 					s.scholarWindowsSettingsPage(c.Key("settings"), p)
 					return
 				}
 				if p.accountOpen {
-					p.references.visible(false, true)
+					p.references.releaseHidden()
 					s.hideTypesetPreview(p, s.activeTab())
 					ui.Column(c).Padding(22).Gap(10).Children(func() {
 						ui.Text(c, s.tr("scholarAccount")).FontSize(24).Bold()
@@ -87,7 +87,7 @@ func (s *Shell) desktopScholarLayout(c *ui.Context, p *scholarState) {
 					return
 				}
 				if p.winCompactProject {
-					p.references.visible(false, true)
+					p.references.releaseHidden()
 					s.hideTypesetPreview(p, s.activeTab())
 					s.scholarProjectPane(c.Key("project"), p)
 					return

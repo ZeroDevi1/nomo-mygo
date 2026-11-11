@@ -27,6 +27,8 @@ type Entry struct {
 	Abstract, URL, File                          string
 	Raw                                          string
 	RemoteID                                     string
+	ItemType, CreatorSummary                     string
+	NumChildren                                  int
 	Record                                       *cslItem
 	ZoteroNote                                   bool
 }
@@ -53,7 +55,7 @@ func (l *Library) add(e Entry) error {
 	e.Abstract = cleanField(e.Abstract, 4096)
 	e.URL = cleanField(e.URL, 2048)
 	e.File = cleanField(e.File, 2048)
-	size := 640 + len(e.Key) + len(e.Title) + len(e.Author) + len(e.Venue) + len(e.Year) + len(e.DOI) + len(e.Source) + len(e.Abstract) + len(e.URL) + len(e.File) + len(e.Raw)
+	size := 640 + len(e.Key) + len(e.Title) + len(e.Author) + len(e.Venue) + len(e.Year) + len(e.DOI) + len(e.Source) + len(e.Abstract) + len(e.URL) + len(e.File) + len(e.Raw) + len(e.ItemType) + len(e.CreatorSummary)
 	if l.disk != nil {
 		if _, duplicate := l.disk.find(e.Key); duplicate {
 			return fmt.Errorf("引用键 %q 重复", e.Key)

@@ -85,6 +85,7 @@ type Shell struct {
 	// post 把后台任务（对话框、文件写入）的结果交回 UI 线程；默认为 win.Update，测试中可替换。
 	post func(func())
 
+	groups  editorGroups
 	compile *compilePane
 	scholar *scholarState
 	mini    miniState // Markdown 小窗（mini.go）
@@ -415,7 +416,7 @@ func (s *Shell) activate(i int) {
 		}
 		prev.syncFromSource()
 		// 同一组合内切换活动文档时两篇都在显示，不释放布局。
-		if prev.partner != s.tabs[i].ID {
+		if prev.partner != s.tabs[i].ID && !s.editorGroupShowsDocument(prev) {
 			prev.Ed.ReleaseLayouts()
 		}
 	}

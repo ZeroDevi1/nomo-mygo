@@ -313,7 +313,6 @@ func (s *Shell) recordScholarPatch(p *scholarState, patch *scholarPatch, before,
 
 func (s *Shell) openScholarChange(p *scholarState, id uint64) {
 	s.flushScholarChanges(p)
-	p.references.right = nil
 	s.selectScholarPDF(p, nil)
 	d := &p.changes
 	d.selected, d.compare = id, true
