@@ -366,7 +366,16 @@ func (s *Shell) scholarReferenceActions(c *ui.Context, m *ui.Menu, p *scholarSta
 		s.scholarPDFMenu(c, m, p, t)
 		m.Separator()
 	}
-	if m.Item(s.tr("scholarPinPDF")).Checked(t.pinned).Chosen() {
+	pinLabel := "scholarPinPDF"
+	if s.pf.windows && t.pinned {
+		pinLabel = "scholarUnpinPDF"
+	}
+	pin := m.Item(s.tr(pinLabel))
+	// Windows 原生菜单会为未勾选的复选项也预留一整列。
+	if !s.pf.windows {
+		pin.Checked(t.pinned)
+	}
+	if pin.Chosen() {
 		t.pinned = !t.pinned
 	}
 	s.editorGroupMenu(m, workspaceItem{reference: t})
@@ -407,8 +416,10 @@ func (t *scholarReferenceTab) openExternalPDF(c *ui.Context) {
 }
 
 func (s *Shell) scholarReferenceError(c *ui.Context, message string, actions func()) {
-	s.scholarReaderNotice(c.Key("message"), message, nil)
-	ui.Column(c.Key("recovery")).FillWidth().Padding(0, scholarReaderInset).Gap(4).Children(actions)
+	ui.Column(c).FillWidth().MaxWidth(520).Children(func() {
+		s.scholarReaderNotice(c.Key("message"), message, nil)
+		ui.Column(c.Key("recovery")).FillWidth().Padding(0, scholarReaderInset).Gap(4).Children(actions)
+	})
 }
 
 func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarReferenceTab) {

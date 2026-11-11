@@ -14,7 +14,8 @@ func (s *Shell) scholarLibraryToolbar(c *ui.Context, p *scholarState) {
 	ui.Row(c).FillWidth().Height(38).Padding(0, 7).Gap(5).AlignItems(ui.Center).Children(func() {
 		titles := []string{s.tr("scholarProject"), "Zotero", s.tr("scholarOnline")}
 		glyph := [...]string{"folder", "book-open", "globe"}[l.mode]
-		s.scholarMenuButton(c.Key("source"), glyph, titles[l.mode], l.mode != 1).Disabled(p.busy).Menu(func(m *ui.Menu) {
+		showSource := l.mode != 1 || s.pf.windows && !l.connected
+		s.scholarMenuButton(c.Key("source"), glyph, titles[l.mode], showSource).Disabled(p.busy).Menu(func(m *ui.Menu) {
 			for i, title := range titles {
 				if m.Item(title).Radio(l.mode == i).Chosen() {
 					l.mode = i

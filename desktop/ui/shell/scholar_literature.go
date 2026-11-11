@@ -187,9 +187,18 @@ func (s *Shell) scholarLibraryView(c *ui.Context, p *scholarState) {
 			case 1:
 				s.scholarZoteroCatalog(c, p)
 			case 2:
-				ui.Text(c, s.tr("scholarOnlineDisclosure")).FontSize(11).Wrap()
-				in := ui.TextInput(c, &l.remoteQuery).FillWidth().Placeholder(s.tr("scholarMetadataSearch"))
-				if ui.Button(c, s.tr("scholarOnlineSearch")).Disabled(p.busy).Clicked() || in.Submitted() {
+				var submit bool
+				ui.Column(c.Key("online-search")).FillWidth().MaxWidth(560).Padding(8).Gap(6).Children(func() {
+					ui.Row(c).FillWidth().Wrap().Gap(8).AlignItems(ui.Center).Children(func() {
+						label := s.tr("scholarMetadataSearch")
+						in := ui.TextInput(c.Key("query"), &l.remoteQuery).Width(260).MinWidth(0).Grow(1).
+							Height(32).Label(label).Placeholder(label)
+						search := ui.PrimaryButton(c.Key("submit"), s.tr("scholarOnlineSearch")).MinHeight(32).Shrink(0).Disabled(p.busy)
+						submit = !p.busy && (search.Clicked() || in.Submitted())
+					})
+					ui.Text(c, s.tr("scholarOnlineDisclosure")).FontSize(12).TextColor(s.ch.muted).Wrap()
+				})
+				if submit {
 					query := l.remoteQuery
 					s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 						items, err := scholar.Lookup(ctx, query)
@@ -246,25 +255,35 @@ func (s *Shell) insertScholarProjectSelection(p *scholarState) {
 
 func (s *Shell) scholarZoteroResults(c *ui.Context, p *scholarState) {
 	l := &p.literature
-	if l.fulltext {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextScope"), l.fulltextScanned, l.fulltextPDFs, l.fulltextUnavailable)).Padding(0, 8).FontSize(11).Wrap()
-	}
 	scanning := p.busy && l.fulltextJob != 0 && l.fulltextJob == p.job
-	if l.fulltext && (scanning || l.sentQuery != "") {
-		ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextProgress"), l.fulltextProgress, l.fulltextTotal, len(l.fulltextEntries))).FontSize(11).Wrap()
-		if l.fulltextPaused && !scanning {
-			ui.Text(c, s.tr("scholarFulltextPaused")).FontSize(11).Wrap()
-		}
-		if ui.Button(c, s.tr("scholarContinueScan")).Disabled(p.busy || !l.fulltextMore).Clicked() {
-			if len(l.fulltextEntries) >= 200 {
-				l.fulltextEntries = nil
-				l.fulltextPage = 0
+	showProgress := l.fulltext && (scanning || l.sentQuery != "")
+	if l.fulltext {
+		ui.Column(c.Key("fulltext-status")).FillWidth().Padding(6, 8).Gap(4).Children(func() {
+			ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextScope"), l.fulltextScanned, l.fulltextPDFs, l.fulltextUnavailable)).
+				FontSize(11).TextColor(s.ch.muted).Wrap()
+			if !showProgress {
+				return
 			}
-			s.loadZotero(p, false, l.collection, l.sentQuery, l.fulltextNext)
-		}
-		if scanning && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() && p.cancelJob != nil {
-			p.cancelJob()
-		}
+			ui.Text(c, fmt.Sprintf(s.tr("scholarFulltextProgress"), l.fulltextProgress, l.fulltextTotal, len(l.fulltextEntries))).
+				FontSize(11).TextColor(s.ch.muted).Wrap()
+			if l.fulltextPaused && !scanning {
+				ui.Text(c, s.tr("scholarFulltextPaused")).FontSize(11).TextColor(s.ch.muted).Wrap()
+			}
+			ui.Row(c).FillWidth().Wrap().Gap(6).Children(func() {
+				if ui.Button(c.Key("continue"), s.tr("scholarContinueScan")).Disabled(p.busy || !l.fulltextMore).Clicked() {
+					if len(l.fulltextEntries) >= 200 {
+						l.fulltextEntries = nil
+						l.fulltextPage = 0
+					}
+					s.loadZotero(p, false, l.collection, l.sentQuery, l.fulltextNext)
+				}
+				if scanning && ui.Button(c.Key("cancel"), s.tr("scholarAgentCancelWork")).Clicked() && p.cancelJob != nil {
+					p.cancelJob()
+				}
+			})
+		})
+	}
+	if showProgress {
 		lo := min(l.fulltextPage*scholar.ZoteroPageSize, len(l.fulltextEntries))
 		l.pageData.Entries = l.fulltextEntries[lo:min(lo+scholar.ZoteroPageSize, len(l.fulltextEntries))]
 	}

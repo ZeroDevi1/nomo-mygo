@@ -26,6 +26,13 @@ type scholarTagPicker struct {
 	tags              []string
 }
 
+type scholarCatalogClick struct {
+	row, detailJob       uint64
+	revealAt             time.Time
+	drawer               int
+	selectOnReveal, open bool
+}
+
 func (s *Shell) scholarCatalogInSidebar(c *ui.Context, p *scholarState) bool {
 	return s.scholarUsesZoteroSidebar(p) && !s.scholarSidebarHidden(c)
 }
@@ -77,12 +84,22 @@ func (s *Shell) scholarCatalogButton(c *ui.Context, glyph, title string, selecte
 func (s *Shell) scholarZoteroCatalog(c *ui.Context, p *scholarState) {
 	l := &p.literature
 	if !l.connected {
-		ui.Text(c, s.tr("scholarEnableZotero")).FontSize(12).Wrap()
-		if ui.Button(c, s.tr("scholarConnectZotero")).Disabled(p.busy).Clicked() {
-			s.loadZotero(p, true, "", "", 0)
+		connectionPrompt := func() {
+			ui.Column(c.Key("connection-prompt")).FillWidth().MaxWidth(520).AlignSelf(ui.Center).
+				Padding(24, 20).Gap(8).Children(func() {
+				ui.Text(c, s.tr("scholarZoteroDisconnected")).FontSize(20).FontWeight(600).Wrap()
+				ui.Text(c, s.tr("scholarEnableZotero")).LineHeight(1.4).TextColor(s.ch.muted).Wrap()
+				if ui.PrimaryButton(c.Key("connect"), s.tr("scholarConnectZotero")).AlignSelf(ui.Start).
+					MinHeight(32).Margin(4, 0, 0, 0).Disabled(p.busy).Clicked() {
+					s.loadZotero(p, true, "", "", 0)
+				}
+			})
 		}
 		if l.recentOpen {
+			connectionPrompt()
 			s.scholarCatalogRows(c, p, l.recent, false)
+		} else {
+			ui.Scroll(c.Key("connection")).FillWidth().Grow(1).MinHeight(0).Children(connectionPrompt)
 		}
 		return
 	}
@@ -306,7 +323,7 @@ func (s *Shell) scholarCatalogResults(c *ui.Context, p *scholarState) {
 		s.scholarCatalogRows(c, p, l.recent, false)
 		return
 	}
-	if !l.loaded && !p.busy && ui.Button(c, s.tr("refresh")).Clicked() {
+	if !l.loaded && !p.busy && ui.Button(c.Key("refresh"), s.tr("refresh")).AlignSelf(ui.Start).Margin(6, 8).Clicked() {
 		s.loadZotero(p, false, l.collection, l.remoteQuery, 0)
 	}
 	s.scholarZoteroResults(c, p)
@@ -420,11 +437,17 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 		}
 	})
 	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-	ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
+	list := ui.Scroll(c.Key("items")).Grow(1).FillWidth().MinHeight(0)
+	click := ui.Local(list, "item-click", func() scholarCatalogClick { return scholarCatalogClick{} })
+	if l.mode != 1 {
+		*click = scholarCatalogClick{}
+	}
+	list.Children(func() {
 		ui.Column(c).FillWidth().Padding(3, scholarCatalogInset).Children(func() {
 			if len(entries) == 0 && !p.busy {
 				ui.Text(c, s.tr("scholarCatalogEmpty")).Padding(8).FontSize(12).TextColor(s.ch.muted).Wrap()
 			}
+			expandedAbove := false
 			for i, e := range entries {
 				ck := c.Key(i)
 				selected := scholarSameCatalogItem(s.scholarLinkedEntry(p, e), l.selected)
@@ -443,6 +466,7 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 						}
 						if s.toolButton(ck.Key("expand"), glyph, s.tr("scholarItemChildren"), false).
 							Width(scholarCatalogDisclosure).Shrink(0).Padding(1).Disabled(p.busy).Clicked() {
+							*click = scholarCatalogClick{}
 							if selected {
 								l.expanded = !l.expanded
 							} else {
@@ -453,8 +477,9 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 					} else {
 						ui.Box(ck).Width(scholarCatalogDisclosure).Shrink(0)
 					}
-					b := scholarCatalogLine(ui.ButtonBase(ck.Key("item"))).Height(27).Justify(ui.Start).
-						Selected(selected && l.selectedNote == "").TextColor(s.ch.text).FocusRing(true).Tooltip(e.Title).Disabled(p.busy)
+					item := ck.Key("item").Key(e.Library).Key(e.RemoteID)
+					b := scholarCatalogLine(ui.ButtonBase(item)).Height(27).Justify(ui.Start).
+						Selected(selected && l.selectedNote == "").TextColor(s.ch.text).FocusRing(true).Tooltip(e.Title)
 					if selected && l.selectedNote == "" {
 						b.Background(scholarZoteroSelection(c))
 					} else if b.Hovered() {
@@ -481,15 +506,7 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 							}
 						})
 					})
-					if b.Clicked() {
-						if !selected || e.Source == "Zotero" && l.selected.Source != e.Source {
-							s.selectScholarEntry(p, e)
-						} else {
-							l.selectedNote = ""
-							l.annotations = nil
-							s.showScholarInspector(p, scholarReader)
-						}
-					}
+					s.scholarCatalogItemClick(c, p, e, b, selected, expandedAbove || p.err != "", click)
 					if local {
 						checked := slices.Contains(l.checked, e.Key)
 						glyph := "plus"
@@ -504,10 +521,86 @@ func (s *Shell) scholarCatalogRows(c *ui.Context, p *scholarState, entries []sch
 				})
 				if expanded {
 					s.scholarCatalogChildren(ck.Key("children"), p)
+					expandedAbove = expandedAbove || len(l.detail.PDFs) != 0 || len(l.detail.Notes) != 0 || l.detail.More || l.attachmentPage > 0
 				}
 			}
 		})
 	})
+}
+
+func (s *Shell) scholarCatalogItemClick(c *ui.Context, p *scholarState, entry scholar.Entry, button ui.Element, selected, movesRow bool, click *scholarCatalogClick) {
+	l := &p.literature
+	canOpen := l.mode == 1 && entry.RemoteID != "" && !entry.ZoteroNote
+	row := button.ID()
+	ownDetail := click.row == row && click.detailJob != 0 && click.detailJob == p.job
+	button.Disabled(p.busy && !(canOpen && selected && ownDetail))
+
+	switch {
+	case canOpen && button.DoubleClicked():
+		click.row, click.open, click.revealAt = row, true, time.Time{}
+		if !selected {
+			s.setScholarEntry(p, entry)
+			click.detailJob = p.job
+		}
+	case !p.busy && button.Clicked():
+		*click = scholarCatalogClick{row: row}
+		switch {
+		case canOpen && !selected && movesRow:
+			click.selectOnReveal = true
+		case !selected || entry.Source == "Zotero" && l.selected.Source != entry.Source:
+			s.setScholarEntry(p, entry)
+			if p.busy {
+				click.detailJob = p.job
+			}
+		default:
+			l.selectedNote = ""
+			l.annotations = nil
+		}
+		if canOpen && (click.selectOnReveal || p.drawer != scholarReader) {
+			// Collapsing earlier children or opening the inspector can move the target.
+			click.drawer, click.revealAt = p.drawer, c.Now().Add(scholarDoubleClickInterval())
+		} else {
+			s.showScholarInspector(p, scholarReader)
+		}
+	}
+
+	if !canOpen || click.row != row {
+		return
+	}
+	if click.open {
+		if !scholarSameCatalogItem(entry, l.selected) {
+			*click = scholarCatalogClick{}
+			return
+		}
+		if p.busy {
+			return
+		}
+		detailFailed := click.detailJob != 0 && click.detailJob == p.job && p.err != ""
+		*click = scholarCatalogClick{}
+		if detailFailed {
+			if address := scholarEntryWebURL(entry); address != "" {
+				s.openScholarWeb(p, entry, address)
+			}
+		} else {
+			s.openScholarReference(p, entry)
+		}
+		c.After(0)
+	} else if !click.revealAt.IsZero() {
+		if wait := click.revealAt.Sub(c.Now()); wait > 0 {
+			c.After(wait)
+		} else {
+			click.revealAt = time.Time{}
+			if p.drawer != click.drawer || !button.Focused() {
+				return
+			}
+			if click.selectOnReveal && !p.busy {
+				s.selectScholarEntry(p, entry)
+			} else if selected {
+				s.showScholarInspector(p, scholarReader)
+			}
+			c.After(0)
+		}
+	}
 }
 
 func (s *Shell) scholarCatalogChildren(c *ui.Context, p *scholarState) {

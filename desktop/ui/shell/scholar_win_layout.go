@@ -10,7 +10,10 @@ const (
 	scholarWindowsCompact    = 640
 	scholarWindowsProjectMin = 1008
 	scholarWindowsRail       = 48
-	scholarWindowsTitleInset = 4
+	scholarWindowsTitleInset = 12
+	scholarWindowsNavInsetX  = 4
+	scholarWindowsNavInsetY  = 8
+	scholarWindowsToggleSize = 40
 )
 
 func (p *scholarState) windowsRailWidth(width float32) float32 {
@@ -40,29 +43,36 @@ func (s *Shell) desktopScholarLayout(c *ui.Context, p *scholarState) {
 		p.winCompactProject = false
 	}
 	bar := c.TitleBar()
+	rail := p.windowsRailWidth(width)
 	ui.Column(c).Fill().Background(s.ch.paint(s.ch.titlebar, true)).Children(func() {
 		ui.Row(c).Height(max(bar.Height, s.pf.titleH)).FillWidth().Padding(0, bar.Right+8, 0, bar.Left+scholarWindowsTitleInset).
 			Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
-			label := s.tr("showHideExplorer")
-			nav := s.toolButton(c.Key("navigation"), "panel-left", label, p.winRailPopup).Width(40)
-			if width < scholarWindowsExpanded {
-				nav.Role(ui.RoleMenuButton)
-			}
-			if nav.Clicked() {
-				s.scholarToggleSidebarAt(width)
-			}
 			s.windowsAppTitle(c, p.project.Root)
 			ui.Box(c).Width(8)
 			s.menus(c.Key("menubar"))
 			ui.Spacer(c)
-		})
-		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-			if rail := p.windowsRailWidth(width); rail > 0 {
-				ui.Column(c.Key("application-nav")).Width(rail).Shrink(0).FillHeight().MinHeight(0).Padding(8, 4).Gap(4).Background(s.ch.paint(s.ch.sidebar, true)).Children(func() {
-					s.scholarWindowsDestinations(c, p, width, rail > scholarWindowsRail)
-					ui.Box(c).Grow(1)
-					s.scholarWindowsFooter(c, p, rail > scholarWindowsRail)
+			if s.editorGroupsVisible(p) && p.winSettings == nil && !p.accountOpen && !p.winCompactProject {
+				ui.Row(c.Key("workspace-tools")).FillHeight().Shrink(0).Gap(4).AlignItems(ui.Center).Children(func() {
+					s.documentTools(c)
 				})
+			}
+		})
+		if rail == 0 {
+			ui.Row(c.Key("compact-navigation")).FillWidth().
+				Padding(scholarWindowsNavInsetY, scholarWindowsNavInsetX, 4, scholarWindowsNavInsetX).Children(func() {
+				s.scholarWindowsPaneToggle(c.Key("navigation"), p, width)
+			})
+		}
+		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+			if rail > 0 {
+				ui.Column(c.Key("application-nav")).Width(rail).Shrink(0).FillHeight().MinHeight(0).
+					Padding(scholarWindowsNavInsetY, scholarWindowsNavInsetX).Gap(4).Background(s.ch.paint(s.ch.sidebar, true)).
+					Children(func() {
+						s.scholarWindowsPaneToggle(c.Key("navigation"), p, width)
+						s.scholarWindowsDestinations(c, p, width, rail > scholarWindowsRail)
+						ui.Box(c).Grow(1)
+						s.scholarWindowsFooter(c, p, rail > scholarWindowsRail)
+					})
 			}
 			ui.Column(c.Key("workspace")).Grow(1).FillHeight().MinWidth(0).MinHeight(0).Radius(8, 0, 0, 0).
 				Border(1, s.ch.separator).BorderWidth(1, 0, 0, 1).Clip().Background(s.ch.content).Children(func() {
@@ -75,10 +85,10 @@ func (s *Shell) desktopScholarLayout(c *ui.Context, p *scholarState) {
 				if p.accountOpen {
 					p.references.releaseHidden()
 					s.hideTypesetPreview(p, s.activeTab())
-					ui.Column(c).Padding(22).Gap(10).Children(func() {
+					ui.Column(c).FillWidth().MaxWidth(520).Padding(24).Gap(10).Children(func() {
 						ui.Text(c, s.tr("scholarAccount")).FontSize(24).Bold()
 						ui.Text(c, s.tr("scholarLocalWorkspace")).Wrap()
-						if ui.Button(c, s.tr("scholarReturnManuscript")).Clicked() {
+						if ui.Button(c, s.tr("scholarReturnManuscript")).AlignSelf(ui.Start).Clicked() {
 							p.accountOpen = false
 							s.focusEditor = true
 						}
@@ -106,6 +116,25 @@ func (s *Shell) desktopScholarLayout(c *ui.Context, p *scholarState) {
 			})
 		})
 	})
+}
+
+func (s *Shell) scholarWindowsPaneToggle(c *ui.Context, p *scholarState, width float32) {
+	compact := width < scholarWindowsExpanded
+	label, expanded := "scholarOpenNavigation", p.winRailPopup
+	if !compact {
+		label, expanded = "scholarExpandNavigation", !p.winRailCollapsed
+		if expanded {
+			label = "scholarCollapseNavigation"
+		}
+	}
+	button := s.toolButton(c, "panel-left", s.tr(label), p.winRailPopup).
+		Size(scholarWindowsToggleSize, scholarWindowsToggleSize).AlignSelf(ui.Start).Shrink(0).Expanded(expanded)
+	if compact {
+		button.Role(ui.RoleMenuButton)
+	}
+	if button.Clicked() {
+		s.scholarToggleSidebarAt(width)
+	}
 }
 
 func (p *scholarState) windowsDestinationSelected(destination int, width float32) bool {
@@ -163,7 +192,8 @@ func (s *Shell) openScholarWindowsNavigation(p *scholarState) {
 			entry("scholarAccount", p.accountOpen, p.openWindowsAccount),
 			entry("settings", p.winSettings != nil, s.openSettings),
 		)
-		mygo.NewMenu(items).PopupAt(win, scholarWindowsTitleInset, int(s.pf.titleH))
+		y := int(s.pf.titleH) + scholarWindowsNavInsetY + scholarWindowsToggleSize
+		mygo.NewMenu(items).PopupAt(win, scholarWindowsNavInsetX, y)
 	})
 }
 

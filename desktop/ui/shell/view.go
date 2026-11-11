@@ -352,12 +352,14 @@ func (s *Shell) desktopLayout(c *ui.Context) {
 
 // desktopTabs 是 Windows 11 / Fluent 风格的标签：选中标签与内容区同色，其余透明。
 func (s *Shell) desktopTabs(c *ui.Context) {
-	if s.editorGroupsVisible(s.scholarForTab(s.activeTab())) {
-		s.editorGroupsToolbar(c)
+	p := s.scholarForTab(s.activeTab())
+	if s.editorGroupsVisible(p) {
+		if !s.pf.windows {
+			s.editorGroupsToolbar(c)
+		}
 		return
 	}
 	t := c.Theme()
-	p := s.scholarForTab(s.activeTab())
 	height := float32(tabBarH)
 	if s.pf.windows {
 		height = windowsTabBarH

@@ -165,12 +165,15 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 	}
 	label := s.tr("scholarToggleInspector")
 	visible := (p.drawer == scholarReader || p.drawer == scholarDiagnostics) && s.scholarInspectorVisible(p, width)
-	var inspector ui.Element
-	if p.references.catalog && p.literature.mode == 1 {
+	zoteroCatalog := p.references.catalog && p.literature.mode == 1
+	if zoteroCatalog {
 		label = s.tr("scholarShowDetails")
 		if visible {
 			label = s.tr("scholarHideDetails")
 		}
+	}
+	var inspector ui.Element
+	if zoteroCatalog && !(s.pf.windows && s.editorGroupsVisible(p)) {
 		// Continue the detail rail through the tab bar without a second active tile.
 		slot := ui.Box(c.Key("inspector-slot")).Width(30).Shrink(0).FillHeight().AlignItems(ui.Center).Justify(ui.Center)
 		if visible && p.drawer == scholarReader {
