@@ -3,11 +3,10 @@ package shell
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
@@ -33,27 +32,29 @@ type scholarPatch struct {
 }
 
 type scholarAgentState struct {
-	target              scholarTarget
-	inline, focusInline bool
-	anchor              ui.Rect
-	instruction, stream string
-	parts               [4]string
-	include             [4]bool
-	showParts           int
-	attachments         bool
-	info                scholar.CodexInfo
-	probed, running     bool
-	model               int
-	patch               *scholarPatch
-	batch               *scholarPatchSet
-	multi, reviewHidden bool
-	reviewRelayout      bool
-	files               []scholarContextFile
-	conversation        string
-	session             *scholar.CodexConversation
-	applied             []scholarAppliedFile
-	trial               scholarTrialView
-	trialPreparing      bool
+	target, inlineTarget scholarTarget
+	inline               bool
+	anchor               ui.Rect
+	inlineX              float32
+	pressAt              time.Time
+	pressX, pressY       float32
+	pressUsed            bool
+	instruction          string
+	parts                [4]string
+	include              [4]bool
+	showParts            int
+	attachments          bool
+	acp                  scholarACPState
+	running              bool
+	patch                *scholarPatch
+	batch                *scholarPatchSet
+	multi, reviewHidden  bool
+	reviewRelayout       bool
+	files                []scholarContextFile
+	conversation         string
+	applied              []scholarAppliedFile
+	trial                scholarTrialView
+	trialPreparing       bool
 }
 
 func (s *Shell) openScholarAgent(p *scholarState) {
@@ -74,14 +75,75 @@ func (s *Shell) openScholarInlinePrompt(p *scholarState) {
 		s.showScholarInspector(p, scholarCodex)
 		return
 	}
-	s.captureScholarTarget(p)
-	if a.target.tabID == 0 {
+	a.inlineTarget = s.scholarSelection(p)
+	a.anchor, a.inlineX = ui.Rect{}, 0
+	if a.inlineTarget.tabID == 0 {
 		s.showScholarInspector(p, scholarCodex)
 		return
 	}
 	s.revealScholarSource(s.activeTab())
-	a.multi = false
-	a.inline, a.focusInline = true, true
+	a.inline = true
+}
+
+func (s *Shell) scholarSourceQuoteGesture(c *ui.Context, p *scholarState, el ui.Element) {
+	a := &p.agent
+	st := s.activeTab().Source()
+	sel := st.Selection()
+	if sel.Anchor == sel.Head || p.busy || a.pendingPatch() != nil {
+		a.pressAt, a.pressUsed = time.Time{}, false
+		return
+	}
+	pointer, _, held := el.PressedPointer()
+	right := el.RightClicked()
+	_, _, released := el.DragEnded()
+	if !held && !right && !released {
+		a.pressAt, a.pressUsed = time.Time{}, false
+		return
+	}
+	x, y, over := el.PointerPosition()
+	if !over || a.pressUsed {
+		return
+	}
+	if !right && !released {
+		button, _ := el.PressedButton()
+		if button != 0 || pointer == ui.PointerMouse {
+			return
+		}
+		if a.pressAt.IsZero() || absF32(x-a.pressX) > 5 || absF32(y-a.pressY) > 5 {
+			a.pressAt, a.pressX, a.pressY = c.Now(), x, y
+		}
+		due := a.pressAt.Add(550 * time.Millisecond)
+		if c.Now().Before(due) {
+			c.After(due.Sub(c.Now()))
+			return
+		}
+		a.pressUsed = true
+	}
+	if target := s.scholarSelection(p); target.tabID != 0 {
+		a.inlineTarget, a.inline = target, true
+		a.inlineX = x
+	}
+}
+
+func absF32(n float32) float32 { return max(n, -n) }
+
+func (s *Shell) anchorScholarInline(p *scholarState, st *editor.State, r ui.Rect) {
+	a := &p.agent
+	if !a.inline {
+		return
+	}
+	target, sel := a.inlineTarget, st.Selection()
+	if min(sel.Anchor, sel.Head) != target.start || max(sel.Anchor, sel.Head) != target.end {
+		a.inline = false
+		return
+	}
+	last := st.Buffer.Snapshot().LineOf(target.end - 1)
+	top := max(0, float32(st.LineTop(target.line)-st.ScrollY()))
+	bottom := min(r.H, float32(st.LineTop(last+1)-st.ScrollY()))
+	a.anchor = ui.Rect{}
+	if bottom > top && r.W > 0 {
+		a.anchor = ui.Rect{X: r.X, Y: r.Y + top, W: r.W, H: bottom - top}
+	}
 }
 
 func (s *Shell) scholarInlinePrompt(c *ui.Context, p *scholarState) {
@@ -89,68 +151,71 @@ func (s *Shell) scholarInlinePrompt(c *ui.Context, p *scholarState) {
 	if !a.inline {
 		return
 	}
-	if !s.scholarTargetCurrent(a.target) {
+	if !s.scholarTargetCurrent(a.inlineTarget) || s.activeTab() == nil || s.activeTab().ID != a.inlineTarget.tabID || p.references.focused != nil || p.references.catalog {
 		a.inline = false
 		return
 	}
-	w, _ := c.Size()
-	width := min(float32(440), w-24)
-	x := max(float32(12), min(a.anchor.X+16, w-width-12))
-	y := max(float32(46), a.anchor.Y+12)
-	ui.Overlay(c, func() {
-		panel := ui.Column(c).Absolute().Left(x).Top(y).Width(width).Padding(10).Gap(6).
-			Radius(c.Theme().Radius).Background(c.Theme().Background).Border(1, scholarInk(c, "agent"))
-		panel.Children(func() {
-			ui.Text(c, fmt.Sprintf("Codex · 第 %d 行", a.target.line+1)).FontSize(12).TextColor(scholarInk(c, "agent"))
-			input := ui.TextInput(c, &a.instruction).FillWidth().Placeholder(s.tr("scholarAgentInput"))
-			if a.focusInline {
-				input.Focus()
-				a.focusInline = false
-			}
-			ui.Row(c).Gap(4).Children(func() {
-				for i, preset := range []string{s.tr("scholarAgentShorten"), s.tr("scholarAgentTranslate"), s.tr("scholarAgentFixFormula"), s.tr("scholarAgentConvert")} {
-					if ui.Button(c.Key(i), preset).Clicked() {
-						a.instruction = preset
-					}
-				}
-			})
-			if ui.Button(c, s.tr("scholarAgentReviewContext")).Clicked() || input.Submitted() {
-				a.inline = false
-				s.showScholarInspector(p, scholarCodex)
-			}
-		})
-		if panel.OverlayShortcut(0, ui.KeyEscape) || panel.PressedOutside() {
-			a.inline, s.focusEditor = false, true
-		}
-	})
-}
-
-func (s *Shell) captureScholarTarget(p *scholarState) {
-	a := &p.agent
-	tab := s.activeTab()
-	if !isManuscript(tab) {
-		a.target = scholarTarget{}
-		a.parts[0], a.include[0] = "", false
-		p.err = s.tr("scholarSelectSource")
+	r := a.anchor
+	if r.W <= 12 {
 		return
 	}
+	width := min(float32(330), r.W-12)
+	x := min(r.X+max(6, a.inlineX-24), r.X+r.W-width-6)
+	_, h := c.Size()
+	y := r.Y + r.H + 5
+	if y+36 > h-10 {
+		y = max(44, r.Y-41)
+	}
+	panel := s.scholarACPSelectionBar(c.Key("source-selection"), x, y, width, func() {
+		ref := s.scholarSourceQuote(p, a.inlineTarget)
+		blocked := p.busy || a.pendingPatch() != nil
+		if s.scholarACPAction(c.Key("append"), "message-square", s.tr("scholarACPAppend"), false).Disabled(blocked).Clicked() {
+			s.quoteScholar(p, ref, false)
+		}
+		if s.scholarACPAction(c.Key("new"), "plus", s.tr("scholarACPNew"), false).Disabled(blocked).Clicked() {
+			s.quoteScholar(p, ref, true)
+		}
+		ui.Box(c.Key("divider")).Size(1, 16).Shrink(0).Background(s.ch.separator)
+		if s.scholarACPAction(c.Key("edit"), "file-pen-line", s.tr("scholarEditSelection"), true).Disabled(blocked).Clicked() {
+			target := a.inlineTarget
+			ref.text = ""
+			s.quoteScholar(p, ref, false)
+			a.target, a.multi = target, false
+			a.parts[0], a.include[0] = target.before, true
+		}
+	})
+	if panel.OverlayShortcut(0, ui.KeyEscape) || panel.PressedOutside() {
+		a.inline = false
+	}
+}
+
+func (s *Shell) scholarSelection(p *scholarState) scholarTarget {
+	tab := s.activeTab()
+	if !isManuscript(tab) || s.scholarForTab(tab) != p {
+		return scholarTarget{}
+	}
 	st := tab.Source()
-	snap := st.Buffer.Snapshot()
 	sel := st.Selection()
 	start, end := min(sel.Anchor, sel.Head), max(sel.Anchor, sel.Head)
 	if start == end || end-start > scholarSelectionLimit {
-		p.err = s.tr("scholarSelectionLimit")
-		a.resetSession()
-		a.target = scholarTarget{}
-		a.parts[0], a.include[0] = "", false
-		return
+		return scholarTarget{}
 	}
+	snap := st.Buffer.Snapshot()
 	before := snap.Slice(start, end)
-	a.target = scholarTarget{tabID: tab.ID, start: start, end: end, line: snap.LineOf(start), path: tab.Path,
+	return scholarTarget{tabID: tab.ID, start: start, end: end, line: snap.LineOf(start), path: tab.Path,
 		version: snap.Version(), digest: sha256.Sum256([]byte(before)), before: before}
+}
+
+func (s *Shell) captureScholarTarget(p *scholarState) bool {
+	target := s.scholarSelection(p)
+	if target.tabID == 0 {
+		p.err = s.tr("scholarSelectionLimit")
+		return false
+	}
+	a := &p.agent
+	a.target, a.parts[0], a.include[0] = target, target.before, true
 	p.err = ""
-	a.parts[0], a.include[0] = before, true
-	a.resetSession()
+	return true
 }
 
 var scholarContextNames = [4]string{"@selection", "@preamble", "@zotero", "@diag"}
@@ -160,132 +225,20 @@ var scholarAgentPrompts = [...]struct{ name, prompt string }{
 	{"/formula", "scholarAgentFixFormula"}, {"/convert", "scholarAgentConvert"},
 }
 
-func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState) {
+func (s *Shell) scholarAgentAttachmentButton(c *ui.Context, p *scholarState, shortcut bool) {
 	a := &p.agent
-	ui.Text(c, s.tr("scholarAgentTitle")).Bold().TextColor(scholarInk(c, "agent"))
-	if p.err != "" {
-		ui.Text(c, p.err).FontSize(11).Wrap().TextColor(scholarInk(c, "warning"))
-	}
-	if a.batch != nil {
-		s.scholarPatchSetView(c, p, a.batch)
-		return
-	}
-	if a.patch != nil {
-		s.scholarPatchView(c, p, a.patch)
-		return
-	}
-	if len(a.applied) > 0 && ui.Button(c, s.tr("scholarRollbackFiles")).Disabled(p.busy).Clicked() {
-		s.rollbackScholarFiles(p)
-	}
-	if a.conversation != "" {
-		ui.Text(c, a.conversation).FontSize(11).Wrap()
-		if ui.Button(c, s.tr("scholarClearConversation")).Disabled(p.busy).Clicked() {
-			a.conversation = ""
-			if a.session != nil {
-				a.session.Close()
-				a.session = nil
-			}
-		}
-	}
-	if !a.probed {
-		ui.Text(c, s.tr("scholarCodexSetup")).FontSize(11).Wrap()
-		if ui.Button(c, s.tr("scholarAgentConnect")).Disabled(p.busy).Clicked() {
-			s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
-				info, err := scholar.ProbeCodex(ctx)
-				return func() { a.probed, a.info = err == nil, info }, err
-			})
-		}
-	}
-	s.scholarAgentAttachments(c.Key("attachments"), p)
-	input := ui.TextInput(c, &a.instruction).FillWidth().Placeholder(s.tr("scholarAgentInput")).Disabled(a.running)
-	command := strings.HasPrefix(strings.TrimSpace(a.instruction), "/")
-	if command && !a.running {
-		s.scholarAgentCommands(c.Key("prompts"), a, input.Submitted())
-	}
-	if a.running {
-		ui.Text(c, s.tr("scholarGenerating")).FontSize(11)
-		if ui.Button(c, s.tr("scholarAgentCancel")).Clicked() {
-			p.cancelCurrent()
-			a.running, a.stream = false, ""
-		}
-		if a.stream != "" {
-			stream := a.stream
-			if len(stream) > 8<<10 {
-				stream = stream[len(stream)-(8<<10):]
-				for len(stream) > 0 && stream[0]&0xc0 == 0x80 {
-					stream = stream[1:]
-				}
-			}
-			ui.Text(c, stream).FontSize(11).Wrap()
-		}
-		return
-	}
-	ready := a.probed && !p.busy && !command && strings.TrimSpace(a.instruction) != "" &&
-		(a.multi && len(a.files) > 0 || !a.multi && a.target.tabID != 0 && a.include[0])
-	if a.probed && !a.include[0] && len(a.files) == 0 {
-		ui.Text(c, s.tr("scholarAgentChooseTarget")).FontSize(11).Wrap()
-	}
-	send := false
-	ui.Row(c.Key("controls")).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-		label := s.tr("scholarCommandPalette")
-		s.toolButton(c.Key("prompt-menu"), "slash", label, false).Disabled(p.busy).Label(label).Menu(func(m *ui.Menu) {
-			for _, command := range scholarAgentPrompts {
-				if m.Item(command.name + "  " + s.tr(command.prompt)).Chosen() {
-					a.instruction = s.tr(command.prompt)
-				}
-			}
-		})
-		if a.probed {
-			labels := []string{s.tr("scholarAgentDefaultModel")}
-			for _, model := range a.info.Models {
-				label := model.DisplayName
-				if label == "" {
-					label = model.Model
-				}
-				labels = append(labels, label)
-			}
-			if scholarSelectIndex(c.Key("model"), &a.model, labels, p.busy) {
-				a.resetSession()
-			}
-		}
-		ui.Box(c).Grow(1)
-		send = ui.Button(c, s.tr("scholarAgentSend")).Disabled(!ready).Clicked()
-	})
-	if ready && (send || input.Submitted()) {
-		if a.multi {
-			s.sendScholarPatchSet(p)
-		} else {
-			s.sendScholarAgent(p)
-		}
-	}
-}
-
-func (s *Shell) scholarAgentCommands(c *ui.Context, a *scholarAgentState, submitted bool) {
-	query := strings.TrimSpace(a.instruction)
-	for i, command := range scholarAgentPrompts {
-		if strings.HasPrefix(command.name, query) {
-			label := command.name + "  " + s.tr(command.prompt)
-			if ui.Button(c.Key(i), label).Clicked() || submitted && command.name == query {
-				a.instruction = s.tr(command.prompt)
-			}
-		}
-	}
-}
-
-func (s *Shell) scholarAgentAttachments(c *ui.Context, p *scholarState) {
-	a := &p.agent
-	add := s.toolButton(c.Key("add"), "plus", s.tr("scholarAgentAttach"), a.attachments).Disabled(p.busy)
-	if add.Clicked() {
+	label := s.tr("scholarAgentAttach")
+	add := s.toolButton(c.Key("add"), "plus", label, a.attachments).Label(label).FocusRing(true).Disabled(p.busy)
+	if !p.busy && (add.Clicked() || shortcut) {
+		a.acp.modelDetails = false
 		a.attachments = !a.attachments
 	}
 	ui.Popover(c, add, &a.attachments, func() {
 		ui.Scroll(c).Width(250).MaxHeight(360).Children(func() {
 			ui.Column(c).FillWidth().Padding(8).Gap(4).Children(func() {
 				if ui.Button(c.Key("selection"), s.tr("scholarAgentUseSelection")).Disabled(p.busy).Clicked() {
-					s.captureScholarTarget(p)
-					if a.target.tabID != 0 {
+					if s.captureScholarTarget(p) {
 						a.multi, a.attachments = false, false
-						a.resetSession()
 					}
 				}
 				s.scholarContextActions(c, p)
@@ -294,6 +247,10 @@ func (s *Shell) scholarAgentAttachments(c *ui.Context, p *scholarState) {
 			})
 		})
 	})
+}
+
+func (s *Shell) scholarAgentAttachments(c *ui.Context, p *scholarState) {
+	a := &p.agent
 	for i, part := range a.parts {
 		if part == "" || !a.include[i] || i == 0 && a.multi {
 			continue
@@ -316,7 +273,6 @@ func (s *Shell) scholarAgentAttachments(c *ui.Context, p *scholarState) {
 				if a.showParts == i+1 {
 					a.showParts = 0
 				}
-				a.resetSession()
 			}
 		})
 		if a.showParts == i+1 && a.include[i] {
@@ -339,91 +295,6 @@ func (s *Shell) scholarTargetValid(target scholarTarget) bool {
 	snap := s.tabWithID(target.tabID).Source().Buffer.Snapshot()
 	return target.start >= 0 && target.end >= target.start && target.end <= snap.Len() &&
 		sha256.Sum256([]byte(snap.Slice(target.start, target.end))) == target.digest
-}
-
-func (s *Shell) sendScholarAgent(p *scholarState) {
-	a := &p.agent
-	target := a.target
-	if !s.scholarTargetValid(target) {
-		p.err = s.tr("scholarSelectionStale")
-		return
-	}
-	contexts := make(map[string]string)
-	for i, part := range a.parts {
-		if a.include[i] && part != "" {
-			contexts[scholarContextNames[i]] = part
-		}
-	}
-	payload, err := json.Marshal(map[string]any{"instruction": a.instruction, "context": contexts, "previous": a.conversation})
-	if err != nil {
-		p.err = err.Error()
-		return
-	}
-	model := ""
-	if a.model > 0 && a.model <= len(a.info.Models) {
-		model = a.info.Models[a.model-1].Model
-		if model == "" {
-			model = a.info.Models[a.model-1].ID
-		}
-	}
-	if a.session == nil {
-		a.session = scholar.NewCodexConversation(p.ctx)
-	}
-	session := a.session
-	a.running, a.stream = true, ""
-	s.scholarJob(p, func(ctx context.Context, job uint64) (func(), error) {
-		var mu sync.Mutex
-		queued := false
-		var latest string
-		next, err := session.Run(ctx, model, string(payload), func(delta string) {
-			mu.Lock()
-			latest = delta
-			post := !queued
-			queued = true
-			mu.Unlock()
-			if post {
-				s.post(func() {
-					mu.Lock()
-					value := latest
-					queued = false
-					mu.Unlock()
-					if s.scholar == p && p.job == job && a.running {
-						a.stream = value
-					}
-				})
-			}
-		}, false)
-		next = strings.ReplaceAll(strings.ReplaceAll(next, "\r\n", "\n"), "\r", "\n")
-		var parts []*scholarPatch
-		if err == nil && next != target.before && !strings.ContainsRune(next, 0) {
-			parts = splitScholarReview(target, next, scholarReviewMaxFragments, -1)
-		}
-		return func() {
-			a.running, a.stream = false, ""
-			if err != nil {
-				return
-			}
-			if !s.scholarTargetValid(target) {
-				p.err = s.tr("scholarProposalStale")
-				return
-			}
-			if strings.ContainsRune(next, 0) {
-				p.err = s.tr("scholarNullProposal")
-				return
-			}
-			if next == target.before {
-				p.err = s.tr("scholarUnchangedProposal")
-				return
-			}
-			a.conversation = trimScholarConversation(a.conversation + "\nUser: " + a.instruction + "\nProposal: selection replacement")
-			if len(parts) == 1 {
-				a.patch = parts[0]
-			} else {
-				a.batch = &scholarPatchSet{hunks: parts}
-			}
-			s.presentScholarReview(p)
-		}, err
-	})
 }
 
 func (s *Shell) scholarPatchView(c *ui.Context, p *scholarState, patch *scholarPatch) {
@@ -476,7 +347,6 @@ func (s *Shell) acceptScholarPatch(p *scholarState, patch *scholarPatch) {
 			end := patch.target.start + len(patch.next)
 			st.Select(end, end)
 			p.agent.conversation = trimScholarConversation(p.agent.conversation + "\nReview: accepted")
-			p.agent.resetSession()
 			p.agent.patch, p.agent.target = nil, scholarTarget{}
 			p.agent.trial.close()
 			p.agent.parts = [4]string{}
@@ -609,13 +479,6 @@ func (s *Shell) jumpScholarDiagnostic(p *scholarState, main string, note typeset
 		if note.Line <= snap.LineCount() {
 			s.jumpScholarOutline(t, snap.LineStart(note.Line-1))
 		}
-	}
-}
-
-func (a *scholarAgentState) resetSession() {
-	if a.session != nil {
-		a.session.Close()
-		a.session = nil
 	}
 }
 

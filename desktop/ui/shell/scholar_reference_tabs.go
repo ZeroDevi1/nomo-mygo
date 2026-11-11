@@ -43,6 +43,7 @@ type scholarReferenceTab struct {
 	err              string
 	cancel           context.CancelFunc
 	generation       uint64
+	quote            scholarPDFQuote
 }
 
 func (t *scholarReferenceTab) releasePage() {
@@ -52,6 +53,7 @@ func (t *scholarReferenceTab) releasePage() {
 	}
 	t.generation++
 	t.bitmap, t.pageAspect = nil, 0
+	t.quote = scholarPDFQuote{}
 }
 
 func (r *scholarReferenceTabs) selectTab(t *scholarReferenceTab) {
@@ -413,7 +415,7 @@ func (s *Shell) scholarReferenceError(c *ui.Context, message string, actions fun
 func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
 	c = c.Key(t)
 	if t.web != nil {
-		s.scholarWebPage(c, t)
+		s.scholarWebPage(c, p, t)
 		return
 	}
 	s.loadScholarPDFPage(p, t, c.Theme().Dark)
@@ -439,11 +441,12 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarR
 				}
 			})
 		} else if t.pageAspect > 0 {
+			s.scholarPDFQuoteControls(c.Key("pdf-quote"), p, t)
 			ui.Scroll(c.Key("pdf-page")).Grow(1).MinHeight(0).FillWidth().Background(s.ch.tabBar).Children(func() {
 				ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(10).Children(func() {
 					width := float32(s.documentWidth(s.activeTab()))
 					if t.bitmap != nil {
-						ui.Image(c, t.bitmap).WidthPercent(width).AspectRatio(t.pageAspect).Label(t.title)
+						s.scholarPDFQuotePage(c, t, width)
 					} else {
 						ui.Box(c).WidthPercent(width).AspectRatio(t.pageAspect)
 					}

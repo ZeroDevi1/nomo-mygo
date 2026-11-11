@@ -3,6 +3,7 @@ module nomo
 go 1.27.3
 
 require (
+	github.com/caelis-labs/acp-go-sdk v1.6.0
 	github.com/egoist/mygo v0.8.1
 	github.com/go-text/typesetting v0.3.5
 	github.com/ncruces/go-sqlite3 v0.37.0

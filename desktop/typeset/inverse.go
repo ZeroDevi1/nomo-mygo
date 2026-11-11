@@ -62,30 +62,76 @@ func (s *Session) readSourcePage(ctx context.Context, page int) *pdfSourcePage {
 	if p := s.sourcePage; p != nil && p.number == page {
 		return p
 	}
-	dir := filepath.Join(s.dir, "pages")
-	n := strconv.Itoa(page)
-	file := filepath.Join(dir, "click.xhtml")
-	defer os.Remove(file)
-	if _, err := run(ctx, dir, "", nil, "pdftotext", "-f", n, "-l", n, "-bbox-layout", "current.pdf", "click.xhtml"); err != nil {
-		return nil
-	}
-	f, err := os.Open(file)
+	p, err := readPDFSourcePage(ctx, filepath.Join(s.dir, "pages"), "current.pdf", page)
 	if err != nil {
 		return nil
 	}
+	s.sourcePage = p
+	return p
+}
+
+func readPDFSourcePage(ctx context.Context, dir, path string, page int) (*pdfSourcePage, error) {
+	n := strconv.Itoa(page)
+	file := filepath.Join(dir, "click.xhtml")
+	defer os.Remove(file)
+	if _, err := run(ctx, dir, "", nil, "pdftotext", "-f", n, "-l", n, "-bbox-layout", path, file); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
 	defer f.Close()
 	if stat, err := f.Stat(); err != nil || stat.Size() > 2<<20 {
-		return nil
+		return nil, fmt.Errorf("PDF text layer exceeds the page budget")
 	}
 	var doc struct {
 		Page pdfSourcePage `xml:"body>doc>page"`
 	}
-	if xml.NewDecoder(pdfXML{f}).Decode(&doc) != nil || doc.Page.Width <= 0 || doc.Page.Height <= 0 {
-		return nil
+	if err := xml.NewDecoder(pdfXML{f}).Decode(&doc); err != nil {
+		return nil, err
+	}
+	if doc.Page.Width <= 0 || doc.Page.Height <= 0 {
+		return nil, fmt.Errorf("invalid PDF text layer")
 	}
 	doc.Page.number = page
-	s.sourcePage = &doc.Page
-	return s.sourcePage
+	return &doc.Page, nil
+}
+
+// PDFRegionText copies words centered inside a page-relative selection rectangle.
+func PDFRegionText(ctx context.Context, path string, page int, x, y, width, height float64, limit int) (string, error) {
+	dir, err := os.MkdirTemp("", "nomo-pdf-text-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	source, err := readPDFSourcePage(ctx, dir, path, page)
+	if err != nil {
+		return "", err
+	}
+	var text strings.Builder
+	for _, line := range source.Lines {
+		first := true
+		for _, word := range line.Words {
+			cx, cy := (word.X+word.R)/(2*source.Width), (word.Y+word.B)/(2*source.Height)
+			if cx < x || cx > x+width || cy < y || cy > y+height {
+				continue
+			}
+			if text.Len()+len(word.Text)+1 > limit {
+				return "", fmt.Errorf("PDF region text exceeds %d bytes", limit)
+			}
+			if text.Len() > 0 {
+				if first {
+					text.WriteByte('\n')
+				} else {
+					text.WriteByte(' ')
+				}
+			}
+			text.WriteString(word.Text)
+			first = false
+		}
+	}
+	return text.String(), nil
 }
 
 func (s *Session) sourceHit(ctx context.Context, page int, x, y float64, nearest bool) *pdfSourceHit {

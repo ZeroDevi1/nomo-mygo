@@ -583,15 +583,9 @@ func (s *Shell) scholarReaderCitations(c *ui.Context, p *scholarState, e scholar
 		}
 	}
 	if isManuscript(s.activeTab()) && s.scholarReaderCommand(c.Key("scholarDiscussPaper"), "message-square-text", s.tr("scholarDiscussPaper"), false).Disabled(p.busy || p.agent.patch != nil || p.agent.batch != nil).Clicked() {
-		s.captureScholarTarget(p)
-		s.showScholarInspector(p, scholarCodex)
-		if p.agent.target.tabID == 0 {
-			p.agent.multi = true
-			p.err = ""
-		}
-		{
-			p.agent.parts[2] = strings.Join([]string{e.Key, e.Title, e.Author, e.Year, e.DOI, l.detail.Abstract}, "\n")
-			p.agent.include[2] = true
+		s.quoteScholar(p, scholarACPQuote{scope: scholarEntryACPScope(e), label: e.Title, locator: e.Key,
+			text: strings.Join([]string{e.Title, e.Author, e.Year, e.DOI, l.detail.Abstract}, "\n")}, false)
+		if p.agent.instruction == "" {
 			p.agent.instruction = s.tr("scholarPaperInstruction")
 		}
 	}

@@ -37,7 +37,6 @@ func (s *Shell) scholarContextActions(c *ui.Context, p *scholarState) {
 			}
 			a.parts[3], a.include[3] = text, true
 			a.attachments = false
-			a.resetSession()
 		}
 	})
 	ui.Text(c, s.tr("scholarContextBounds")).FontSize(11).Wrap()
@@ -90,7 +89,6 @@ func (s *Shell) loadScholarPreamble(p *scholarState) {
 				return
 			}
 			p.agent.parts[1], p.agent.include[1] = text, true
-			p.agent.resetSession()
 		}, ctx.Err()
 	})
 }
@@ -109,7 +107,6 @@ func (s *Shell) loadScholarReferenceContext(p *scholarState) {
 		return func() {
 			if p.library == library {
 				p.agent.parts[2], p.agent.include[2] = text.String(), true
-				p.agent.resetSession()
 			}
 		}, err
 	})

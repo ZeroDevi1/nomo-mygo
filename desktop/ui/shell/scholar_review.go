@@ -173,17 +173,18 @@ func (s *Shell) scholarInlineReview(c *ui.Context, p *scholarState, t *Tab, el u
 	ui.Overlay(c, func() {
 		ck := c.Key(patch)
 		card := ui.Column(ck).Absolute().Left(r.X+4).Top(r.Y+y).Width(width).Height(height).Padding(8).Gap(4).
-			Radius(c.Theme().Radius).Background(c.Theme().Background).Border(1, scholarInk(c, "agent"))
+			Radius(c.Theme().Radius+4).Background(s.ch.content).Border(1, s.ch.separator).
+			Shadow(0, 4, 12, 0, ui.RGBA(0, 0, 0, 0.16))
 		accept, reject, hide := false, false, false
 		card.Children(func() {
 			ui.Row(ck.Key("header")).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
-				ui.Text(ck, s.scholarReviewLabel(patch)).FontSize(11).TextColor(scholarInk(c, "agent")).SingleLine().Grow(1).MinWidth(0)
+				ui.Text(ck, s.scholarReviewLabel(patch)).FontSize(11).TextColor(s.ch.muted).SingleLine().Grow(1).MinWidth(0)
 				if set := p.agent.batch; set != nil && len(set.hunks) > 1 {
 					ui.Text(ck, fmt.Sprintf("%d / %d", set.selected+1, len(set.hunks))).FontSize(11)
-					if s.toolButton(ck.Key("prev"), "chevron-up", s.tr("scholarPreviousChange"), false).Disabled(p.busy).Clicked() {
+					if s.scholarCompactIcon(ck.Key("prev"), "chevron-left", s.tr("scholarPreviousChange"), false).Disabled(p.busy).Clicked() {
 						s.navigateScholarHunk(p, -1)
 					}
-					if s.toolButton(ck.Key("next"), "chevron-down", s.tr("scholarNextChange"), false).Disabled(p.busy).Clicked() {
+					if s.scholarCompactIcon(ck.Key("next"), "chevron-right", s.tr("scholarNextChange"), false).Disabled(p.busy).Clicked() {
 						s.navigateScholarHunk(p, 1)
 					}
 				}
@@ -201,7 +202,7 @@ func (s *Shell) scholarInlineReview(c *ui.Context, p *scholarState, t *Tab, el u
 					if ui.Button(ck.Key("cancel-trial"), s.tr("scholarAgentCancelWork")).Clicked() {
 						p.cancelCurrent()
 					}
-				} else if ui.Button(ck.Key("pdf-diff"), s.tr("scholarPDFDiff")).Disabled(p.busy).Clicked() {
+				} else if s.scholarACPAction(ck.Key("pdf-diff"), "file-diff", s.tr("scholarPDFDiff"), false).Disabled(p.busy).Clicked() {
 					s.trialScholarPatch(p, patch)
 				}
 				showReject := func() {

@@ -88,6 +88,7 @@ func (s *Shell) view(c *ui.Context) {
 			s.scholarCitationPicker(c, p)
 		}
 		s.scholarInlinePrompt(c, p)
+		s.scholarPDFQuotePopup(c, p)
 		s.scholarPalette(c, p)
 	}
 	w, h := c.Size()

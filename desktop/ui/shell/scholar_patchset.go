@@ -3,7 +3,6 @@ package shell
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -50,7 +49,6 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 		if (!exists || !a.multi) && ui.Button(c.Key(t.ID), "+ "+t.Name(s.untitledName)).Disabled(p.busy).Clicked() {
 			if exists {
 				a.multi, a.attachments = true, false
-				a.resetSession()
 				continue
 			}
 			snap := t.Source().Buffer.Snapshot()
@@ -66,7 +64,6 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 			a.files = append(a.files, scholarContextFile{target: scholarTarget{tabID: t.ID, path: t.Path, start: 0, end: snap.Len(), version: snap.Version(), before: text, digest: sha256.Sum256([]byte(text))}})
 			a.multi, a.attachments = true, false
 			p.err = ""
-			a.resetSession()
 		}
 	}
 }
@@ -89,123 +86,8 @@ func (s *Shell) scholarAttachedFiles(c *ui.Context, p *scholarState) {
 		})
 	}
 	if remove >= 0 {
-		a.resetSession()
 		a.files = slices.Delete(a.files, remove, remove+1)
 	}
-}
-
-func (s *Shell) sendScholarPatchSet(p *scholarState) {
-	a := &p.agent
-	files := make(map[string]string)
-	bases := make(map[string]scholarTarget)
-	for _, f := range a.files {
-		if !s.scholarTargetValid(f.target) {
-			p.err = s.tr("scholarStaleBaseline")
-			return
-		}
-		name, err := scholar.Relative(p.project.Root, f.target.path)
-		if err == nil {
-			_, err = p.project.Path(name)
-		}
-		if err != nil {
-			p.err = err.Error()
-			return
-		}
-		files[name], bases[name] = f.target.before, f.target
-	}
-	if len(files) == 0 {
-		p.err = s.tr("scholarChooseFiles")
-		return
-	}
-	contextParts := make(map[string]string)
-	for i, part := range a.parts {
-		if i > 0 && a.include[i] {
-			contextParts[scholarContextNames[i]] = part
-		}
-	}
-	payload, _ := json.Marshal(map[string]any{"instruction": a.instruction, "files": files, "context": contextParts, "previous": a.conversation})
-	model := ""
-	if a.model > 0 && a.model <= len(a.info.Models) {
-		model = a.info.Models[a.model-1].Model
-		if model == "" {
-			model = a.info.Models[a.model-1].ID
-		}
-	}
-	instruction := a.instruction
-	if a.session == nil {
-		a.session = scholar.NewCodexConversation(p.ctx)
-	}
-	session := a.session
-	a.running, a.stream = true, ""
-	s.scholarJob(p, func(ctx context.Context, job uint64) (func(), error) {
-		proposal, err := session.ProposePatch(ctx, model, string(payload), func(delta string) {
-			s.post(func() {
-				if s.scholar == p && p.job == job && a.running {
-					a.stream = delta
-				}
-			})
-		})
-		set := &scholarPatchSet{summary: proposal.Summary}
-		if err == nil {
-			extra := scholarReviewMaxFragments - len(proposal.Edits)
-			grouped := make(map[string][]scholar.PatchEdit)
-			for _, e := range proposal.Edits {
-				if _, ok := bases[e.Path]; !ok {
-					err = fmt.Errorf("proposal references an unattached file %q", e.Path)
-					break
-				}
-				grouped[e.Path] = append(grouped[e.Path], e)
-			}
-			for path, edits := range grouped {
-				if err != nil {
-					break
-				}
-				base := bases[path]
-				spans, e := scholar.LocateEdits(base.before, edits)
-				if e != nil {
-					err = e
-					break
-				}
-				for i, span := range spans {
-					target := base
-					target.start, target.end = span.Start, span.End
-					target.before = strings.Clone(base.before[span.Start:span.End])
-					target.digest = sha256.Sum256([]byte(target.before))
-					target.line = strings.Count(base.before[:span.Start], "\n")
-					nextStart := -1
-					if i+1 < len(spans) {
-						nextStart = spans[i+1].Start
-					}
-					parts := splitScholarReview(target, span.After, extra+1, nextStart)
-					extra -= len(parts) - 1
-					set.hunks = append(set.hunks, parts...)
-				}
-			}
-			sort.Slice(set.hunks, func(i, j int) bool {
-				a, b := set.hunks[i].target, set.hunks[j].target
-				if a.path == b.path {
-					return a.start < b.start
-				}
-				return a.path < b.path
-			})
-		}
-		return func() {
-			a.running, a.stream = false, ""
-			if err != nil {
-				return
-			}
-			for _, base := range bases {
-				if !s.scholarTargetValid(base) {
-					p.err = s.tr("scholarStaleBaseline")
-					return
-				}
-			}
-			a.batch = set
-			// Retain a bounded, visible conversation summary across isolated turns.
-			a.conversation = trimScholarConversation(a.conversation + "\nUser: " + instruction + "\nProposal: " + proposal.Summary)
-			s.presentScholarReview(p)
-		}, err
-	})
 }
 
 func trimScholarConversation(text string) string {
@@ -224,56 +106,64 @@ func (s *Shell) scholarPatchSetView(c *ui.Context, p *scholarState, set *scholar
 		return
 	}
 	set.selected = min(set.selected, len(set.hunks)-1)
-	if set.summary != "" {
-		ui.Text(c, set.summary).Wrap().FontSize(12)
-	}
-	ui.Row(c).Gap(4).Children(func() {
-		if ui.Button(c, "↑").Disabled(p.busy).Clicked() {
-			s.navigateScholarHunk(p, -1)
-		}
-		ui.Text(c, fmt.Sprintf("%d / %d", set.selected+1, len(set.hunks))).FontSize(11)
-		if ui.Button(c, "↓").Disabled(p.busy).Clicked() {
-			s.navigateScholarHunk(p, 1)
-		}
-	})
 	patch := p.agent.pendingPatch()
 	stale := !s.scholarTargetCurrent(patch.target)
-	ui.Text(c, s.scholarReviewLabel(patch)).Wrap().TextColor(scholarInk(c, "agent")).FontSize(11)
-	if stale {
-		ui.Text(c, s.tr("scholarBaselineChanged")).FontSize(11).TextColor(scholarInk(c, "warning"))
-		if ui.Button(c, s.tr("scholarAgentReject")).Disabled(p.busy).Clicked() {
-			s.rejectScholarHunk(p)
-			return
-		}
-	} else if ui.Button(c, s.tr("scholarShowReview")).Clicked() {
-		s.openScholarReview(p)
+	if set.summary != "" {
+		ui.Text(c.Key("summary"), set.summary).Wrap().FontSize(11).TextColor(scholarInk(c, "warning"))
 	}
-	ui.Row(c).Gap(4).Children(func() {
-		if ui.Button(c, s.tr("scholarAcceptFile")).Disabled(p.busy || stale).Clicked() {
-			var chosen []*scholarPatch
-			for _, h := range set.hunks {
-				if h.target.path == patch.target.path {
-					chosen = append(chosen, h)
-				}
+	ui.Row(c.Key("heading")).FillWidth().AlignItems(ui.Center).Gap(3).Children(func() {
+		ui.Text(c.Key("file"), s.scholarReviewLabel(patch)).FontSize(12).SingleLine().MinWidth(0).Grow(1)
+		if len(set.hunks) > 1 {
+			if s.scholarCompactIcon(c.Key("previous"), "chevron-left", s.tr("scholarPreviousChange"), false).Disabled(p.busy).Clicked() {
+				s.navigateScholarHunk(p, -1)
 			}
-			s.acceptScholarHunks(p, chosen)
-		}
-		if ui.Button(c, s.tr("scholarAcceptAll")).Disabled(p.busy).Clicked() {
-			s.acceptScholarHunks(p, append([]*scholarPatch(nil), set.hunks...))
+			ui.Text(c.Key("counter"), fmt.Sprintf("%d / %d", set.selected+1, len(set.hunks))).FontSize(11).TextColor(s.ch.muted)
+			if s.scholarCompactIcon(c.Key("next"), "chevron-right", s.tr("scholarNextChange"), false).Disabled(p.busy).Clicked() {
+				s.navigateScholarHunk(p, 1)
+			}
 		}
 	})
-	if ui.Button(c, s.tr("scholarRejectAll")).Disabled(p.busy).Clicked() {
-		p.agent.batch = nil
-		if p.agent.trial.pending {
-			p.agent.trial.close()
+	if stale {
+		ui.Text(c.Key("stale"), s.tr("scholarBaselineChanged")).FontSize(11).TextColor(scholarInk(c, "warning"))
+	}
+	ui.Row(c.Key("actions")).FillWidth().AlignItems(ui.Center).Gap(4).Children(func() {
+		if stale {
+			if s.scholarACPAction(c.Key("reject"), "undo-2", s.tr("scholarAgentReject"), false).Disabled(p.busy).Clicked() {
+				s.rejectScholarHunk(p)
+			}
+		} else if s.scholarACPAction(c.Key("review"), "file-diff", s.tr("scholarShowReview"), true).Disabled(p.busy).Clicked() {
+			s.openScholarReview(p)
 		}
-	}
-	if ui.Button(c, s.tr("scholarPDFDiffAll")).Disabled(p.busy).Clicked() {
-		s.trialScholarPatchSet(p, set)
-	}
-	if p.agent.trialPreparing && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() {
-		p.cancelCurrent()
-	}
+		if p.agent.trialPreparing {
+			if s.scholarACPAction(c.Key("cancel"), "x", s.tr("scholarAgentCancelWork"), false).Clicked() {
+				p.cancelCurrent()
+			}
+		} else if s.scholarACPAction(c.Key("trial"), "book-open", s.tr("scholarPDFDiffAll"), false).Disabled(p.busy).Clicked() {
+			s.trialScholarPatchSet(p, set)
+		}
+		ui.Spacer(c)
+		s.scholarCompactIcon(c.Key("more"), "ellipsis", s.tr("scholarACPOptions"), false).Disabled(p.busy).Menu(func(m *ui.Menu) {
+			if m.Item(s.tr("scholarAcceptFile")).Disabled(stale).Chosen() {
+				var chosen []*scholarPatch
+				for _, h := range set.hunks {
+					if h.target.path == patch.target.path {
+						chosen = append(chosen, h)
+					}
+				}
+				s.acceptScholarHunks(p, chosen)
+			}
+			if m.Item(s.tr("scholarAcceptAll")).Chosen() {
+				s.acceptScholarHunks(p, append([]*scholarPatch(nil), set.hunks...))
+			}
+			if m.Item(s.tr("scholarRejectAll")).Chosen() {
+				p.agent.conversation = trimScholarConversation(p.agent.conversation + fmt.Sprintf("\nReview: rejected %d proposed changes", len(set.hunks)))
+				p.agent.batch = nil
+				if p.agent.trial.pending {
+					p.agent.trial.close()
+				}
+			}
+		})
+	})
 }
 
 func (s *Shell) rejectScholarHunk(p *scholarState) {
@@ -285,6 +175,7 @@ func (s *Shell) rejectScholarHunk(p *scholarState) {
 	resume, all := p.agent.trial.show && p.agent.trial.pending, p.agent.trial.allPending
 	advance := resume || !p.agent.reviewHidden && s.activeTab() != nil && s.activeTab().ID == set.hunks[i].target.tabID
 	set.hunks = slices.Delete(set.hunks, i, i+1)
+	p.agent.conversation = trimScholarConversation(p.agent.conversation + "\nReview: rejected one proposed change")
 	if p.agent.trial.pending {
 		p.agent.trial.close()
 	}
@@ -378,6 +269,7 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 				}
 			}
 			p.agent.applied = applied
+			p.agent.conversation = trimScholarConversation(p.agent.conversation + fmt.Sprintf("\nReview: accepted %d proposed changes", len(chosen)))
 			resume, all := p.agent.trial.show && p.agent.trial.pending, p.agent.trial.allPending
 			p.agent.trial.close()
 			selected := p.agent.pendingPatch()
@@ -416,7 +308,6 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 			clear(set.hunks[len(remaining):])
 			set.hunks = remaining
 			if len(remaining) == 0 {
-				p.agent.resetSession()
 				p.agent.batch = nil
 				p.agent.files = nil
 				if !p.agent.multi {

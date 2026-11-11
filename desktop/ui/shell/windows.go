@@ -21,6 +21,7 @@ var registry struct {
 	prefs                 map[*config.Manager]*Prefs // 同一配置的窗口共享一份偏好
 	trayInstalled, trayOK bool
 	quitHooked            bool
+	acp                   scholarACPConnectionState
 }
 
 // quitAll 依次退出全部窗口（托盘“退出”）：每个窗口先确认未保存的修改。
@@ -70,6 +71,12 @@ func register(s *Shell) {
 
 func unregister(s *Shell) {
 	registry.shells = slices.DeleteFunc(registry.shells, func(x *Shell) bool { return x == s })
+	if len(registry.shells) == 0 {
+		if registry.acp.cancel != nil {
+			registry.acp.cancel()
+		}
+		registry.acp = scholarACPConnectionState{}
+	}
 	if registry.focused == s {
 		registry.focused = nil
 		if n := len(registry.shells); n > 0 {

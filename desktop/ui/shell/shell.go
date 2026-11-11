@@ -332,6 +332,7 @@ func (s *Shell) Open() *mygo.Window {
 		}
 	})
 	if first {
+		startScholarACP()
 		applyAppLocale(s.prefs.InterfaceLanguage)
 		s.installMenu()
 		s.startUpdateTasks()

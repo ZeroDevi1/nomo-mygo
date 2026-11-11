@@ -306,7 +306,8 @@ func (p *scholarState) cancelCurrent() {
 	}
 	p.job++
 	p.busy = false
-	p.agent.trialPreparing = false
+	p.agent.trialPreparing, p.agent.running = false, false
+	p.agent.acp.forms = nil
 	p.cancelJob = nil
 }
 
@@ -768,7 +769,6 @@ func (s *Shell) scholarMainMenu(m *ui.Menu, p *scholarState) {
 		p.diagnostics = scholarCompileReport{}
 		tab.typesetPaused = false
 		p.libraryReady = false
-		p.agent.resetSession()
 		p.agent.trial.close()
 		p.agent = scholarAgentState{}
 		s.storeScholarProject(p)
@@ -799,6 +799,10 @@ func (s *Shell) scholarInspectorVisible(p *scholarState, width float32) bool {
 
 func (s *Shell) showScholarInspector(p *scholarState, drawer int) {
 	p.dismissWindowsPage()
+	if drawer != scholarCodex {
+		p.agent.acp.previewQuote, p.agent.acp.previewImage = 0, nil
+		p.agent.acp.modelDetails = false
+	}
 	if p.drawer == scholarClosed || p.compactNav {
 		p.drawerNav = p.compactNav
 	}
@@ -809,6 +813,8 @@ func (s *Shell) showScholarInspector(p *scholarState, drawer int) {
 }
 
 func (s *Shell) closeScholarInspector(p *scholarState) {
+	p.agent.acp.previewQuote, p.agent.acp.previewImage = 0, nil
+	p.agent.acp.modelDetails = false
 	if p.drawer != scholarClosed {
 		s.persistScholarDrawer(p)
 		p.drawer = scholarClosed
@@ -901,18 +907,16 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 		s.scholarReaderPane(c, p, width, singlePane)
 		return
 	}
+	if p.drawer == scholarCodex {
+		ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.sidebar).Children(func() {
+			s.scholarAgentView(c.Key("codex"), p, singlePane)
+		})
+		return
+	}
 	ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.content).Children(func() {
 		ui.Row(c).Height(s.pf.scholarNavHeight()).FillWidth().Padding(0, 8).Gap(4).AlignItems(ui.Center).Children(func() {
-			label := [...]string{"", "scholarLiterature", "scholarWritingAssistant", "scholarDiagnostics"}[p.drawer]
-			ui.Text(c, s.tr(label)).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
-			label = s.tr("scholarCloseDrawer")
-			if singlePane && p.drawer == scholarCodex {
-				label = s.tr("scholarReturnManuscript")
-				if ui.Button(c, label).Clicked() {
-					s.closeScholarInspector(p)
-				}
-				return
-			}
+			ui.Text(c, s.tr("scholarDiagnostics")).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
+			label := s.tr("scholarCloseDrawer")
 			if s.toolButton(c, "x", label, false).Label(label).FocusRing(true).Clicked() {
 				s.closeScholarInspector(p)
 			}
@@ -920,12 +924,7 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
 		ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
 			ui.Column(c).FillWidth().Padding(8).Gap(6).Children(func() {
-				switch p.drawer {
-				case scholarCodex:
-					s.scholarAgentView(c, p)
-				case scholarDiagnostics:
-					s.scholarDiagnosticsView(c, p)
-				}
+				s.scholarDiagnosticsView(c, p)
 			})
 		})
 	})

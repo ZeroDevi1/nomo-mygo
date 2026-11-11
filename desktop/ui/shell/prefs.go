@@ -68,8 +68,9 @@ type Prefs struct {
 	PDFPageNumbers   string  `json:"pdfPageNumbers"`
 	PDFBreakBeforeH1 bool    `json:"pdfBreakBeforeH1"`
 
-	ScholarProjects     map[string]scholarProjectPrefs `json:"scholarProjects"`
-	ZoteroDataDirectory string                         `json:"zoteroDataDirectory"`
+	ScholarProjects          map[string]scholarProjectPrefs `json:"scholarProjects"`
+	ScholarACPContextWindows map[string]int                 `json:"scholarACPContextWindows,omitempty"`
+	ZoteroDataDirectory      string                         `json:"zoteroDataDirectory"`
 
 	ColorThemeID          string            `json:"colorThemeId"`
 	UIFontFamily          string            `json:"uiFontFamily"`
@@ -84,6 +85,7 @@ type Prefs struct {
 }
 
 type scholarProjectPrefs struct {
+	ACPThreads   []scholarACPThread           `json:"acpThreads,omitempty"`
 	Sources      map[string]scholarSourceLink `json:"sources,omitempty"`
 	MainSelected bool                         `json:"mainSelected,omitempty"`
 	Main         string                       `json:"main,omitempty"`
@@ -133,7 +135,7 @@ func defaultPrefs() Prefs {
 
 // prefKeys 列出每个字段的设置键与读写入口（逐键存储，未写过的键保持默认值）。
 func (p *Prefs) fields() map[string]any {
-	return map[string]any{"scholarProjects": &p.ScholarProjects, "zoteroDataDirectory": &p.ZoteroDataDirectory, "disabledProviders": &p.DisabledProviders, "providerSyntax": &p.ProviderSyntax, "providerPreview": &p.ProviderPreview,
+	return map[string]any{"scholarProjects": &p.ScholarProjects, "scholarACPContextWindows": &p.ScholarACPContextWindows, "zoteroDataDirectory": &p.ZoteroDataDirectory, "disabledProviders": &p.DisabledProviders, "providerSyntax": &p.ProviderSyntax, "providerPreview": &p.ProviderPreview,
 		"themeMode": &p.ThemeMode, "interfaceLanguage": &p.InterfaceLanguage, "editorMode": &p.EditorMode,
 		"splitViewLayout": &p.SplitViewLayout, "splitLeftPercent": &p.SplitLeftPercent,
 		"autoSaveEnabled": &p.AutoSaveEnabled, "autoSaveDelayMs": &p.AutoSaveDelayMs,

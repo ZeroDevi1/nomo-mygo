@@ -367,7 +367,12 @@ func (s *Shell) sourceEditor(c *ui.Context, t *Tab) ui.Element {
 	if t.afterSourceInput != nil {
 		t.afterSourceInput()
 	}
-	return editor.View(c, st).FillHeight().WidthPercent(float32(s.documentWidth(t)))
+	el := editor.View(c, st).FillHeight().WidthPercent(float32(s.documentWidth(t)))
+	if p := s.scholarForTab(t); p != nil && t == s.activeTab() {
+		s.scholarSourceQuoteGesture(c, p, el)
+		s.anchorScholarInline(p, st, el.Bounds())
+	}
+	return el
 }
 
 func (s *Shell) openTypeset(t *Tab, live bool) {

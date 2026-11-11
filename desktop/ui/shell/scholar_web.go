@@ -19,12 +19,12 @@ var scholarWebDarkScript string
 // Only visible tabs own a WebView. The bounded, memory-only session snapshot
 // restores history/scroll position on backends that provide it.
 type scholarWebTab struct {
-	source, url string
-	view        *mygo.WebView
-	state       []byte
-	off         []func()
-	loading     bool
-	err         string
+	source, url   string
+	view          *mygo.WebView
+	state         []byte
+	off           []func()
+	loading       bool
+	err, quoteErr string
 }
 
 func scholarWebURL(raw string) string {
@@ -105,7 +105,8 @@ func (s *Shell) openScholarWeb(p *scholarState, e scholar.Entry, address string)
 	}
 }
 
-func (s *Shell) loadScholarWeb(w *scholarWebTab) {
+func (s *Shell) loadScholarWeb(p *scholarState, t *scholarReferenceTab) {
+	w := t.web
 	if s.win == nil || w.view != nil || w.err != "" {
 		return
 	}
@@ -121,13 +122,18 @@ func (s *Shell) loadScholarWeb(w *scholarWebTab) {
 	w.view, w.loading = v, len(state) == 0
 	page := v.Page()
 	w.off = []func(){
+		page.OnContextMenu(func(event *mygo.ContextMenuEvent) {
+			if w.view == v && !event.Editable {
+				s.scholarWebNativeQuoteMenu(p, t, event)
+			}
+		}),
 		page.OnWillNavigate(func(e *mygo.NavigateEvent) {
 			if scholarWebURL(e.URL) == "" {
 				e.PreventDefault()
 				return
 			}
 			if w.view == v {
-				w.loading, w.err = true, ""
+				w.loading, w.err, w.quoteErr = true, "", ""
 				s.win.Invalidate()
 			}
 		}),
@@ -165,9 +171,9 @@ func (s *Shell) loadScholarWeb(w *scholarWebTab) {
 	}
 }
 
-func (s *Shell) scholarWebPage(c *ui.Context, t *scholarReferenceTab) {
+func (s *Shell) scholarWebPage(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
 	w := t.web
-	s.loadScholarWeb(w)
+	s.loadScholarWeb(p, t)
 	ui.Column(c).Grow(1).Fill().MinWidth(0).MinHeight(0).Clip().Children(func() {
 		ui.Row(c.Key("web-controls")).FillWidth().Height(36).Shrink(0).Padding(0, scholarReaderInset).Gap(4).
 			AlignItems(ui.Center).Background(s.ch.content).Children(func() {
@@ -190,11 +196,18 @@ func (s *Shell) scholarWebPage(c *ui.Context, t *scholarReferenceTab) {
 				label = s.tr("scholarWebLoading") + " · " + label
 			}
 			ui.Text(c, label).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(s.ch.muted).Tooltip(w.url)
+			label = s.tr("scholarACPQuote")
+			s.scholarCompactIcon(c.Key("quote"), "quote", label, false).Disabled(page == nil || w.loading || p.busy).Menu(func(m *ui.Menu) {
+				s.scholarWebQuoteMenu(m, p, t)
+			})
 			if s.scholarCompactIcon(c.Key("browser"), "external-link", s.tr("scholarOpenBrowser"), false).Clicked() {
 				c.Services().OpenURL(w.url)
 			}
 		})
 		s.scholarReaderDivider(c)
+		if w.quoteErr != "" {
+			ui.Text(c.Key("quote-error"), w.quoteErr).Wrap().Padding(3, scholarReaderInset).FontSize(11).TextColor(scholarInk(c, "warning"))
+		}
 		if w.err != "" {
 			s.scholarReferenceError(c, w.err, func() {
 				if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("refresh"), false).Clicked() {
