@@ -205,6 +205,8 @@ type Editor struct {
 	edgeHover bool
 	// OnImageOpen 在双击图片时调用（外壳打开预览），src 为图片原文中的地址；为空时双击图片按普通双击处理。
 	OnImageOpen func(src string)
+	// OnManuscriptObject opens the inspector for a clicked rendered figure or table.
+	OnManuscriptObject func(at int) bool
 
 	// highlights 是查找结果（字节区间，升序），current 为当前项下标，-1 表示无；
 	// 由外壳的查找栏设置，编辑后由外壳重新查找。
@@ -213,10 +215,11 @@ type Editor struct {
 
 	pal palette
 	// syntax 为代码块的语法配色（随明暗主题切换），tokBuf 为切分代码行的复用缓冲。
-	syntax *editor.Theme
-	tokBuf []editor.Token
-	dark   bool
-	themed bool
+	syntax         *editor.Theme
+	tokBuf         []editor.Token
+	manuscriptLang *editor.Language
+	dark           bool
+	themed         bool
 	// colors 为外壳提供的主题配色（nil 用默认），classic 为经典块样式（引用与提示块为
 	// 左边框加底色，对应原版 documentStyleId = nomo-classic）。
 	colors  *Colors
@@ -290,8 +293,15 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	if e.edgeHover || e.resize != nil {
 		cursor = ui.CursorResizeEW
 	}
+	label := "Markdown"
+	if e.Doc.manuscript != nil {
+		label = "Typst"
+		if e.Doc.manuscript.latex {
+			label = "LaTeX"
+		}
+	}
 	box := ui.Box(c).Fill().Clip().Background(e.pal.background).
-		Role(ui.RoleTextField).Label("Markdown").Cursor(cursor).
+		Role(ui.RoleTextField).Label(label).Cursor(cursor).
 		HandleTextInput(e).HandleInput(e.input).Draw(e.draw)
 	e.focused = box.Focused()
 	return box
@@ -369,10 +379,15 @@ func (e *Editor) setTheme(t *ui.Theme) {
 	}
 	e.themed, e.dark = true, t.Dark
 	e.pal = paletteFor(t)
-	e.syntax = editor.DefaultTheme(t)
 	if c := e.colors; c != nil {
 		e.pal.apply(c)
 	}
+	codeTheme := *t
+	if e.Doc.manuscript != nil {
+		bg := e.pal.background
+		codeTheme.Dark = 299*int(bg.R)+587*int(bg.G)+114*int(bg.B) < 128000
+	}
+	e.syntax = editor.DefaultTheme(&codeTheme)
 	// 颜色写入了布局的 Span，换主题时旧布局作废。
 	e.layoutGen++
 	e.dirty = true
@@ -401,7 +416,7 @@ func textWidth(s string, fs float32) float32 {
 
 // estimate 估算未展开块的高度，只用于屏幕外的块，进入可见区后由实测高度替换。
 func (e *Editor) estimate(b Block) entry {
-	s := e.Doc.Source()[b.Start:b.End]
+	s := e.Doc.slice(b.Start, b.End)
 	lines := 1
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\n' {
@@ -469,7 +484,13 @@ func (e *Editor) applyEdit(ed Edit) {
 func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 	en := &e.entries[i]
 	top := e.Doc.blocks[i]
-	rows, frames := buildRows(e.Doc, i, top, e.seed, e.canRender())
+	var rows []row
+	var frames []frame
+	if e.Doc.manuscript != nil {
+		rows = manuscriptRows(e.Doc, top, e.seed)
+	} else {
+		rows, frames = buildRows(e.Doc, i, top, e.seed, e.canRender())
+	}
 	e.applyLineNumbers(rows, frames)
 	// 折叠块正文按层级缩进（行哈希按缩进前计算，行内容相同的布局仍可继承）。
 	inset, rinset := e.detailsInset(i)
@@ -490,7 +511,9 @@ func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 		}
 	}
 	en.inset, en.rinset, en.scale = inset, rinset, e.scale
-	en.pspan = e.Doc.md.next(top.Index) - top.Index
+	if e.Doc.manuscript == nil {
+		en.pspan = e.Doc.md.next(top.Index) - top.Index
+	}
 	if top.Kind == parser.CodeBlock {
 		en.lines = strings.Count(e.Doc.Source()[top.Start:top.End], "\n")
 	}
@@ -500,13 +523,15 @@ func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 			frames[k].scrollX = oldFrames[k].scrollX
 		}
 	}
-	e.layoutTables(e.Doc.Source(), top.Start, rows, frames, e.width()-rinset)
+	if len(frames) != 0 {
+		e.layoutTables(e.Doc.Source(), top.Start, rows, frames, e.width()-rinset)
+	}
 	en.tablesW = e.width()
 	for k := range rows {
 		r := &rows[k]
 		_, w := e.rowBox(r)
 		f := e.rowFont(r)
-		lines := 1 + int(textWidth(e.Doc.Source()[top.Start+r.a:top.Start+r.b], f.Size)/w)
+		lines := 1 + int(textWidth(e.Doc.slice(top.Start+r.a, top.Start+r.b), f.Size)/w)
 		r.height = r.padTop + r.padBottom + float32(lines)*max(f.Size*1.4, e.rowLead(r, f))
 	}
 	if reuse != nil {
@@ -583,7 +608,8 @@ func (e *Editor) rowBox(r *row) (x, w float32) {
 // expansionFor 返回行的展开状态：光标位于行内时就地展开光标处的标记。
 func (e *Editor) expansionFor(top Block, r *row) expansion {
 	h := e.Doc.Sel.Head - top.Start
-	if h >= r.a && h <= r.b {
+	if h >= r.a && h <= r.b || e.Doc.manuscript != nil && e.Doc.hasMarked &&
+		e.Doc.marked.Anchor <= top.Start+r.b && e.Doc.marked.Head >= top.Start+r.a {
 		return expansion{inBlock: true, caret: h - r.a}
 	}
 	return expansion{}
@@ -629,7 +655,9 @@ func (e *Editor) ensure(i int) *entry {
 		e.split(i, en.rows, en.frames)
 	} else if en.tablesW != e.width() {
 		// 内容区宽度变化：重算表格列宽（单元格行宽变化后，其布局在 ensureRow 中按 shapeW 作废）。
-		e.layoutTables(e.Doc.Source(), e.Doc.blocks[i].Start, en.rows, en.frames, e.width()-en.rinset)
+		if len(en.frames) != 0 {
+			e.layoutTables(e.Doc.Source(), e.Doc.blocks[i].Start, en.rows, en.frames, e.width()-en.rinset)
+		}
 		en.tablesW = e.width()
 	}
 	if en.ydirty {
@@ -659,6 +687,9 @@ func (e *Editor) ensureRow(i, k int) bool {
 		ex.inBlock = ex.inBlock && ex.caret > 0 && ex.caret < r.b-r.a
 	}
 	sig := e.signature(top, r, ex)
+	if m := e.Doc.manuscript; m != nil && (top.Kind == parser.MathBlock || top.Kind == manuscriptStyled) {
+		sig |= m.styleVersion << 2
+	}
 	folded := e.calloutRowHidden(i, en, k)
 	if folded != r.folded {
 		r.folded, en.ydirty = folded, true
@@ -685,11 +716,19 @@ func (e *Editor) ensureRow(i, k int) bool {
 			return false
 		}
 		r.imgGen = e.imageGen()
-		if sizes = e.objSizes(p, w); slices.Equal(sizes, r.objSizes) {
+		for _, o := range p.objs {
+			if o.manuscript != nil && e.imageEntry(o).state == imageFailed {
+				p = e.projectManuscript(top, r, ex)
+				break
+			}
+		}
+		if sizes = e.objSizes(p, w); p == r.proj && slices.Equal(sizes, r.objSizes) {
 			return false
 		}
 	} else {
-		if r.kind == rowText {
+		if e.Doc.manuscript != nil {
+			p = e.projectManuscript(top, r, ex)
+		} else if r.kind == rowText {
 			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode, noRender: !e.canRender()})
 		} else if r.htmlImg && !ex.inBlock {
 			p = projectHTMLImages(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
@@ -706,18 +745,30 @@ func (e *Editor) ensureRow(i, k int) bool {
 	}
 	font := e.rowFont(r)
 	var spans []ui.Span
-	if fr != nil && p.text != "" {
+	manuscriptSource := p.manuscriptSource && e.manuscriptLang != nil
+	if manuscriptSource {
+		var state uint64
+		if !e.Doc.manuscript.latex && top.Index > 0 {
+			state = uint64(top.Index % typstCodeState)
+		}
+		spans = e.manuscriptCodeSpans(nil, ui.Span{Text: p.text, Color: e.pal.text}, state)
+	} else if fr != nil && p.text != "" {
 		e.tokBuf, _ = fr.tok.Tokenize(p.text, hlIn, e.tokBuf[:0])
 		spans = e.codeSpans(p.text, e.tokBuf)
 	} else {
 		spans = e.spans(p, sizes)
 	}
 	var l *lineLayout
-	if fr == nil {
+	if fr == nil && !manuscriptSource {
 		l = e.typeset(top, r, p, spans, font, w, e.rowLead(r, font))
 	}
 	if l == nil {
-		l = newLineLayout(ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: r.align}), e.rowLead(r, font))
+		align := r.align
+		if e.Doc.manuscript != nil && (top.Kind == parser.MathBlock || top.Kind == manuscriptStyled) && len(p.objs) > 0 {
+			align = ui.Center
+		}
+		justify := r.role == roleBody && e.Doc.manuscript != nil && e.Doc.manuscript.paragraphAlignment == "justify"
+		l = newLineLayout(ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: w, Align: align, Justify: justify}), e.rowLead(r, font))
 	}
 	r.objSizes, r.objRects, r.shapeW = sizes, objRects(l, p), w
 	_, lh := l.Size()
@@ -732,6 +783,9 @@ func (e *Editor) ensureRow(i, k int) bool {
 	e.cacheBytes -= r.bytes
 	r.proj, r.layout, r.gen, r.sig, r.height, r.measured = p, l, e.layoutGen, sig, h, true
 	r.bytes = 512 + len(p.text) + 96*p.u16 + 48*max(len(p.runs), len(spans)) + 64*len(p.objs)
+	for _, format := range p.manuscriptStyles {
+		r.bytes += 64 + len(format.font)
+	}
 	for _, o := range p.objs {
 		r.bytes += len(o.src) + len(o.alt)
 		if o.html != nil && o.html.lay != nil {
@@ -790,10 +844,37 @@ func (e *Editor) spans(p *projection, sizes [][2]float32) []ui.Span {
 			sp.Color = e.pal.link
 		case r.st&stImage != 0:
 			sp.Color = e.pal.muted
-		case r.st&stColorMask != 0 && int(r.st>>stColorShift) <= len(p.colors):
-			sp.Color = p.colors[r.st>>stColorShift-1]
+		case r.st&stColorMask != 0 && int((r.st&stColorMask)>>stColorShift) <= len(p.colors):
+			sp.Color = p.colors[(r.st&stColorMask)>>stColorShift-1]
 		}
-		spans = append(spans, sp)
+		if i := int(r.st >> manuscriptSpanShift); i > 0 && i <= len(p.manuscriptStyles) {
+			f := p.manuscriptStyles[i-1]
+			if f.font != "" {
+				sp.Font = f.font
+			}
+			if f.size > 0 && e.Doc.manuscript != nil {
+				sp.Size = f.size * e.Doc.manuscript.pointScale
+				if r.st&stSmall != 0 {
+					sp.Size *= .75
+				}
+			}
+			if f.color != (ui.Color{}) {
+				sp.Color = f.color
+			}
+			if f.fill != (ui.Color{}) {
+				sp.Background, sp.Radius = f.fill, 2
+			}
+		}
+		if r.st&stRaise != 0 {
+			sp.BaselineShift = sp.Size * .35
+		} else if r.st&stLower != 0 {
+			sp.BaselineShift = -sp.Size * .2
+		}
+		if e.manuscriptLang != nil && r.st&stRaw != 0 && !r.atomic {
+			spans = e.manuscriptCodeSpans(spans, sp, 0)
+		} else {
+			spans = append(spans, sp)
+		}
 	}
 	return spans
 }

@@ -621,7 +621,7 @@ func (e *Editor) rowLead(r *row, f ui.Font) float32 {
 	switch {
 	case r.role == roleHeading:
 		return f.Size * 1.2
-	case (r.role == roleBody || r.role == roleCellHead) && (r.kind == rowText || r.empty):
+	case (r.role == roleBody || r.role == roleCellHead) && (r.kind == rowText || r.empty || e.Doc.manuscript != nil):
 		return f.Size * e.lineMul
 	}
 	return 0

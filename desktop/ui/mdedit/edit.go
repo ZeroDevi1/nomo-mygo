@@ -8,12 +8,15 @@ type Edit struct {
 
 // Replace 把 [from, to) 替换为 text，光标置于插入内容之后，并记入撤销历史。
 func (d *Document) Replace(from, to int, text string, kind editKind) Edit {
-	src := d.Source()
-	from, to = clamp(from, 0, len(src)), clamp(to, 0, len(src))
+	from, to = clamp(from, 0, d.len()), clamp(to, 0, d.len())
 	if from > to {
 		from, to = to, from
 	}
-	old := src[from:to]
+	if d.manuscript != nil {
+		d.finishManuscriptComposition()
+		return d.editManuscript(from, to, text)
+	}
+	old := d.slice(from, to)
 	if old == text {
 		return Edit{}
 	}
@@ -31,7 +34,7 @@ func (d *Document) Replace(from, to int, text string, kind editKind) Edit {
 
 // SetSelection 移动选区并结束可合并的撤销步。
 func (d *Document) SetSelection(s Selection) {
-	n := len(d.Source())
+	n := d.len()
 	s.Anchor, s.Head = clamp(s.Anchor, 0, n), clamp(s.Head, 0, n)
 	if s != d.Sel {
 		d.hist.seal()
@@ -42,6 +45,9 @@ func (d *Document) SetSelection(s Selection) {
 // SetMarked 用 text 替换 [from, to) 并把它标记为组字区间；selected 为组字内的
 // 字节区间。组字期间的替换合并为一步撤销，提交后与被替换内容一起撤销。
 func (d *Document) SetMarked(from, to int, text string, selA, selB int) Edit {
+	if d.manuscript != nil {
+		return d.markManuscript(from, to, text, selA, selB)
+	}
 	if !d.hasMarked {
 		d.hist.seal()
 	}
@@ -61,6 +67,14 @@ func (d *Document) SetMarked(from, to int, text string, selA, selB int) Edit {
 
 // CommitMarked 用 text 替换组字区间（或 [from, to)）并结束组字。
 func (d *Document) CommitMarked(from, to int, text string) Edit {
+	if d.manuscript != nil {
+		if d.manuscript.draft == nil {
+			return d.editManuscript(from, to, text)
+		}
+		ed := d.markManuscript(from, to, text, len(text), len(text))
+		d.finishManuscriptComposition()
+		return ed
+	}
 	kind := editTyping
 	if d.hasMarked {
 		kind = editCompose
@@ -75,6 +89,10 @@ func (d *Document) CommitMarked(from, to int, text string) Edit {
 
 // Unmark 结束组字，保留已写入的文本。
 func (d *Document) Unmark() {
+	if d.manuscript != nil {
+		d.finishManuscriptComposition()
+		return
+	}
 	if d.hasMarked {
 		d.hist.seal()
 	}

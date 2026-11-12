@@ -23,6 +23,7 @@ import (
 
 	"nomo/desktop/internal/applog"
 	"nomo/desktop/internal/docfs"
+	"nomo/desktop/typeset"
 	"nomo/desktop/ui/icons"
 	"nomo/desktop/ui/kpexport"
 	"nomo/desktop/ui/mdedit"
@@ -450,11 +451,22 @@ func (s *Shell) exportHTML() {
 func (s *Shell) exportPDF() {
 	tab := s.activeTab()
 	if tab != nil && tab.Kind() != kindMarkdown {
+		s.commitManuscript(tab)
 		pr := s.previewProvider(tab)
 		if pr == nil || pr.ExportPDF == nil {
 			return
 		}
 		s.exportTo(tab, "pdf", "PDF", "exportPdfSuccess", func(path string) func() (string, error) {
+			s.commitManuscript(tab)
+			if project := s.typesetProject(tab); project.Root != "" && isManuscript(&Tab{Path: project.Main}) {
+				input := s.projectPreviewRevision(&compilePane{project: project})
+				return func() (string, error) {
+					if input.err != nil {
+						return "", input.err
+					}
+					return "", typeset.ExportProjectPDF(context.Background(), project.Root, project.Main, input.readers(), path)
+				}
+			}
 			snap := tab.Source().Buffer.Snapshot()
 			src := tab.Path
 			return func() (string, error) {

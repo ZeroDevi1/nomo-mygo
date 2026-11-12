@@ -3,7 +3,12 @@ package mdedit
 import (
 	"hash/maphash"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
+	"nomo/desktop/providers/typesetting"
 )
 
 func TestCodeHighlightCarriesStateAcrossLines(t *testing.T) {
@@ -55,6 +60,57 @@ func TestCodeSpansMergeAndColor(t *testing.T) {
 	}
 	if codeTokenizer("no-such-lang") != nil || codeTokenizer("") != nil {
 		t.Fatal("未知语言不应高亮")
+	}
+}
+
+func TestManuscriptHighlightPreservesSourceAndProjection(t *testing.T) {
+	const source = `\noindent\textbf{关键词}\quad 正文 \custom{中文}`
+	e := NewManuscriptEditor(editor.NewBuffer(source), true)
+	defer e.CloseManuscript()
+	e.SetManuscriptLanguage(typesetting.LaTeX.Language)
+	e.setTheme(&ui.Theme{})
+	b := e.Doc.blocks[0]
+	r := row{b: b.End - b.Start}
+	tokenColor := e.syntax.Tokens[editor.TokenFunction].Color
+	raw := e.projectManuscript(b, &r, expansion{inBlock: true})
+	if !raw.manuscriptSource || raw.text != source {
+		t.Fatalf("expanded row changed source: %q", raw.text)
+	}
+	highlighted := e.manuscriptCodeSpans(nil, ui.Span{Text: raw.text}, 0)
+	if len(highlighted) == 0 || highlighted[0].Color != tokenColor ||
+		!strings.Contains(highlighted[0].Text, `\textbf`) {
+		t.Fatalf("expanded commands lack syntax color: %+v", highlighted)
+	}
+	reading := e.projectManuscript(b, &r, expansion{})
+	if reading.text != "关键词\u2003正文 "+`\custom{中文}` || reading.manuscriptSource {
+		t.Fatalf("unexpected reading projection: %q", reading.text)
+	}
+	var display strings.Builder
+	var command string
+	for _, span := range e.spans(reading, nil) {
+		display.WriteString(span.Text)
+		if span.Color == tokenColor {
+			command += span.Text
+		}
+	}
+	if display.String() != reading.text || command != `\custom` {
+		t.Fatalf("reading projection colored %q in %q", command, display.String())
+	}
+
+	e.SetManuscriptLanguage(typesetting.Typst.Language)
+	const code = "/* first line\ncontinuation */\n#math.equation(block: true)"
+	var rebuilt strings.Builder
+	for _, span := range e.manuscriptCodeSpans(nil, ui.Span{Text: code}, 0) {
+		rebuilt.WriteString(span.Text)
+		if span.Text == "continuation */" && span.Color != e.syntax.Tokens[editor.TokenComment].Color {
+			t.Fatal("Typst comment state did not carry to the next line")
+		}
+		if span.Text == "#math.equation" && span.Color != tokenColor {
+			t.Fatal("qualified Typst command lost its syntax color")
+		}
+	}
+	if rebuilt.String() != code {
+		t.Fatalf("highlight spans changed source: %q", rebuilt.String())
 	}
 }
 

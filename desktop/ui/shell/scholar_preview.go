@@ -138,6 +138,7 @@ func (s *Shell) queuePreview(p *compilePane, revision previewRevision) {
 	default:
 	}
 	p.cancelBuild()
+	revision.semantic = p.semantic
 	revision.ctx, p.cancelBuild = context.WithCancel(p.lifetime)
 	p.version, p.projectInput, p.sourceVersion = revision.version, revision.project, revision.snap.Version()
 	p.busy = true
@@ -173,7 +174,7 @@ func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
 		s.scholarReviewPatch(workspace, tab) != nil))
 	if !covered ||
 		workspace.agent.trial.show ||
-		p.tab != tab || tab.typesetMode == typesetSource || tab.typesetPaused || p.reuseChecks == nil ||
+		p.tab != tab || tab.typesetMode == typesetSource || tab.typesetMode == typesetSemantic || tab.typesetPaused || p.reuseChecks == nil ||
 		p.project != s.typesetProject(tab) || s.previewProvider(&Tab{Path: p.path}) != p.provider ||
 		p.busy || p.stopped || p.err != "" || p.image == nil || p.fullVersion != p.version || !s.previewBuffersCurrent(p) {
 		s.closeCompile()

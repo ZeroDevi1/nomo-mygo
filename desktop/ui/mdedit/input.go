@@ -20,7 +20,7 @@ func (e *Editor) TextForRange(r ui.TextInputRange) (string, ui.TextInputRange) {
 	if z < a {
 		a, z = z, a
 	}
-	return e.Doc.Source()[a:z], ui.TextInputRange{Start: e.Doc.ByteToU16(a), End: e.Doc.ByteToU16(z)}
+	return e.Doc.slice(a, z), ui.TextInputRange{Start: e.Doc.ByteToU16(a), End: e.Doc.ByteToU16(z)}
 }
 
 func (e *Editor) Selection() ui.TextInputSelection {
@@ -49,17 +49,20 @@ func (e *Editor) target(r *ui.TextInputRange) (int, int) {
 }
 
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
+	e.SyncManuscript()
 	a, z := e.target(r)
 	e.applyEdit(e.Doc.CommitMarked(a, z, text))
 }
 
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
+	e.SyncManuscript()
 	a, z := e.target(r)
 	e.applyEdit(e.Doc.SetMarked(a, z, text, u16ToByte(text, selected.Start), u16ToByte(text, selected.End)))
 	e.dirty = true
 }
 
 func (e *Editor) UnmarkText() {
+	e.SyncManuscript()
 	e.Doc.Unmark()
 	e.dirty = true
 }
@@ -120,14 +123,18 @@ func (e *Editor) entryPos(s seg, atEnd bool) int {
 
 // moveH 返回水平移动一个字素（word 为词、line 为视觉行边界）后的位置。
 func (e *Editor) moveH(pos, dir int, word, line bool) int {
-	src := e.Doc.Source()
 	if line {
 		return e.lineEdge(pos, dir)
 	}
-	if word {
-		return wordEdge(src, pos, dir)
+	if word && e.Doc.manuscript == nil {
+		return wordEdge(e.Doc.Source(), pos, dir)
 	}
 	s, ok := e.segAt(pos)
+	if word && ok {
+		if to := wordEdge(e.Doc.slice(s.base, s.end), pos-s.base, dir) + s.base; to != pos {
+			return to
+		}
+	}
 	if !ok {
 		_, after := e.Doc.BlockAt(pos)
 		if dir < 0 {
@@ -139,7 +146,7 @@ func (e *Editor) moveH(pos, dir int, word, line bool) int {
 		if n := e.visibleNeighbor(after, 1); n >= 0 {
 			return e.entryPos(e.firstSeg(n), false)
 		}
-		return len(src)
+		return e.Doc.len()
 	}
 	d := s.toDisp(pos)
 	if (dir < 0 && d == 0) || (dir > 0 && d >= s.dispLen()) {
@@ -185,7 +192,7 @@ func (e *Editor) moveV(pos, dir int) int {
 			if dir < 0 {
 				return 0
 			}
-			return len(e.Doc.Source())
+			return e.Doc.len()
 		}
 	} else {
 		// 间隙光标：上移到前一块末行，下移到后一块首行。
@@ -201,7 +208,7 @@ func (e *Editor) moveV(pos, dir int) int {
 			if dir < 0 {
 				return 0
 			}
-			return len(e.Doc.Source())
+			return e.Doc.len()
 		}
 		if dir < 0 {
 			target = e.lastSeg(t)
@@ -317,10 +324,10 @@ func (e *Editor) deleteDir(dir int, word, line bool) {
 		return
 	}
 	pos := e.Doc.Sel.Head
-	if dir < 0 && !word && !line && e.liftRow(pos) {
+	if e.Doc.manuscript == nil && dir < 0 && !word && !line && e.liftRow(pos) {
 		return
 	}
-	src := e.Doc.Source()
+	size := e.Doc.len()
 	bi, after := e.Doc.BlockAt(pos)
 	var a, z int
 	switch {
@@ -330,7 +337,7 @@ func (e *Editor) deleteDir(dir int, word, line bool) {
 			a = e.Doc.blocks[after].End
 		}
 	case bi < 0:
-		a, z = pos, len(src)
+		a, z = pos, size
 		if after+1 < len(e.Doc.blocks) {
 			z = e.Doc.blocks[after+1].Start
 		}
@@ -340,7 +347,7 @@ func (e *Editor) deleteDir(dir int, word, line bool) {
 			a = e.Doc.blocks[bi-1].End
 		}
 	case dir > 0 && pos == e.Doc.blocks[bi].End:
-		a, z = pos, len(src)
+		a, z = pos, size
 		if bi+1 < len(e.Doc.blocks) {
 			z = e.Doc.blocks[bi+1].Start
 		}
@@ -357,6 +364,10 @@ func (e *Editor) deleteDir(dir int, word, line bool) {
 // enter 在段落与标题中分段（插入空行），在列表、引用中延续结构（见 enterInRow），
 // 在其他块中插入换行；soft 为 Shift+Enter，插入带续行前缀的换行。
 func (e *Editor) enter(soft bool) {
+	if e.Doc.manuscript != nil {
+		e.replaceSel("\n", editOther)
+		return
+	}
 	pos := e.Doc.Sel.Head
 	bi, _ := e.Doc.BlockAt(pos)
 	switch {
@@ -435,7 +446,7 @@ func (e *Editor) copySel(cut bool) {
 	if a == z || !e.hasSvc {
 		return
 	}
-	text := e.Doc.Source()[a:z]
+	text := e.Doc.slice(a, z)
 	if e.opts.PlainCopy {
 		text = plainText(text)
 	}
@@ -448,6 +459,16 @@ func (e *Editor) copySel(cut bool) {
 // undo 撤销或重做一步；相连的步骤（history.linkLast）一并处理：撤销时刚撤销的一步标记为相连则继续，重做时下一步
 // 标记为相连则继续。
 func (e *Editor) undo(redo bool) {
+	if m := e.Doc.manuscript; m != nil {
+		e.Doc.Unmark()
+		if redo {
+			m.buffer.Redo()
+		} else {
+			m.buffer.Undo()
+		}
+		e.SyncManuscript()
+		return
+	}
 	h := &e.Doc.hist
 	for {
 		var ed Edit
@@ -486,7 +507,7 @@ func (e *Editor) command(name string) bool {
 			}
 		}
 	case "selectAll":
-		e.Doc.SetSelection(Selection{Anchor: 0, Head: len(e.Doc.Source())})
+		e.Doc.SetSelection(Selection{Anchor: 0, Head: e.Doc.len()})
 		e.dirty = true
 	case "delete":
 		e.replaceSel("", editOther)
@@ -495,10 +516,19 @@ func (e *Editor) command(name string) bool {
 	case "redo":
 		e.undo(true)
 	case "bold":
+		if e.Doc.manuscript != nil {
+			return false
+		}
 		e.toggleWrap("**")
 	case "italic":
+		if e.Doc.manuscript != nil {
+			return false
+		}
 		e.toggleWrap("*")
 	case "strikethrough":
+		if e.Doc.manuscript != nil {
+			return false
+		}
 		e.toggleWrap("~~")
 	default:
 		return false
@@ -537,7 +567,7 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 			if dir < 0 {
 				e.setHead(0, shift)
 			} else {
-				e.setHead(len(e.Doc.Source()), shift)
+				e.setHead(e.Doc.len(), shift)
 			}
 			break
 		}
@@ -568,7 +598,7 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 	case ui.KeyEnter:
 		e.enter(shift)
 	case ui.KeyTab:
-		if cmd || alt || !e.tab(shift) {
+		if e.Doc.manuscript != nil || cmd || alt || !e.tab(shift) {
 			return false
 		}
 	case ui.KeyZ:
@@ -597,6 +627,7 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 }
 
 func (e *Editor) input(ev ui.InputEvent) bool {
+	e.SyncManuscript()
 	if e.Intercept != nil && ev.Kind == ui.InputKeyDown && e.Intercept(ev) {
 		return true
 	}
@@ -677,11 +708,16 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 				e.JumpTo(-1 - at)
 				return true
 			}
-			// 图片：按下后拖动换位置，没有拖动时松开按单击处理（光标进入图片原文）。
-			if ref, ok := e.ImageAt(at); ok {
-				e.move = &imageMove{ref: ref, at: at, x0: ev.X, y0: ev.Y, drop: at}
-				e.drag = dragImageMove
+			if e.OnManuscriptObject != nil && e.OnManuscriptObject(at) {
 				return true
+			}
+			// 图片：按下后拖动换位置，没有拖动时松开按单击处理（光标进入图片原文）。
+			if e.Doc.manuscript == nil {
+				if ref, ok := e.ImageAt(at); ok {
+					e.move = &imageMove{ref: ref, at: at, x0: ev.X, y0: ev.Y, drop: at}
+					e.drag = dragImageMove
+					return true
+				}
 			}
 			e.setHead(at, false)
 			e.hasGoal = false
@@ -695,8 +731,8 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 		switch ev.Clicks {
 		case 2:
 			if s, ok := e.segAt(pos); ok {
-				a, z := wordAt(e.Doc.Source(), pos, s.base, s.end)
-				e.Doc.SetSelection(Selection{Anchor: a, Head: z})
+				a, z := wordAt(e.Doc.slice(s.base, s.end), pos-s.base, 0, s.end-s.base)
+				e.Doc.SetSelection(Selection{Anchor: s.base + a, Head: s.base + z})
 			} else {
 				e.Doc.SetSelection(Selection{Anchor: pos, Head: pos})
 			}

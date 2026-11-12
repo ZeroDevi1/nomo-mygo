@@ -1,6 +1,8 @@
 package mdedit
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 )
@@ -62,12 +64,21 @@ func (e *Editor) codeState(i int, en *entry, fr *frame, k int) uint64 {
 // codeSpans 把一行代码按 Token 切成着色片段，相邻同样式的 Token 合并；正文 Token 不设颜色，用行默认色。
 // 字体由行字体（等宽）决定。
 func (e *Editor) codeSpans(text string, toks []editor.Token) []ui.Span {
-	spans := make([]ui.Span, 0, len(toks)+1)
+	return e.appendCodeSpans(make([]ui.Span, 0, len(toks)+1), ui.Span{Text: text}, toks)
+}
+
+func (e *Editor) appendCodeSpans(spans []ui.Span, base ui.Span, toks []editor.Token) []ui.Span {
+	text := base.Text
 	var cur editor.TokenStyle
 	at, end := 0, 0 // [at, end) 为待写出、样式为 cur 的区间
 	flush := func() {
 		if end > at {
-			sp := ui.Span{Text: text[at:end], Color: cur.Color, Italic: cur.Italic}
+			sp := base
+			sp.Text = text[at:end]
+			if cur.Color != (ui.Color{}) {
+				sp.Color = cur.Color
+			}
+			sp.Italic = sp.Italic || cur.Italic
 			if cur.Bold {
 				sp.Weight = 700
 			}
@@ -92,7 +103,34 @@ func (e *Editor) codeSpans(text string, toks []editor.Token) []ui.Span {
 	}
 	flush()
 	if at < len(text) {
-		spans = append(spans, ui.Span{Text: text[at:]})
+		base.Text = text[at:]
+		spans = append(spans, base)
+	}
+	return spans
+}
+
+// SetManuscriptLanguage uses the same grammar as the source editor.
+func (e *Editor) SetManuscriptLanguage(lang *editor.Language) {
+	if lang != nil && lang.Tokenizer == nil {
+		lang = nil
+	}
+	if lang != e.manuscriptLang {
+		e.manuscriptLang = lang
+		e.layoutGen++
+		e.dirty = true
+	}
+}
+
+func (e *Editor) manuscriptCodeSpans(spans []ui.Span, base ui.Span, state uint64) []ui.Span {
+	for line := range strings.Lines(base.Text) {
+		var newline bool
+		base.Text, newline = strings.CutSuffix(line, "\n")
+		e.tokBuf, state = e.manuscriptLang.Tokenizer.Tokenize(base.Text, state, e.tokBuf[:0])
+		spans = e.appendCodeSpans(spans, base, e.tokBuf)
+		if newline {
+			base.Text = "\n"
+			spans = append(spans, base)
+		}
 	}
 	return spans
 }

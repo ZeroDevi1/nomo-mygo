@@ -56,6 +56,10 @@ func (s *Shell) pasteData(tab *Tab, d transfer.Data) bool {
 
 // dropFiles 处理拖到编辑区的文件：图片插入当前文档，其余交给 OpenFiles 打开。
 func (s *Shell) dropFiles(tab *Tab, paths []string) {
+	if v := s.manuscript; s.manuscriptVisible && v != nil && v.tab == tab {
+		s.dropManuscriptAsset(v, paths)
+		return
+	}
 	var images []imageInput
 	var other []string
 	for _, p := range paths {

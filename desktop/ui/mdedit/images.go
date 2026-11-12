@@ -51,7 +51,7 @@ type Images struct {
 	dims map[string][2]float32
 
 	mu     sync.Mutex    // 保护 queues
-	queues [3]imageQueue // 0 本地文件与 data URI，1 远程下载，2 公式与图表渲染（串行，见 enqueue）
+	queues [4]imageQueue // 0 本地，1 远程，2 WebView 渲染，3 原生排版
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -64,9 +64,14 @@ type Images struct {
 
 // 渲染对象的种类（RenderRequest.Kind）。
 const (
-	RenderMathInline  = "math-inline"
-	RenderMathDisplay = "math-display"
-	RenderMermaid     = "mermaid"
+	RenderMathInline       = "math-inline"
+	RenderMathDisplay      = "math-display"
+	RenderMermaid          = "mermaid"
+	RenderTypstMathInline  = "typst-math-inline"
+	RenderTypstMathDisplay = "typst-math-display"
+	RenderTypstBlock       = "typst-block"
+	RenderLaTeXBlock       = "latex-block"
+	RenderPDFThumbnail     = "pdf-thumbnail"
 	// RenderSVG 栅格化含 <text> 的 SVG 图片（MyGo v0.6.2 的 SVG 渲染不画文字，如徽章上的字）：Src 为 SVG 原文，
 	// W、H 为显示尺寸。由图片加载流程内部使用，不进入渲染对象缓存。
 	RenderSVG = "svg"
@@ -75,10 +80,13 @@ const (
 // RenderRequest 是一个公式或 Mermaid 图表的渲染请求：Src 为 TeX 或 Mermaid 源码，Dark 与 FontSize（CSS 像素）
 // 决定配色与字号，参与缓存键。
 type RenderRequest struct {
-	Kind, Src string
-	Dark      bool
-	FontSize  float32
-	W, H      float32 // 仅 RenderSVG：显示尺寸（CSS 像素）
+	Context      context.Context // 可选，视图关闭后取消局部编译。
+	Manuscript   *ManuscriptBlockStyle
+	Kind, Src    string
+	Dark         bool
+	FontSize     float32
+	FileRevision int64   // PDF thumbnails are keyed by the staged file's revision.
+	W, H         float32 // 仅 RenderSVG：显示尺寸（CSS 像素）
 }
 
 // RenderResult 是一个渲染请求的结果：Img 与显示尺寸 W、H（CSS 像素，按 DIP 显示），Depth 为基线以下的深度
@@ -118,21 +126,45 @@ func (im *Images) InvalidateRenders() {
 // requestRender 返回渲染请求的缓存项并标记本帧使用；不存在时创建并排队渲染。
 func (im *Images) requestRender(req RenderRequest) *imageEntry {
 	key := fmt.Sprintf("render:%s:%t:%.1f:%x:%d", req.Kind, req.Dark, req.FontSize, maphash.String(im.seed, req.Src), len(req.Src))
+	if req.Manuscript != nil {
+		key += fmt.Sprintf(":%x", req.Manuscript.key)
+	}
+	if req.Kind == RenderPDFThumbnail {
+		key += fmt.Sprintf(":%x", req.FileRevision)
+	}
+	native := req.native()
 	en := im.m[key]
-	if en == nil || en.state == imageFailed && time.Since(en.failedAt) > imageRetryAfter && im.render != nil {
+	if en == nil || en.req.Context != nil && en.req.Context.Err() != nil && en.state != imageReady ||
+		en.state == imageFailed && time.Since(en.failedAt) > imageRetryAfter && im.render != nil {
 		if en != nil {
 			im.bytes -= en.bytes
 		}
-		en = &imageEntry{key: key, req: &req}
+		en = &imageEntry{key: key, req: &req, used: im.clock}
+		if native {
+			en.bytes = 256 + len(req.Src)
+			if style := req.Manuscript; style != nil {
+				en.bytes += len(style.Preamble) + len(style.Bibliography) + len(style.References)
+			}
+			im.bytes += en.bytes
+		}
 		im.m[key] = en
 		if im.render == nil {
 			en.state, en.failedAt = imageFailed, time.Now()
 		} else {
 			im.enqueue(en)
 		}
+		if native {
+			im.evict()
+		}
+	} else if en.state == imageDeferred && en.queuedGen != im.gen {
+		im.enqueue(en)
 	}
 	en.used = im.clock
 	return en
+}
+
+func (req RenderRequest) native() bool {
+	return req.Manuscript != nil || req.Kind == RenderTypstMathInline || req.Kind == RenderTypstMathDisplay || req.Kind == RenderPDFThumbnail
 }
 
 type imageQueue struct {
@@ -146,15 +178,17 @@ const (
 	imageLoading imageState = iota
 	imageReady
 	imageFailed
+	imageDeferred // 原生排版队列暂满，下次队列有进展时重试。
 )
 
 // imageEntry 是一张图片的缓存项。key 为解析后的绝对路径、URL 或 data URI 摘要；src 为加载来源
 // （路径、URL 或 data URI 本身），创建后不变，worker 只读它。
 type imageEntry struct {
-	key, src string
-	state    imageState
-	bmp      *ui.Bitmap
-	svg      *ui.SVG
+	key, src  string
+	state     imageState
+	queuedGen uint64
+	bmp       *ui.Bitmap
+	svg       *ui.SVG
 	// frames/delays 为动画 GIF 的各帧（已按处置方式合成）与停留时间，len(frames) > 1 时按时间播放；
 	// period 为一轮总时长。静态图片为空。
 	frames   []*ui.Bitmap
@@ -268,6 +302,8 @@ func (im *Images) enqueue(en *imageEntry) {
 	}
 	k, limit := 0, imageWorkers
 	switch {
+	case en.req != nil && en.req.native():
+		k, limit = 3, 1
 	case en.req != nil:
 		// 渲染在同一个离屏窗口里串行进行，多开 worker 只会排队等锁；单独一条队列，慢渲染不拖住图片。
 		k, limit = 2, 1
@@ -275,6 +311,11 @@ func (im *Images) enqueue(en *imageEntry) {
 		k = 1
 	}
 	q := &im.queues[k]
+	if k == 3 && len(q.items) >= 32 {
+		en.state, en.queuedGen = imageDeferred, im.gen
+		return
+	}
+	en.state = imageLoading
 	q.items = append(q.items, en)
 	if q.workers < limit {
 		q.workers++
@@ -308,8 +349,12 @@ func (im *Images) work(q *imageQueue) {
 			return
 		}
 		if q.items[0].req != nil {
-			// 渲染队列：先等 renderCoalesce 收集同一帧排入的请求，再一次取出至多 renderBatch 个批量渲染。
-			if len(q.items) < renderBatch {
+			limit := renderBatch
+			if q == &im.queues[3] {
+				limit = 6
+			}
+			// 等同一帧排入的请求到齐，避免为相邻块重复启动编译器。
+			if len(q.items) < limit {
 				im.mu.Unlock()
 				time.Sleep(renderCoalesce)
 				im.mu.Lock()
@@ -318,9 +363,13 @@ func (im *Images) work(q *imageQueue) {
 					continue
 				}
 			}
-			n := min(len(q.items), renderBatch)
+			n := min(len(q.items), limit)
 			batch := append([]*imageEntry(nil), q.items[:n]...)
+			clear(q.items[:n])
 			q.items = q.items[n:]
+			if len(q.items) == 0 {
+				q.items = nil
+			}
 			im.mu.Unlock()
 			im.renderEntries(q, batch)
 			continue
@@ -397,10 +446,17 @@ func (im *Images) finish(en *imageEntry, res imageResult) {
 	if im.closed || im.m[en.key] != en {
 		return
 	}
+	if en.req != nil && en.req.Context != nil && en.req.Context.Err() != nil {
+		delete(im.m, en.key)
+		im.bytes -= en.bytes
+		im.gen++
+		return
+	}
 	if res.err != nil {
 		en.state, en.failedAt = imageFailed, time.Now()
 	} else {
-		en.state, en.bmp, en.svg, en.w, en.h, en.bytes, en.modTime = imageReady, res.bmp, res.svg, res.w, res.h, res.bytes, res.modTime
+		en.state, en.bmp, en.svg, en.w, en.h, en.modTime = imageReady, res.bmp, res.svg, res.w, res.h, res.modTime
+		en.bytes += res.bytes
 		en.frames, en.delays, en.depth = res.frames, res.delays, res.depth
 		for _, d := range res.delays {
 			en.period += d

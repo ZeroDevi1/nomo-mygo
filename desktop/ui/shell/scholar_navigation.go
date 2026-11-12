@@ -157,6 +157,12 @@ func (s *Shell) scholarPalette(c *ui.Context, p *scholarState) {
 }
 
 func (s *Shell) jumpScholarOutline(tab *Tab, offset int) {
+	if v := s.manuscript; v != nil && v.tab == tab && tab.typesetMode == typesetSemantic {
+		s.commitManuscript(tab)
+		v.editor.JumpTo(offset)
+		s.focusEditor = true
+		return
+	}
 	st := tab.Source()
 	st.Select(offset, offset)
 	st.ScrollTo(st.Buffer.Snapshot().LineOf(offset))

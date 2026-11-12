@@ -401,17 +401,45 @@ func (m *projectMirror) diskStable(ctx context.Context) bool {
 	return ctx.Err() == nil
 }
 
+// ExportProjectPDF compiles the private main file with unsaved project inputs
+// and atomically replaces the destination after a successful build.
+func ExportProjectPDF(ctx context.Context, root, main string, buffers map[string]ProjectBuffer, target string) error {
+	if !strings.EqualFold(filepath.Ext(target), ".pdf") {
+		return errors.New("expected a .pdf output file")
+	}
+	s, err := openProjectSession(ctx, root, main, buffers)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	f, err := os.Open(s.path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := s.build(ctx, f, true, true); err != nil {
+		return errors.New(s.ProjectLog(err.Error()))
+	}
+	if err := replacePDF(ctx, s.pdf, target); err != nil {
+		return err
+	}
+	if runtime.GOOS == "darwin" && len(s.mirror.pending) == 0 {
+		s.publishProjectQuickLook(ctx, s.pdf)
+	}
+	return nil
+}
+
 // CompileProjectPreview publishes a Finder snapshot only for a successfully
 // compiled, disk-only revision whose inputs still match the private tree.
 func (s *Session) CompileProjectPreview(ctx context.Context) (int, error) {
 	n, err := s.CompileProjectTrial(ctx)
 	if err == nil && runtime.GOOS == "darwin" && s.liveProject && len(s.mirror.pending) == 0 && ctx.Err() == nil {
-		s.publishProjectQuickLook(ctx)
+		s.publishProjectQuickLook(ctx, filepath.Join(s.dir, "pages", "current.pdf"))
 	}
 	return n, err
 }
 
-func (s *Session) publishProjectQuickLook(ctx context.Context) {
+func (s *Session) publishProjectQuickLook(ctx context.Context, pdf string) {
 	f, err := os.Open(s.path)
 	if err != nil {
 		return
@@ -423,5 +451,5 @@ func (s *Session) publishProjectQuickLook(ctx context.Context) {
 	if err != nil || n > limit {
 		return
 	}
-	storeQuickLookIf(ctx, s.mirror.main, filepath.Join(s.dir, "pages", "current.pdf"), hash.Sum(nil), func() bool { return s.mirror.diskStable(ctx) })
+	storeQuickLookIf(ctx, s.mirror.main, pdf, hash.Sum(nil), func() bool { return s.mirror.diskStable(ctx) })
 }

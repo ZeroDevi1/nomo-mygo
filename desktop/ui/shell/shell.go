@@ -102,7 +102,9 @@ type Shell struct {
 	// images 是本窗口各标签共用的语义模式图片缓存（字节预算 mdedit.DefaultImageBudget），窗口关闭时释放。
 	images *mdedit.Images
 	// rend 是公式与 Mermaid 的离屏渲染服务（见 render.go），窗口打开后接入图片缓存，窗口关闭时释放。
-	rend renderService
+	rend              renderService
+	manuscript        *manuscriptView
+	manuscriptVisible bool
 
 	quick   quickState     // 快捷插入菜单，见 quickinsert.go
 	link    linkEditor     // 链接快速编辑浮层，见 linkedit.go
@@ -295,7 +297,7 @@ func (s *Shell) Open() *mygo.Window {
 		StateKey: stateKey, TitleBarStyle: mygo.TitleBarHidden, Vibrancy: s.pf.vibrancy, Content: ui.View(s.view),
 	})
 	s.post = s.win.Update
-	s.images.SetRenderer(s.rend.render)
+	s.images.SetRenderer(s.rend.renderObjects)
 	s.win.OnClose(func(e *mygo.CloseEvent) {
 		if s.closingAll && len(s.closing) == 0 {
 			return
@@ -321,6 +323,7 @@ func (s *Shell) Open() *mygo.Window {
 	})
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
+		s.closeManuscriptEditor()
 		s.closeScholar()
 		s.closeCompile()
 		s.finishWorkspaceClose()
@@ -410,6 +413,7 @@ func (s *Shell) activate(i int) {
 	if i == s.active {
 		return
 	}
+	s.closeManuscriptEditor()
 	if prev := s.activeTab(); prev != nil {
 		if p := s.scholar; p != nil && p.changes.tabID == prev.ID {
 			s.captureScholarChangeSnapshot(p, prev.Source().Buffer.Snapshot(), time.Now())
@@ -632,6 +636,7 @@ func (s *Shell) save(t *Tab, as bool, then func()) {
 	if t == nil || t.saving {
 		return
 	}
+	s.commitManuscript(t)
 	t.syncFromSource()
 	// 目录区列表随标题更新（保存时改写一次，可撤销）；源码模式的缓冲随之同步。
 	if !t.plain && t.Ed.RefreshToc() && t.source != nil {
@@ -710,6 +715,7 @@ func (s *Shell) continueClose() {
 			continue
 		}
 		t := s.tabs[i]
+		s.commitManuscript(t)
 		t.syncFromSource()
 		if t.Dirty() {
 			s.activate(i)

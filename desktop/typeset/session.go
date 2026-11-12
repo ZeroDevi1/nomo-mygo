@@ -2,6 +2,7 @@
 package typeset
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -73,6 +74,56 @@ func (s *Session) Close() {
 	}
 }
 
+// BlockReferences reuses label and BibTeX metadata from the last successful preview.
+func (s *Session) BlockReferences() string {
+	if !IsLaTeXPath(s.path) {
+		return ""
+	}
+	const limit = 64 << 10
+	var out strings.Builder
+	dir := filepath.Dir(s.pdf)
+	remaining := 256 << 10
+	seen := make(map[string]bool)
+	var readAux func(string)
+	readAux = func(name string) {
+		if !filepath.IsLocal(name) || filepath.Ext(name) != ".aux" || seen[name] || len(seen) >= 32 || remaining <= 0 {
+			return
+		}
+		seen[name] = true
+		f, err := os.Open(filepath.Join(dir, name))
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		budget := &io.LimitedReader{R: f, N: int64(remaining)}
+		sc := bufio.NewScanner(budget)
+		var children []string
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case strings.HasPrefix(line, "\\newlabel{"), strings.HasPrefix(line, "\\bibcite{"):
+				if strings.HasSuffix(line, "}") && out.Len()+len(line)+1 <= limit {
+					out.WriteString(line)
+					out.WriteByte('\n')
+				}
+			case strings.HasPrefix(line, "\\@input{"):
+				if child, ok := strings.CutSuffix(strings.TrimPrefix(line, "\\@input{"), "}"); ok && len(children) < 32 {
+					children = append(children, filepath.Clean(child))
+				}
+			}
+		}
+		remaining = int(budget.N)
+		if sc.Err() != nil {
+			return
+		}
+		for _, child := range children {
+			readAux(child)
+		}
+	}
+	readAux(strings.TrimSuffix(filepath.Base(s.pdf), ".pdf") + ".aux")
+	return out.String()
+}
+
 const MaxPageEdge = 5120
 
 // Page 渲染最近一次成功编译的指定页（从 1 起），长边上限 1400 像素。
@@ -113,7 +164,14 @@ func ExportPDF(ctx context.Context, path string, source io.Reader, target string
 	if e = s.build(ctx, source, true, false); e != nil {
 		return e
 	}
-	in, e := os.Open(s.pdf)
+	if e = replacePDF(ctx, s.pdf, target); e == nil {
+		storeQuickLook(ctx, s.path, s.pdf, digest.Sum(nil))
+	}
+	return e
+}
+
+func replacePDF(ctx context.Context, pdf, target string) error {
+	in, e := os.Open(pdf)
 	if e != nil {
 		return e
 	}
@@ -130,11 +188,9 @@ func ExportPDF(ctx context.Context, path string, source io.Reader, target string
 	if e = ctx.Err(); e != nil {
 		return e
 	}
-	if e = fsutil.ReplaceFile(out.Name(), target); e == nil {
-		storeQuickLook(ctx, s.path, s.pdf, digest.Sum(nil))
-	}
-	return e
+	return fsutil.ReplaceFile(out.Name(), target)
 }
+
 func renderPage(ctx context.Context, pdf string, page, edge int) (image.Image, error) {
 	return renderPageIn(ctx, filepath.Dir(pdf), pdf, page, edge)
 }

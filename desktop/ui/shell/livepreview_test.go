@@ -39,10 +39,11 @@ func TestLiveTeX(t *testing.T) {
 	s.activeTab().replaceText(src)
 	posted := make(chan func(), 16)
 	s.post = func(f func()) { posted <- f }
+	defer s.closeScholar()
 	defer s.closeCompile()
-	if err := tt.Click(s.tr("splitMode")); err != nil {
-		t.Fatal(err)
-	}
+	tt.Frame()
+	s.setTypesetView(s.scholar, s.activeTab(), typesetSplit)
+	tt.Frame()
 	p := s.compile
 	allowError := false
 	wait := func(f func() bool) {
@@ -114,10 +115,11 @@ func TestLiveTypstCoalescesAndClampsPage(t *testing.T) {
 	s, tt := newTestShell(t, path)
 	posted := make(chan func(), 16)
 	s.post = func(f func()) { posted <- f }
+	defer s.closeScholar()
 	defer s.closeCompile()
-	if err := tt.Click(s.tr("splitMode")); err != nil {
-		t.Fatal(err)
-	}
+	tt.Frame()
+	s.setTypesetView(s.scholar, s.activeTab(), typesetSplit)
+	tt.Frame()
 	p := s.compile
 	wait := func(page, total int) {
 		t.Helper()
@@ -157,6 +159,72 @@ func TestLiveTypstCoalescesAndClampsPage(t *testing.T) {
 	}
 }
 
+func TestLiveTypstSemanticReferencesTrackRevision(t *testing.T) {
+	if err := exec.Command("typst", "eval", "--help").Run(); err != nil {
+		t.Skip("Typst eval unavailable")
+	}
+	for _, name := range []string{"pdfinfo", "pdftoppm"} {
+		if _, err := exec.LookPath(name); err != nil {
+			t.Skip(name)
+		}
+	}
+	const source = "#set heading(numbering: \"1\")\n= Results <sec-results>\n"
+	path := filepath.Join(t.TempDir(), "main.typ")
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, tt := newTestShell(t, path)
+	posted := make(chan func(), 16)
+	s.post = func(fn func()) {
+		select {
+		case posted <- fn:
+		case <-t.Context().Done():
+		}
+	}
+	defer s.closeScholar()
+	defer s.closeCompile()
+	tt.Frame()
+	tab := s.activeTab()
+	s.setTypesetView(s.scholar, tab, typesetSemantic)
+	tt.Frame()
+	wait := func(ready func(*compilePane) bool) *compilePane {
+		t.Helper()
+		timer := time.NewTimer(20 * time.Second)
+		defer timer.Stop()
+		for {
+			if p := s.compile; p != nil && !p.busy {
+				if p.err != "" {
+					t.Fatal(p.err)
+				}
+				if ready(p) {
+					return p
+				}
+			}
+			select {
+			case fn := <-posted:
+				fn()
+				tt.Frame()
+			case <-timer.C:
+				t.Fatal("preview did not finish")
+			}
+		}
+	}
+	numbered := func(number string) func(*compilePane) bool {
+		return func(p *compilePane) bool {
+			return p.referenceIndex != nil && p.referenceIndex.ByLabel["sec-results"].Number == number
+		}
+	}
+	if p := wait(numbered("1")); p.image != nil || p.pages != 0 {
+		t.Fatal("metadata query populated a PDF view")
+	}
+	tab.replaceText(strings.Replace(source, "= Results", "= Earlier\n= Results", 1))
+	tt.Frame()
+	wait(numbered("2"))
+	s.setTypesetView(s.scholar, tab, typesetSplit)
+	tt.Frame()
+	wait(func(p *compilePane) bool { return p.pages == 1 && p.image != nil })
+}
+
 func TestLiveTeXFollowsEditedPage(t *testing.T) {
 	for _, exe := range []string{"xelatex", "pdftotext", "pdftoppm", "pdfinfo"} {
 		if _, e := exec.LookPath(exe); e != nil {
@@ -171,10 +239,11 @@ func TestLiveTeXFollowsEditedPage(t *testing.T) {
 	s, tt := newTestShell(t, path)
 	posted := make(chan func(), 8)
 	s.post = func(fn func()) { posted <- fn }
+	defer s.closeScholar()
 	defer s.closeCompile()
-	if e := tt.Click(s.tr("splitMode")); e != nil {
-		t.Fatal(e)
-	}
+	tt.Frame()
+	s.setTypesetView(s.scholar, s.activeTab(), typesetSplit)
+	tt.Frame()
 	p := s.compile
 	wait := func(ok func() bool) {
 		t.Helper()

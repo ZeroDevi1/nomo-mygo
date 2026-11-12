@@ -188,6 +188,10 @@ func (s *Shell) editCommand(id string) bool {
 	if t == nil {
 		return false
 	}
+	if v := s.manuscript; v != nil && v.tab == t {
+		s.tagScholarChange(t, id)
+		return v.editor.Run(id)
+	}
 	if s.mode() == modeSource {
 		s.tagScholarChange(t, id)
 		if id == "undo" {

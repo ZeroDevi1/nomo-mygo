@@ -32,6 +32,8 @@ const (
 	stFootRef   // 脚注引用：显示为标签（原版 sup.footnote-ref 显示 id）
 	stSmall     // <sup>、<sub>：按正文 75% 字号显示（同脚注标签）；MyGo 的排版片段没有基线偏移，不做上下错位
 	stKbd       // <kbd>：按键样式（等宽、较深底色与圆角）
+	stRaise
+	stLower
 )
 
 // run 是一段可见原文。src 偏移相对所在行（片段）的起点，块整体平移时投影仍然有效。
@@ -47,11 +49,13 @@ type run struct {
 // projection 是一个叶子块（段落、标题、表格单元格）的显示投影：原文去掉隐藏标记后的
 // 文本及其映射。显示文本是独立副本，不引用整篇原文，缓存它不会让旧版本原文常驻。
 type projection struct {
-	text   string
-	runs   []run
-	u16    int // 显示文本的 UTF-16 长度
-	objs   []imgObj
-	colors []ui.Color // 行内 HTML 指定的文字颜色（<span style="color:…">、<font color>），由样式高位引用
+	text             string
+	runs             []run
+	u16              int // 显示文本的 UTF-16 长度
+	objs             []imgObj
+	colors           []ui.Color // 行内 HTML 指定的文字颜色（<span style="color:…">、<font color>），由样式高位引用
+	manuscriptStyles []manuscriptSpanStyle
+	manuscriptSource bool
 }
 
 // objChar 是行内图片在显示文本中的占位字符（U+FFFC），布局时按图片尺寸成为行内对象。
@@ -65,7 +69,9 @@ type imgObj struct {
 	// html 非空时对象是 HTML 块预览或注释卡片（见 htmlpreview.go），src 等字段不用。
 	html *htmlBlockPreview
 	// render 非空时对象是公式或 Mermaid 图表（RenderMathInline 等），src 为 TeX 或 Mermaid 源码。
-	render string
+	render     string
+	manuscript *ManuscriptBlockStyle
+	cardTitle  string
 }
 
 // expansion 描述投影时哪些标记就地展开：caret 为相对片段起点的光标字节偏移，

@@ -33,6 +33,10 @@ func run(parent context.Context, dir, input string, env []string, name string, a
 	return runReader(parent, dir, strings.NewReader(input), env, name, args...)
 }
 func runReader(parent context.Context, dir string, input io.Reader, env []string, name string, args ...string) (string, error) {
+	return runReaderOutput(parent, dir, input, env, nil, name, args...)
+}
+
+func runReaderOutput(parent context.Context, dir string, input io.Reader, env []string, stdout io.Writer, name string, args ...string) (string, error) {
 	path, err := tool(name)
 	if err != nil {
 		return "", err
@@ -47,7 +51,10 @@ func runReader(parent context.Context, dir string, input io.Reader, env []string
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH")+":/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin")
 	}
 	var log previewLog
-	cmd.Stdout = &log
+	if stdout == nil {
+		stdout = &log
+	}
+	cmd.Stdout = stdout
 	cmd.Stderr = &log
 	cmd.WaitDelay = time.Second
 	cleanup, err := childproc.Start(cmd)

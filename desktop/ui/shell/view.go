@@ -30,6 +30,12 @@ const (
 )
 
 func (s *Shell) view(c *ui.Context) {
+	s.manuscriptVisible = false
+	defer func() {
+		if !s.manuscriptVisible {
+			s.closeManuscriptEditor()
+		}
+	}()
 	if p := s.compile; p != nil && (s.previewProvider(p.tab) == nil || p.tab != s.activeTab() || p.tab.Path != p.sourcePath || p.tab.partner != 0 || s.mini.active) {
 		s.closeCompile()
 	}
@@ -798,7 +804,7 @@ func (s *Shell) document(c *ui.Context) {
 				s.linkPopover(c, tab, el)
 				s.emojiSuggest(c, tab, el)
 			}
-			if p != nil && !p.agent.trial.show && !s.scholarPDFOnly(c, p, tab) {
+			if p != nil && !s.manuscriptVisible && !p.agent.trial.show && !s.scholarPDFOnly(c, p, tab) {
 				p.agent.anchor = el.Bounds()
 				s.scholarInlineCitations(c, p, tab, el)
 				s.scholarInlineReview(c, p, tab, el)

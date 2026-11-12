@@ -81,7 +81,23 @@ func (e *Editor) imageEntry(o imgObj) *imageEntry {
 		return nil
 	}
 	if o.render != "" {
-		return e.images.requestRender(RenderRequest{Kind: o.render, Src: o.src, Dark: e.dark, FontSize: bodySize * e.scale})
+		req := RenderRequest{Kind: o.render, Src: o.src, Dark: e.dark, FontSize: bodySize * e.scale}
+		if o.manuscript != nil {
+			req.Manuscript = o.manuscript
+			req.Context = o.manuscript.ctx
+		} else if o.render == RenderTypstMathInline || o.render == RenderTypstMathDisplay {
+			req.Context = e.Doc.manuscript.ctx
+		}
+		if e.Doc.manuscript != nil {
+			switch o.render {
+			case RenderMathInline, RenderMathDisplay, RenderTypstMathInline, RenderTypstMathDisplay:
+				bg := e.pal.background
+				req.Dark = 299*int(bg.R)+587*int(bg.G)+114*int(bg.B) < 128000
+			default:
+				req.Dark = false
+			}
+		}
+		return e.images.requestRender(req)
 	}
 	return e.images.request(o.src, e.baseDir)
 }
@@ -106,6 +122,10 @@ func (e *Editor) objSizes(p *projection, maxW float32) [][2]float32 {
 // 宽度不超过行宽（CSS max-width: 100%），高度按比例。
 func (e *Editor) objSize(o imgObj, en *imageEntry, maxW float32) [2]float32 {
 	if o.render != "" {
+		if o.cardTitle != "" {
+			size := e.renderSize(o, en, max(1, maxW-16))
+			return [2]float32{min(maxW, max(160, size[0]+16)), size[1] + 32}
+		}
 		return e.renderSize(o, en, maxW)
 	}
 	want, hasWant := parseImageWidth(o.width, maxW)
@@ -137,8 +157,8 @@ func (e *Editor) renderSize(o imgObj, en *imageEntry, maxW float32) [2]float32 {
 	switch {
 	case en == nil || en.state == imageFailed:
 		return e.objSize(imgObj{alt: firstLine(o.src)}, nil, maxW)
-	case en.state == imageLoading:
-		if o.render == RenderMathInline {
+	case en.state == imageLoading || en.state == imageDeferred:
+		if o.render == RenderMathInline || o.render == RenderTypstMathInline {
 			return [2]float32{min(maxW, max(16, textWidth(o.src, bodySize*e.scale)*0.7)), e.lineH}
 		}
 		return [2]float32{min(maxW, 240), 48}
@@ -148,7 +168,7 @@ func (e *Editor) renderSize(o imgObj, en *imageEntry, maxW float32) [2]float32 {
 		f := maxW / w
 		w, h, depth = maxW, h*f, depth*f
 	}
-	if o.render == RenderMathInline {
+	if o.render == RenderMathInline || o.render == RenderTypstMathInline {
 		return [2]float32{max(1, w), max(1, h-depth)}
 	}
 	return [2]float32{max(1, w), max(1, h)}
@@ -226,7 +246,7 @@ func (e *Editor) drawImages(p *ui.Painter, r *row, tx, ty float32) {
 			}
 			continue
 		}
-		if o.render == RenderMathInline {
+		if o.render == RenderMathInline || o.render == RenderTypstMathInline {
 			// 行内公式的对象框只含基线以上部分，按渲染比例补回基线以下的深度。
 			if en := e.imageEntry(o); en != nil && en.state == imageReady && en.h > en.depth && en.depth > 0 {
 				rc.H = rc.H * en.h / (en.h - en.depth)
@@ -239,6 +259,18 @@ func (e *Editor) drawImages(p *ui.Painter, r *row, tx, ty float32) {
 // drawImageAt 在 rc 处绘制一张图片：已加载时画位图或 SVG，加载中画占位底色，失败画替代文字框。
 func (e *Editor) drawImageAt(p *ui.Painter, o imgObj, rc ui.Rect) {
 	en := e.imageEntry(o) // 同时标记本帧使用，防止可见图片被淘汰
+	if o.cardTitle != "" {
+		p.Fill(rc, e.pal.codeBg, 8)
+		p.Stroke(rc, e.pal.muted.Mix(e.pal.codeBg, .78), 8, 1)
+		p.RichText(rc.X+8, rc.Y+5, max(1, rc.W-16), ui.Span{Text: o.cardTitle, Font: e.fontBody, Size: 11, Color: e.pal.muted})
+		outer := rc
+		rc = ui.Rect{X: rc.X + 8, Y: rc.Y + 24, W: max(1, rc.W-16), H: max(1, rc.H-32)}
+		if en != nil && en.state == imageReady {
+			inner := e.renderSize(o, en, rc.W)
+			rc.X = outer.X + (outer.W-inner[0])/2
+			rc.W = inner[0]
+		}
+	}
 	switch {
 	case en != nil && en.state == imageReady && en.bmp != nil:
 		// 动画只在被绘制（可见、窗口可见）时预约下一帧，屏幕外与后台标签自然暂停。
@@ -249,7 +281,7 @@ func (e *Editor) drawImageAt(p *ui.Painter, o imgObj, rc ui.Rect) {
 		}
 	case en != nil && en.state == imageReady && en.svg != nil:
 		p.Image(en.svg, rc, ui.Contain)
-	case en != nil && en.state == imageLoading:
+	case en != nil && (en.state == imageLoading || en.state == imageDeferred):
 		p.Fill(rc, e.pal.codeBg, 4)
 	default:
 		p.StrokeDashed(rc, e.pal.muted, 4, 1)
@@ -289,7 +321,7 @@ func (e *Editor) imageHit(pt ui.Point) (int, bool) {
 			for _, run := range s.proj.runs {
 				if run.atomic && run.disp == s.proj.objs[k].u16 {
 					at := s.base + run.srcA
-					if e.Doc.Source()[at] == '!' {
+					if e.Doc.slice(at, at+1) == "!" {
 						return at + 2, true
 					}
 					return at + 1, true

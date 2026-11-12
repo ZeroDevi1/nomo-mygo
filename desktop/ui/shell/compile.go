@@ -21,6 +21,7 @@ const (
 	typesetSource = iota
 	typesetPreview
 	typesetSplit
+	typesetSemantic
 )
 
 type pageRequest struct {
@@ -40,10 +41,11 @@ type pageClick struct {
 	scroll          bool
 }
 type previewRevision struct {
-	snap    editor.Snapshot
-	ctx     context.Context
-	version uint64
-	project *scholarPreviewRevision
+	snap     editor.Snapshot
+	ctx      context.Context
+	version  uint64
+	project  *scholarPreviewRevision
+	semantic bool
 }
 
 // 工作协程拥有编译会话；UI 只保留有限页缓存与一张临时段落位图。
@@ -55,6 +57,9 @@ type compilePane struct {
 	anchor                  typeset.PageAnchor
 	shown                   uint64
 	fullVersion, fullSerial uint64
+	blockReferences         string
+	referenceIndex          *typeset.ManuscriptReferences
+	semantic                bool
 	inlineText              string
 	paragraph               *ui.Bitmap
 	stopped                 bool
@@ -116,6 +121,12 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	if workspace != nil {
 		mode = s.scholarPreviewMode(c, workspace, t)
 	}
+	if mode == typesetSemantic && !canEditManuscript(t) {
+		mode = typesetSource
+	}
+	if mode != typesetSemantic {
+		s.closeManuscriptEditor()
+	}
 	wantPreview := s.canPreviewTypeset(t) && mode != typesetSource && (s.scholar == nil || workspace != nil)
 	trial := wantPreview && workspace != nil && workspace.agent.trial.show
 	if trial {
@@ -142,10 +153,21 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 		}
 	}
 	if wantPreview && !t.typesetPaused && s.compile == nil {
-		s.openTypeset(t, true)
+		s.openTypesetMode(t, true, mode == typesetSemantic)
 	}
 	if p := s.compile; p != nil && p.parkedPage == 0 {
-		if p.project.Root != "" {
+		leavingCanvas := p.semantic && mode != typesetSemantic && wantPreview
+		enteringTypstCanvas := !p.semantic && mode == typesetSemantic && !typeset.IsLaTeXPath(p.path)
+		p.semantic = mode == typesetSemantic
+		if (enteringTypstCanvas || leavingCanvas && (p.image == nil || p.busy)) && p.liveUpdates != nil && !p.stopped {
+			version := st.Buffer.Version()
+			var inputs *scholarPreviewRevision
+			if p.project.Root != "" {
+				version = p.version + 1
+				inputs = s.projectPreviewRevision(p)
+			}
+			s.queuePreview(p, previewRevision{snap: st.Buffer.Snapshot(), version: version, project: inputs})
+		} else if p.project.Root != "" {
 			s.updateProjectPreview(p)
 		} else if p.liveUpdates != nil && !p.stopped && p.version != st.Buffer.Version() {
 			s.queuePreview(p, previewRevision{snap: st.Buffer.Snapshot(), version: st.Buffer.Version()})
@@ -164,6 +186,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	}
 	if p != nil {
 		p.observeSourcePosition(c, workspace != nil && mode == typesetSplit && p.canLocate())
+	}
+	if mode == typesetSemantic {
+		return s.manuscriptEditor(c, t)
 	}
 	if p != nil || wantPreview && (workspace != nil || t.typesetPaused) {
 		preview := func() {
@@ -376,6 +401,14 @@ func (s *Shell) sourceEditor(c *ui.Context, t *Tab) ui.Element {
 }
 
 func (s *Shell) openTypeset(t *Tab, live bool) {
+	s.openTypesetMode(t, live, t.typesetMode == typesetSemantic)
+}
+
+func (s *Shell) openTypesetMode(t *Tab, live, semantic bool) {
+	post := s.post
+	if post == nil {
+		return
+	}
 	project := s.typesetProject(t)
 	path := t.Path
 	if project.Root != "" {
@@ -388,7 +421,7 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 	s.closeCompile()
 	ctx, cancel := context.WithCancel(context.Background())
 	initial := t.Source().Buffer.Snapshot()
-	p := &compilePane{provider: pr, tab: t, path: path, sourcePath: t.Path, project: project, version: initial.Version(), sourceVersion: initial.Version(), cancel: cancel, cacheSlots: 2, requests: make(chan pageRequest, 1), sections: make(chan sourcePageRequest, 1), clicks: make(chan pageClick, 1), busy: true}
+	p := &compilePane{provider: pr, tab: t, path: path, sourcePath: t.Path, project: project, version: initial.Version(), sourceVersion: initial.Version(), cancel: cancel, cacheSlots: 2, requests: make(chan pageRequest, 1), sections: make(chan sourcePageRequest, 1), clicks: make(chan pageClick, 1), busy: true, semantic: semantic}
 	if workspace := s.scholarForTab(t); workspace != nil && live {
 		p.previewRoot = workspace.project.Root
 		p.reuseChecks = make(chan func(bool), 2)
@@ -414,11 +447,11 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 		}
 		p.projectInput = s.projectPreviewRevision(p)
 	}
-	revision := previewRevision{snap: initial, ctx: buildCtx, version: p.version, project: p.projectInput}
+	revision := previewRevision{snap: initial, ctx: buildCtx, version: p.version, project: p.projectInput, semantic: semantic}
 	s.compile = p
 	go func() {
 		err := p.runPreview(ctx, revision, func(v uint64, draft bool, apply func()) {
-			s.post(func() {
+			post(func() {
 				if s.compile != p || s.activeTab() != t || t.Path != p.sourcePath {
 					return
 				}
@@ -437,7 +470,7 @@ func (s *Shell) openTypeset(t *Tab, live bool) {
 			})
 		})
 		if err != nil && ctx.Err() == nil {
-			s.post(func() {
+			post(func() {
 				if s.compile == p {
 					p.err = err.Error()
 					p.busy = false
@@ -517,6 +550,8 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 		started := time.Now()
 		var n int
 		var e error
+		var index *typeset.ManuscriptReferences
+		typstIndexOnly := revision.semantic && !typeset.IsLaTeXPath(p.path)
 		if inputs := revision.project; inputs != nil {
 			e = inputs.err
 			if e == nil {
@@ -530,14 +565,22 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 				}
 				if e == nil {
 					disk = inputs.disk
-					n, e = projectSession.CompileProjectPreview(buildCtx)
+					if typstIndexOnly {
+						index, e = projectSession.QueryTypstReferences(buildCtx, nil)
+					} else {
+						n, e = projectSession.CompileProjectPreview(buildCtx)
+					}
 				}
 			}
 		} else {
 			if p.previewRoot != "" {
 				standaloneStamp, _ = (scholar.Project{Root: p.previewRoot}).InputStamp(buildCtx)
 			}
-			n, e = session.Compile(buildCtx, strings.NewReader(snap.String()))
+			if engine, ok := session.(*typeset.Session); ok && typstIndexOnly {
+				index, e = engine.QueryTypstReferences(buildCtx, &scholarSnapshotReader{snap: snap})
+			} else {
+				n, e = session.Compile(buildCtx, strings.NewReader(snap.String()))
+			}
 		}
 		version := revision.version
 		if e == nil {
@@ -552,7 +595,34 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 					warnings[i].Text = projectSession.ProjectLog(warnings[i].Text)
 				}
 			}
-			publish(version, false, func() { p.elapsed, p.warnings = elapsed, warnings; p.fullVersion = version; p.fullSerial++ })
+			var refs string
+			if metadata, ok := session.(interface{ BlockReferences() string }); ok {
+				refs = metadata.BlockReferences()
+			}
+			if !typstIndexOnly && typeset.IsLaTeXPath(p.path) {
+				index = typeset.LaTeXManuscriptReferences(refs)
+			}
+			if typstIndexOnly {
+				refs = index.TypstPreviewNumbers()
+			}
+			semantic := revision.semantic
+			currentPage := min(page, n)
+			publish(version, false, func() {
+				p.elapsed, p.warnings = elapsed, warnings
+				p.fullVersion, p.blockReferences = version, refs
+				p.referenceIndex = index
+				p.fullSerial++
+				if semantic && p.semantic {
+					p.busy, p.err = false, ""
+					p.image, p.cached, p.bookmarks = nil, nil, nil
+					p.page, p.pages = currentPage, n
+				}
+			})
+			if semantic {
+				base, baseVersion, baseProject = snap, version, revision.project
+				pageBitmap, pages = nil, n
+				return
+			}
 			var heads []mdedit.Heading
 			if book, ok := session.(interface {
 				Bookmarks(context.Context) []typeset.Bookmark
@@ -561,7 +631,7 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 					heads = append(heads, mdedit.Heading{Level: b.Level, Text: b.Title, Pos: b.Page})
 				}
 			}
-			if fast, ok := session.(typeset.ParagraphSession); p.liveUpdates != nil && ok && p.provider.Fragment != nil {
+			if fast, ok := session.(typeset.ParagraphSession); p.liveUpdates != nil && ok && p.provider.Fragment != nil && !revision.semantic {
 				fast.PrepareAnchors(buildCtx)
 				settled = typeset.PageAnchor{}
 				if follow != "" {
@@ -585,7 +655,6 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 			publish(version, false, func() { p.err = msg; p.busy = false; p.paragraph = nil; p.inlineText = ""; p.warnings = nil })
 		}
 	}
-	full()
 	old := snap
 	var quick, layout <-chan time.Time
 	qt, lt := time.NewTimer(time.Hour), time.NewTimer(time.Hour)
@@ -593,6 +662,13 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 	lt.Stop()
 	defer qt.Stop()
 	defer lt.Stop()
+	const semanticLayoutDelay = 1500 * time.Millisecond
+	if revision.semantic {
+		lt.Reset(semanticLayoutDelay)
+		layout = lt.C
+	} else {
+		full()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -693,11 +769,17 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 		case next := <-p.liveUpdates:
 			revision = next
 			snap, buildCtx = next.snap, next.ctx
-			if quick == nil {
+			if revision.semantic {
+				quick = nil
+			} else if quick == nil {
 				qt.Reset(12 * time.Millisecond)
 				quick = qt.C
 			}
-			lt.Reset(300 * time.Millisecond)
+			delay := 300 * time.Millisecond
+			if revision.semantic {
+				delay = semanticLayoutDelay
+			}
+			lt.Reset(delay)
 			layout = lt.C
 		case <-quick:
 			quick = nil

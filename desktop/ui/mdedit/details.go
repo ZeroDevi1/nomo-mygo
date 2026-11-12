@@ -150,7 +150,12 @@ func (d *Document) shiftDetails(ch Change, prev uint64) {
 }
 
 // details 返回当前原文的折叠框架（按版本缓存）。只扫描顶层 HTML 块，不含折叠块的文档成本为 O(顶层块数) 的整数比较。
+var noManuscriptDetails detailsIndex
+
 func (d *Document) details() *detailsIndex {
+	if d.manuscript != nil {
+		return &noManuscriptDetails
+	}
 	if d.detailsIdx != nil && d.detailsIdx.ver == d.version {
 		return d.detailsIdx
 	}

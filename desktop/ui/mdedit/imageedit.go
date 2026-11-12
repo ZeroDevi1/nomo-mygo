@@ -160,6 +160,33 @@ func (e *Editor) ImageBitmap(src string) (bmp *ui.Bitmap, w, h float32, ok bool)
 	return en.bmp, en.w, en.h, true
 }
 
+// LocalImagePreview requests an image through the shared, bounded cache.
+func (e *Editor) LocalImagePreview(src string) (ui.ImageSource, float32, float32) {
+	en := e.imageEntry(imgObj{src: src})
+	if en == nil || en.state != imageReady {
+		return nil, 0, 0
+	}
+	if en.bmp != nil {
+		return en.bmp, en.w, en.h
+	}
+	if en.svg != nil {
+		return en.svg, en.w, en.h
+	}
+	return nil, 0, 0
+}
+
+func (e *Editor) ManuscriptPDFPreview(path string, revision int64) (ui.ImageSource, float32, float32) {
+	if e.images == nil || e.Doc.manuscript == nil {
+		return nil, 0, 0
+	}
+	en := e.images.requestRender(RenderRequest{Kind: RenderPDFThumbnail, Src: path,
+		FileRevision: revision, Context: e.Doc.manuscript.ctx})
+	if en.state == imageReady && en.bmp != nil {
+		return en.bmp, en.w, en.h
+	}
+	return nil, 0, 0
+}
+
 // imageResize 是拖动图片右边缘调整宽度的状态：at 为图片原文中的位置，rect 为按下时图片在编辑区中的矩形，
 // w 为当前拖到的宽度（DIP）。
 type imageResize struct {

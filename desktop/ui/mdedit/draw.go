@@ -91,6 +91,10 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		ty := (r.H - th) * min(1, pos/max(1, total-r.H))
 		p.Fill(ui.Rect{X: r.X + r.W - 8, Y: r.Y + ty, W: 5, H: th}, e.pal.scrollbar, 2.5)
 	}
+	// 稿件公式按可见块渲染，滚动时不预排视口外的公式。
+	if e.Doc.manuscript != nil {
+		return
+	}
 	// 预排版只在空闲帧进行：本帧处理了输入或滚动（busy）时推迟到下一帧，不占用响应时间。
 	switch {
 	case busy && e.prefetchedTick != e.tick:

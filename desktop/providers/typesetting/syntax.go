@@ -3,6 +3,7 @@ package typesetting
 import (
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
@@ -297,17 +298,38 @@ func typesetTokens(tex bool, line string, state uint64, tokens []editor.Token) (
 				}
 			}
 			k = editor.TokenString
-		case line[i] == '\\' && tex || line[i] == '#' && !tex:
+		case tex && line[i] == '\\':
 			i++
 			a := i
-			for i < len(line) && syntaxWord(line[i]) {
+			for i < len(line) && (syntaxWord(line[i]) || line[i] == '@') {
 				i++
 			}
-			if tex && a == i && i < len(line) {
+			if a == i && i < len(line) {
 				_, n := utf8.DecodeRuneInString(line[i:])
 				i += n
 			}
 			k = editor.TokenFunction
+		case !tex && line[i] == '#':
+			i++
+			for i < len(line) {
+				r, size := utf8.DecodeRuneInString(line[i:])
+				if !(unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r) || r == '_' || r == '-') {
+					if r == '.' && i+1 < len(line) {
+						next, _ := utf8.DecodeRuneInString(line[i+1:])
+						if unicode.IsLetter(next) || next == '_' {
+							i++
+							continue
+						}
+					}
+					break
+				}
+				i += size
+			}
+			k = editor.TokenFunction
+		case !tex && line[i] == '\\' && i+1 < len(line):
+			_, size := utf8.DecodeRuneInString(line[i+1:])
+			i += 1 + size
+			k = editor.TokenEscape
 		case strings.IndexByte("{}[]()$", line[i]) >= 0:
 			i++
 			k = editor.TokenPunctuation

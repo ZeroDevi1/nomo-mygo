@@ -47,9 +47,10 @@ func (s Selection) Empty() bool       { return s.Anchor == s.Head }
 // 不变量：blocks 按 Start 升序，与 md 的顶层子块一一对应；u16Total 等于原文的
 // UTF-16 长度；marked 非空时 marked.Anchor <= marked.Head 且位于原文范围内。
 type Document struct {
-	md     *tree
-	blocks []Block
-	spare  []Block // 编辑时复用的块数组，避免每次按键分配
+	md         *tree
+	manuscript *manuscript
+	blocks     []Block
+	spare      []Block // 编辑时复用的块数组，避免每次按键分配
 	// u16Total 是原文的 UTF-16 长度，编辑时增量维护。
 	u16Total int
 	version  uint64
@@ -96,7 +97,7 @@ func NewDocument(src string) *Document {
 }
 
 // Source 返回当前原文。返回值共享内部存储，调用方不应长期持有大文档的旧版本。
-func (d *Document) Source() string { return d.md.Source() }
+func (d *Document) Source() string { return d.slice(0, d.len()) }
 
 // Blocks 返回顶层块列表，下次编辑前有效。
 func (d *Document) Blocks() []Block { return d.blocks }
@@ -444,36 +445,38 @@ func (d *Document) BlockAt(b int) (index int, after int) {
 
 // ByteToU16 把字节偏移换算为 UTF-16 偏移。
 func (d *Document) ByteToU16(b int) int {
-	src := d.md.Source()
-	b = runeStartBefore(src, clamp(b, 0, len(src)))
+	b = d.runeStart(clamp(b, 0, d.len()))
 	i := sort.Search(len(d.blocks), func(i int) bool { return d.blocks[i].Start > b }) - 1
 	if i < 0 {
-		return u16Len(src[:b])
+		return u16Len(d.slice(0, b))
 	}
 	blk := d.blocks[i]
 	if b-blk.Start > u16Big {
 		pts := d.checkpoints(i)
 		k := sort.Search(len(pts), func(k int) bool { return pts[k][0] > b-blk.Start }) - 1
-		return blk.U16Start + pts[k][1] + u16Len(src[blk.Start+pts[k][0]:b])
+		return blk.U16Start + pts[k][1] + u16Len(d.slice(blk.Start+pts[k][0], b))
 	}
-	return blk.U16Start + u16Len(src[blk.Start:b])
+	return blk.U16Start + u16Len(d.slice(blk.Start, b))
 }
 
 // U16ToByte 把 UTF-16 偏移换算为字节偏移，落在代理对中间时取到完整 rune 之后。
 func (d *Document) U16ToByte(u int) int {
-	src := d.md.Source()
 	u = clamp(u, 0, d.u16Total)
 	i := sort.Search(len(d.blocks), func(i int) bool { return d.blocks[i].U16Start > u }) - 1
 	if i < 0 {
-		return u16ToByte(src, u)
+		return u16ToByte(d.slice(0, d.len()), u)
 	}
 	b := d.blocks[i]
+	end := d.len()
+	if i+1 < len(d.blocks) {
+		end = d.blocks[i+1].Start
+	}
 	if u-b.U16Start > u16Big/2 && b.End-b.Start > u16Big {
 		pts := d.checkpoints(i)
 		k := sort.Search(len(pts), func(k int) bool { return pts[k][1] > u-b.U16Start }) - 1
-		return b.Start + pts[k][0] + u16ToByte(src[b.Start+pts[k][0]:], u-b.U16Start-pts[k][1])
+		return b.Start + pts[k][0] + u16ToByte(d.slice(b.Start+pts[k][0], end), u-b.U16Start-pts[k][1])
 	}
-	return b.Start + u16ToByte(src[b.Start:], u-b.U16Start)
+	return b.Start + u16ToByte(d.slice(b.Start, end), u-b.U16Start)
 }
 
 // 大块内换算的检查点参数：块内偏移超过 u16Big 字节时改用检查点，每 u16Stride 字节一个。经验值：4 KB 一个检查点
@@ -497,7 +500,7 @@ func (d *Document) checkpoints(i int) [][2]int {
 	if c := d.u16cp; c != nil && c.ver == d.version && c.start == blk.Start {
 		return c.pts
 	}
-	s := d.md.Source()[blk.Start:blk.End]
+	s := d.slice(blk.Start, blk.End)
 	pts := make([][2]int, 1, len(s)/u16Stride+2)
 	for pos, u := 0, 0; pos < len(s); {
 		next := min(len(s), pos+u16Stride)
