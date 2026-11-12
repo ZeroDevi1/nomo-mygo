@@ -180,6 +180,10 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 			})
 		})
 	}
+	catalogFormOpen := p.references.catalog && p.literature.catalogForm() != nil
+	assistantVisible := p.drawer == scholarCodex && s.scholarInspectorVisible(p, width)
+	s.scholarAssistantButton(c, p, assistantVisible, catalogFormOpen)
+
 	label := s.tr("scholarToggleInspector")
 	visible := (p.drawer == scholarReader || p.drawer == scholarDiagnostics) && s.scholarInspectorVisible(p, width)
 	zoteroCatalog := p.references.catalog && p.literature.mode == 1
@@ -202,7 +206,7 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 	} else {
 		inspector = s.toolButton(c.Key("inspector"), "panel-right", label, visible).Label(label).FocusRing(true)
 	}
-	if p.references.catalog && p.literature.catalogForm() != nil {
+	if catalogFormOpen {
 		inspector.Disabled(true)
 	}
 	if inspector.Clicked() {
@@ -224,6 +228,14 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 			}
 			s.showScholarInspector(p, drawer)
 		}
+	}
+}
+
+func (s *Shell) scholarAssistantButton(c *ui.Context, p *scholarState, visible, disabled bool) {
+	label := s.tr("scholarWritingAssistant")
+	if s.toolButton(c.Key("assistant"), "message-square-text", label, visible).
+		Label(label).FocusRing(true).Selected(visible).Disabled(disabled).Clicked() {
+		s.openScholarAgent(p)
 	}
 }
 

@@ -51,7 +51,9 @@ func (s *Shell) desktopScholarLayout(c *ui.Context, p *scholarState) {
 			ui.Box(c).Width(8)
 			s.menus(c.Key("menubar"))
 			ui.Spacer(c)
-			if s.editorGroupsVisible(p) && p.winSettings == nil && !p.accountOpen && !p.winCompactProject {
+			if p.winSettings != nil || p.accountOpen || p.winCompactProject {
+				s.scholarAssistantButton(c, p, false, false)
+			} else if s.editorGroupsVisible(p) {
 				ui.Row(c.Key("workspace-tools")).FillHeight().Shrink(0).Gap(4).AlignItems(ui.Center).Children(func() {
 					s.documentTools(c)
 				})
@@ -147,10 +149,6 @@ func (p *scholarState) windowsDestinationSelected(destination int, width float32
 	return p.references.catalog
 }
 
-func (p *scholarState) windowsAssistantSelected() bool {
-	return p.drawer == scholarCodex && !p.accountOpen && p.winSettings == nil && !p.winCompactProject
-}
-
 func (p *scholarState) openWindowsAccount() {
 	p.dismissWindowsPage()
 	p.accountOpen = true
@@ -180,14 +178,13 @@ func (s *Shell) openScholarWindowsNavigation(p *scholarState) {
 			}
 		}
 		w := float32(width)
-		items := make([]*mygo.MenuItem, 0, len(scholarDestinations)+4)
+		items := make([]*mygo.MenuItem, 0, len(scholarDestinations)+3)
 		for i, destination := range scholarDestinations {
 			items = append(items, entry(destination.label, p.windowsDestinationSelected(i, w), func() {
 				s.showScholarNavigation(p, i, w)
 			}))
 		}
 		items = append(items,
-			entry("scholarWritingAssistant", p.windowsAssistantSelected(), func() { s.openScholarAgent(p) }),
 			mygo.Separator(),
 			entry("scholarAccount", p.accountOpen, p.openWindowsAccount),
 			entry("settings", p.winSettings != nil, s.openSettings),
@@ -206,9 +203,6 @@ func (s *Shell) scholarWindowsDestinations(c *ui.Context, p *scholarState, width
 		if s.scholarWindowsNavButton(c.Key(i), destination.icon, s.tr(destination.label), p.windowsDestinationSelected(i, width), expanded).Clicked() {
 			s.showScholarNavigation(p, i, width)
 		}
-	}
-	if s.scholarWindowsNavButton(c.Key("assistant"), "message-square-text", s.tr("scholarWritingAssistant"), p.windowsAssistantSelected(), expanded).Clicked() {
-		s.openScholarAgent(p)
 	}
 }
 

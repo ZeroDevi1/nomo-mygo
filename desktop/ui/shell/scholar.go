@@ -636,22 +636,6 @@ func (s *Shell) scholarSidebar(c *ui.Context, p *scholarState) {
 			s.scholarCatalogSidebar(c.Key("catalog-sidebar"), p)
 		}
 	})
-	ui.Column(c.Key("writing-assistant")).FillWidth().Padding(0, 8, 8, 8).Gap(5).Children(func() {
-		if s.scholarCatalogInSidebar(c, p) {
-			b := s.scholarReaderCommand(c, "message-square-text", s.tr("scholarWritingAssistant"), false)
-			if p.drawer == scholarCodex {
-				b.Background(s.ch.pressed).Selected(true)
-			}
-			if b.Clicked() {
-				s.openScholarAgent(p)
-			}
-			return
-		}
-		ui.Box(c).FillWidth().Height(1).Background(s.ch.separator)
-		if s.scholarSidebarItem(c, "message-square-text", s.tr("scholarWritingAssistant"), p.drawer == scholarCodex).Clicked() {
-			s.openScholarAgent(p)
-		}
-	})
 }
 
 func (s *Shell) scholarSidebarItem(c *ui.Context, glyph, label string, selected bool) ui.Element {
