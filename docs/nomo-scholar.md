@@ -96,6 +96,8 @@ npm install -g @agentclientprotocol/codex-acp@2.6.0
 
 [ACP 开发计划和协议兼容范围](scholar-acp-plan.md) · [Codex ACP 适配器](https://github.com/agentclientprotocol/codex-acp/tree/v2.6.0)
 
+[阅读与写作界面打磨计划](scholar-ui-polish-plan.md)
+
 ## 排版预览与隔离试排
 
 ### 常规项目预览
