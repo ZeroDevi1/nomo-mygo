@@ -180,6 +180,13 @@ func (s *Shell) scholarManuscriptLayout(c *ui.Context, p *scholarState, tab *Tab
 				}
 			}
 		}
+		if shown == typesetSource && tab.typesetMode == typesetSource && s.canPreviewTypeset(tab) {
+			m.Separator()
+			if m.Item(s.tr("sourceLocalPreview")).Checked(!tab.sourcePreviewOff).Chosen() {
+				tab.sourcePreviewOff = !tab.sourcePreviewOff
+				s.focusEditor = true
+			}
+		}
 	})
 }
 

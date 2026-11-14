@@ -144,7 +144,8 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 	if mode != typesetSemantic {
 		s.closeManuscriptEditor()
 	}
-	wantPreview := s.canPreviewTypeset(t) && mode != typesetSource && (s.scholar == nil || workspace != nil)
+	canPreview := s.canPreviewTypeset(t)
+	wantPreview := canPreview && mode != typesetSource && (s.scholar == nil || workspace != nil)
 	trial := wantPreview && workspace != nil && workspace.agent.trial.show
 	if trial {
 		s.closeCompile()
@@ -268,6 +269,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 		}
 	} else {
 		source()
+	}
+	if canPreview && mode == typesetSource && t.typesetMode == typesetSource {
+		s.sourcePreviewOverlay(c, t, workspace, el)
 	}
 	if p != nil {
 		p.flushPositionSync(c)

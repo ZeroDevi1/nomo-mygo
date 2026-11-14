@@ -107,6 +107,10 @@ type Shell struct {
 	manuscript        *manuscriptView
 	manuscriptVisible bool
 
+	sourcePreview        *sourcePreviewView
+	sourcePreviewVisible bool
+	sourcePreviewBusy    bool
+
 	quick   quickState     // 快捷插入菜单，见 quickinsert.go
 	link    linkEditor     // 链接快速编辑浮层，见 linkedit.go
 	snaps   snapshotsState // 历史快照窗口，见 snapshots.go
@@ -322,9 +326,12 @@ func (s *Shell) Open() *mygo.Window {
 			}
 		})
 	})
+	s.win.OnBlur(s.closeSourcePreview)
+	s.win.OnMinimize(s.closeSourcePreview)
 	// 主窗口关闭时一并关闭设置窗口，进程随最后一个窗口退出。
 	s.win.OnClosed(func() {
 		s.closeManuscriptEditor()
+		s.closeSourcePreview()
 		s.closeScholar()
 		s.closeCompile()
 		s.finishWorkspaceClose()
@@ -415,6 +422,7 @@ func (s *Shell) activate(i int) {
 		return
 	}
 	s.closeManuscriptEditor()
+	s.closeSourcePreview()
 	if prev := s.activeTab(); prev != nil {
 		prev.Ed.CloseEmbedEdit()
 		if p := s.scholar; p != nil && p.changes.tabID == prev.ID {

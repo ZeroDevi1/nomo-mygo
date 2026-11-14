@@ -41,6 +41,7 @@ type Tab struct {
 	// 只为满足共用代码路径）；未保存判定、保存与外部重载都走缓冲。大文件因此只占一份原文、打开不做 Markdown 解析。
 	plain               bool
 	typesetMode         int
+	sourcePreviewOff    bool
 	typesetPaused       bool // 取消后保持当前预览视图，直到用户主动恢复。
 	typesetSplitPercent float32
 	typesetCompactPDF   bool

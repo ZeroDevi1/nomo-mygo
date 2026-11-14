@@ -31,9 +31,13 @@ const (
 
 func (s *Shell) view(c *ui.Context) {
 	s.manuscriptVisible = false
+	s.sourcePreviewVisible = false
 	defer func() {
 		if !s.manuscriptVisible {
 			s.closeManuscriptEditor()
+		}
+		if !s.sourcePreviewVisible {
+			s.closeSourcePreview()
 		}
 	}()
 	if p := s.compile; p != nil && (s.previewProvider(p.tab) == nil || p.tab != s.activeTab() || p.tab.Path != p.sourcePath || p.tab.partner != 0 || s.mini.active) {

@@ -91,6 +91,7 @@ func (s *Shell) ShowWindow() { s.showFromTray() }
 func (s *Shell) hideToTray() {
 	s.win.Hide()
 	s.hiddenToTray = true
+	s.closeSourcePreview()
 	s.closeScholar()
 	s.closeCompile()
 	s.syncTrayActive()
