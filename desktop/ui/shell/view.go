@@ -56,6 +56,13 @@ func (s *Shell) view(c *ui.Context) {
 		s.applyEditorStyle(tab)
 	}
 	s.updateScholar(c, tab)
+	if s.revealFolder {
+		s.revealFolder = false
+		if p := s.scholarForTab(tab); p != nil {
+			width, _ := c.Size()
+			s.showScholarNavigation(p, scholarFiles, width)
+		}
+	}
 	s.syncEditorGroups()
 	s.applyDocumentAppearance(c, tab)
 	// 字体偏好可能再次 SetTheme，材质底层须在其后恢复透明。

@@ -59,8 +59,9 @@ type Shell struct {
 	version      string        // 应用版本，显示在设置的“关于”中
 	appIcon      [2]*ui.Bitmap // 浅色、深色外观的应用图标；解码失败或未提供时为 nil
 
-	folder *folderNode // 资源管理器根目录；nil 表示未打开文件夹
-	recent []config.RecentEntry
+	folder       *folderNode // 资源管理器根目录；nil 表示未打开文件夹
+	revealFolder bool        // 下一帧解析稿件项目后，显示文件导航
+	recent       []config.RecentEntry
 
 	// 查找替换（语义模式；源码模式使用 ui/editor 自带的查找栏）。
 	finding, replacing   bool
@@ -548,6 +549,10 @@ func (s *Shell) openFolder(path string) {
 	s.folder = root
 	s.prefs.SidebarHidden = false
 	s.remember(path, "folder")
+	if s.win != nil {
+		s.revealFolder = true
+		s.win.Invalidate()
+	}
 }
 
 // remember 记录最近打开（与原版 recent 条目格式一致）。

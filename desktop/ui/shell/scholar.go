@@ -666,7 +666,7 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 	section := p.nav
 	var files *folderNode
 	if section == scholarFiles {
-		if s.folder != nil && samePath(s.folder.path, p.project.Root) {
+		if s.folder != nil {
 			p.files = nil
 			files = s.folder
 		} else {
@@ -685,12 +685,12 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 		header.Height(windowsTabBarH).Padding(0, 6, 0, 12)
 	}
 	header.Children(func() {
-		title := s.tr(scholarDestinations[section].label)
-		if section == scholarFiles {
-			title = filepath.Base(p.project.Root)
+		title, path := s.tr(scholarDestinations[section].label), p.project.Root
+		if files != nil {
+			title, path = files.name, files.path
 		}
 		name := ui.Text(c, title).FontSize(11).Bold().TextColor(s.ch.muted).
-			SingleLine().Grow(1).MinWidth(0).Tooltip(p.project.Root)
+			SingleLine().Grow(1).MinWidth(0).Tooltip(path)
 		if s.pf.windows {
 			name.FontSize(14).FontWeight(600).TextColor(s.ch.text)
 		}
@@ -728,7 +728,7 @@ func (s *Shell) scholarProjectPane(c *ui.Context, p *scholarState) {
 			s.showScholarCatalog(p)
 		}
 	default:
-		ui.Scroll(c.Key(p.project.Root)).Grow(1).MinHeight(0).FillWidth().Children(func() {
+		ui.Scroll(c.Key(files.path)).Grow(1).MinHeight(0).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Padding(4, 6, 8, 6).Children(func() {
 				s.tree(c, files, p.project.Main)
 				if files.err != "" {
@@ -762,7 +762,7 @@ func (s *Shell) scholarMainMenu(m *ui.Menu, p *scholarState) {
 		p.agent = scholarAgentState{}
 		s.storeScholarProject(p)
 	}
-	if s.folder == nil && m.Item(s.tr("scholarOpenProjectFolder")).Chosen() {
+	if (s.folder == nil || !samePath(s.folder.path, p.project.Root)) && m.Item(s.tr("scholarOpenProjectFolder")).Chosen() {
 		s.openFolder(p.project.Root)
 	}
 }
