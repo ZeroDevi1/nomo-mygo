@@ -86,7 +86,7 @@ func (s *Shell) scholarPDFQuoteActions(c *ui.Context, p *scholarState, t *schola
 	ref := scholarACPQuote{scope: scholarReferenceScope(t), label: t.title}
 	thread := s.scholarACPQuoteThread(p, ref, false)
 	current := p.agent.acp.thread
-	conflict := p.agent.hasDraft() && (current.ID != thread.ID || current.Scope != thread.Scope)
+	conflict := p.agent.hasDraft() && !sameScholarACPThread(current, thread)
 	disabled := p.busy || p.agent.pendingPatch() != nil
 	known, imageOK := scholarACPImageCapability()
 	imageBlocked := q.picture && known && !imageOK
@@ -281,7 +281,7 @@ func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, 
 	attempt := q.attempt
 	original := p.agent.acp.thread
 	draft, instruction := p.agent.hasDraft(), p.agent.instruction
-	switching := newChat || original.ID != thread.ID || original.Scope != thread.Scope
+	switching := newChat || !sameScholarACPThread(original, thread)
 	go func() {
 		defer cancel()
 		var err error
@@ -330,12 +330,14 @@ func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, 
 				q.err = s.tr("scholarACPChooseDraft")
 			} else if known, available := scholarACPImageCapability(); picture && known && !available {
 				q.err = s.tr("scholarACPImageUnsupported")
-			} else if s.attachScholarACPQuote(p, ref, thread, newChat) {
+			} else if !s.attachScholarACPQuote(p, ref, thread, newChat, func() {
 				if prompt != "" && strings.TrimSpace(p.agent.instruction) == "" {
 					p.agent.instruction = prompt
 				}
-				*q = scholarPDFQuote{attempt: q.attempt + 1}
-			} else if p.err != "" {
+				if q.attempt == attempt && t.generation == generation {
+					*q = scholarPDFQuote{attempt: q.attempt + 1}
+				}
+			}) && p.err != "" {
 				q.err = p.err
 			}
 		})
@@ -363,7 +365,7 @@ func (s *Shell) scholarWebNativeQuoteMenu(p *scholarState, t *scholarReferenceTa
 				if available() {
 					ref := scholarWebACPQuote(t, address)
 					ref.text = selection
-					s.quoteScholar(p, ref, newChat)
+					s.quoteScholar(p, ref, newChat, nil)
 					s.win.Invalidate()
 				}
 			}})
@@ -454,7 +456,7 @@ func (s *Shell) captureScholarWebQuote(p *scholarState, t *scholarReferenceTab, 
 		}
 		return func() {
 			if p.references.focused == t && w.view == view && w.url == address {
-				s.quoteScholar(p, ref, newChat)
+				s.quoteScholar(p, ref, newChat, nil)
 			}
 		}, ctx.Err()
 	})

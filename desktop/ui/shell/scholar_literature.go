@@ -584,10 +584,11 @@ func (s *Shell) scholarReaderCitations(c *ui.Context, p *scholarState, e scholar
 	}
 	if isManuscript(s.activeTab()) && s.scholarReaderCommand(c.Key("scholarDiscussPaper"), "message-square-text", s.tr("scholarDiscussPaper"), false).Disabled(p.busy || p.agent.patch != nil || p.agent.batch != nil).Clicked() {
 		s.quoteScholar(p, scholarACPQuote{scope: scholarEntryACPScope(e), label: e.Title, locator: e.Key,
-			text: strings.Join([]string{e.Title, e.Author, e.Year, e.DOI, l.detail.Abstract}, "\n")}, false)
-		if p.agent.instruction == "" {
-			p.agent.instruction = s.tr("scholarPaperInstruction")
-		}
+			text: strings.Join([]string{e.Title, e.Author, e.Year, e.DOI, l.detail.Abstract}, "\n")}, false, func() {
+			if p.agent.instruction == "" {
+				p.agent.instruction = s.tr("scholarPaperInstruction")
+			}
+		})
 	}
 }
 

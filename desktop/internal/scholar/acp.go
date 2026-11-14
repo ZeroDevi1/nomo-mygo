@@ -120,9 +120,15 @@ func StartACP(ctx context.Context, workspace string, launch ACPOptions) (*ACPCon
 	if launch.ContextWindow > 0 {
 		config += `,"model_context_window":` + strconv.Itoa(launch.ContextWindow)
 	}
+	searchPath := exeDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	if runtime.GOOS == "darwin" {
+		// Finder launches can find the adapter through the fallback above
+		// while its npm entry point still needs Node on the child PATH.
+		searchPath += ":/opt/homebrew/bin:/usr/local/bin"
+	}
 	env := append(os.Environ(),
 		"INITIAL_AGENT_MODE="+mode,
-		"PATH="+exeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PATH="+searchPath,
 		"CODEX_CONFIG="+config+"}",
 	)
 	process, err := stdio.Start(context.WithoutCancel(ctx), stdio.Command{Executable: path, Args: args, Dir: dir, Env: env, Stderr: io.Discard})

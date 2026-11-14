@@ -204,7 +204,7 @@ func (s *Shell) showScholarReference(st *editor.State, p *scholarState, e schola
 		})
 		if ui.Button(c, s.tr("scholarDiscussPaper")).Disabled(p.busy || p.agent.patch != nil || p.agent.batch != nil).Clicked() {
 			s.quoteScholar(p, scholarACPQuote{scope: scholarEntryACPScope(e), label: e.Title, locator: e.Key,
-				text: fmt.Sprintf("%s\n%s\n%s", e.Title, e.Author, e.Abstract)}, false)
+				text: fmt.Sprintf("%s\n%s\n%s", e.Title, e.Author, e.Abstract)}, false, nil)
 		}
 		glyph, label := s.scholarReferenceOpenLabel(p, e)
 		if s.scholarReaderCommand(c.Key("open-reference"), glyph, label, false).Disabled(p.busy).Clicked() {

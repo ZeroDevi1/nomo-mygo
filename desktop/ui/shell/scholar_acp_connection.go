@@ -27,6 +27,10 @@ type scholarACPConnectionState struct {
 	needsLogin bool
 }
 
+func (state *scholarACPConnectionState) ready() bool {
+	return state.cancel == nil && state.err == nil && !state.needsLogin
+}
+
 func startScholarACP() {
 	state := &registry.acp
 	if state.cancel != nil {
@@ -140,25 +144,41 @@ func (s *Shell) scholarACPAccountMenu(m *ui.Menu, p *scholarState) {
 
 func (s *Shell) scholarACPConnectionNotice(c *ui.Context, p *scholarState) {
 	state := &registry.acp
-	if state.cancel != nil || !state.needsLogin && state.err == nil {
-		return
-	}
 	label := s.tr("scholarACPUnavailable")
-	if state.needsLogin {
+	glyph := "info"
+	connecting := state.cancel != nil
+	missing := !state.needsLogin && (errors.Is(state.err, exec.ErrNotFound) || errors.Is(state.err, os.ErrNotExist))
+	switch {
+	case connecting:
+		label, glyph = s.tr("scholarACPConnecting"), "loader-circle"
+	case state.needsLogin:
 		label = s.tr("scholarACPSignInRequired")
-	} else if errors.Is(state.err, exec.ErrNotFound) || errors.Is(state.err, os.ErrNotExist) {
+	case missing:
 		label = s.tr("scholarCodexSetup")
 	}
-	ui.Row(c).FillWidth().MinWidth(0).Padding(6, 8).Gap(6).AlignItems(ui.Center).
-		Background(s.ch.tabBar).Border(1, s.ch.separator).Radius(6).Children(func() {
-		message := ui.Text(c.Key("message"), label).FontSize(11).Wrap().Grow(1).MinWidth(0)
-		if state.err != nil {
-			message.Tooltip(state.err.Error())
+	ui.Column(c).FillWidth().MinWidth(0).Padding(6, 8).Gap(3).
+		Background(s.ch.hover).Radius(c.Theme().Radius).Children(func() {
+		ui.Row(c.Key("status")).FillWidth().Gap(7).AlignItems(ui.Start).Children(func() {
+			ui.Icon(c.Key("icon"), s.icon(glyph)).FontSize(13).Shrink(0).TextColor(s.ch.muted)
+			message := scholarReaderText(c.Key("message"), label).Grow(1).MinWidth(0)
+			if state.err != nil && !connecting {
+				message.Tooltip(state.err.Error())
+			}
+		})
+		if connecting {
+			return
 		}
 		if state.needsLogin && len(state.info.AuthMethods) > 0 {
-			s.scholarMenuButton(c.Key("sign-in"), "user", s.tr("scholarACPSignIn"), true).
+			s.scholarReaderCommand(c.Key("sign-in"), "user", s.tr("scholarACPSignIn"), true).
 				Disabled(p.busy).Menu(func(m *ui.Menu) { s.scholarACPAccountMenu(m, p) })
-		} else if ui.Button(c.Key("retry"), s.tr("scholarACPRetry")).FontSize(11).Disabled(p.busy).Clicked() {
+			return
+		}
+		if missing && s.scholarReaderCommand(c.Key("copy"), "copy", s.tr("scholarACPCopyInstall"), false).Clicked() {
+			c.Services().WriteClipboard("npm install -g @agentclientprotocol/codex-acp@2.6.0")
+			s.status = s.tr("copied")
+		}
+		if s.scholarReaderCommand(c.Key("retry"), "refresh-cw", s.tr("scholarACPRetry"), false).Disabled(p.busy).Clicked() {
+			p.err = ""
 			startScholarACP()
 		}
 	})

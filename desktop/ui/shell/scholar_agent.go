@@ -170,18 +170,19 @@ func (s *Shell) scholarInlinePrompt(c *ui.Context, p *scholarState) {
 		ref := s.scholarSourceQuote(p, a.inlineTarget)
 		blocked := p.busy || a.pendingPatch() != nil
 		if s.scholarACPAction(c.Key("append"), "message-square", s.tr("scholarACPAppend"), false).Disabled(blocked).Clicked() {
-			s.quoteScholar(p, ref, false)
+			s.quoteScholar(p, ref, false, nil)
 		}
 		if s.scholarACPAction(c.Key("new"), "plus", s.tr("scholarACPNew"), false).Disabled(blocked).Clicked() {
-			s.quoteScholar(p, ref, true)
+			s.quoteScholar(p, ref, true, nil)
 		}
 		ui.Box(c.Key("divider")).Size(1, 16).Shrink(0).Background(s.ch.separator)
 		if s.scholarACPAction(c.Key("edit"), "file-pen-line", s.tr("scholarEditSelection"), true).Disabled(blocked).Clicked() {
 			target := a.inlineTarget
 			ref.text = ""
-			s.quoteScholar(p, ref, false)
-			a.target, a.multi = target, false
-			a.parts[0], a.include[0] = target.before, true
+			s.quoteScholar(p, ref, false, func() {
+				a.target, a.multi = target, false
+				a.parts[0], a.include[0] = target.before, true
+			})
 		}
 	})
 	if panel.OverlayShortcut(0, ui.KeyEscape) || panel.PressedOutside() {
@@ -228,7 +229,7 @@ var scholarAgentPrompts = [...]struct{ name, prompt string }{
 func (s *Shell) scholarAgentAttachmentButton(c *ui.Context, p *scholarState, shortcut bool) {
 	a := &p.agent
 	label := s.tr("scholarAgentAttach")
-	add := s.toolButton(c.Key("add"), "plus", label, a.attachments).Label(label).FocusRing(true).Disabled(p.busy)
+	add := s.scholarCompactIcon(c.Key("add"), "paperclip", label, a.attachments).Disabled(p.busy)
 	if !p.busy && (add.Clicked() || shortcut) {
 		a.acp.modelDetails = false
 		a.attachments = !a.attachments

@@ -56,15 +56,13 @@ func (s *Shell) scholarACPModelDetails(c *ui.Context, p *scholarState) {
 	if summary != "" {
 		label += " · " + summary
 	}
-	enabled := !p.busy && !registry.acp.needsLogin && (len(a.configOptions()) > 0 || actual > 0)
-	button := ui.ButtonBase(c.Key("button")).MaxWidth(204).MinWidth(0).Height(24).Padding(0, 8).
-		Radius(12).Gap(5).AlignItems(ui.Center).FocusRing(true).Label(label).Tooltip(label).Disabled(!enabled)
+	enabled := !p.busy && registry.acp.ready() && (len(a.configOptions()) > 0 || actual > 0)
+	button := ui.ButtonBase(c.Key("button")).MaxWidth(204).MinWidth(0).Height(26).Padding(0, 6).
+		Radius(c.Theme().Radius).Gap(5).AlignItems(ui.Center).FocusRing(true).Label(label).Tooltip(label).Disabled(!enabled)
 	switch {
-	case a.modelDetails:
-		button.Background(s.ch.accent.Alpha(0.12))
-	case button.Hovered():
-		button.Background(s.ch.selected)
-	default:
+	case enabled && (a.modelDetails || button.Pressed()):
+		button.Background(s.ch.pressed)
+	case enabled && button.Hovered():
 		button.Background(s.ch.hover)
 	}
 	button.Children(func() {

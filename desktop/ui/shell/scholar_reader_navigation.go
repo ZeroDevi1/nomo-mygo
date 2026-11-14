@@ -169,7 +169,7 @@ func (s *Shell) scholarACPStarter(c *ui.Context, p *scholarState) {
 		} else if !a.hasDraft() && t.bitmap != nil && t.quote.cancel == nil && scholarValidPDFRegion(t.quote.region) {
 			label := s.tr("scholarACPExplainSelection")
 			known, available := scholarACPImageCapability()
-			if s.scholarACPAction(c, "quote", label, false).Disabled(t.quote.picture && known && !available).Clicked() {
+			if s.scholarReaderCommand(c, "quote", label, false).Disabled(t.quote.picture && known && !available).Clicked() {
 				ref := scholarACPQuote{scope: scope, label: t.title}
 				s.captureScholarPDFQuote(p, t, s.scholarACPQuoteThread(p, ref, false), false, false, label)
 			}
@@ -189,7 +189,7 @@ func (s *Shell) scholarACPStarter(c *ui.Context, p *scholarState) {
 
 func (s *Shell) scholarACPStarterAction(c *ui.Context, p *scholarState, key, glyph, diagnostics string) {
 	label := s.tr(key)
-	if !s.scholarACPAction(c, glyph, label, false).Clicked() {
+	if !s.scholarReaderCommand(c, glyph, label, false).Clicked() {
 		return
 	}
 	a := &p.agent
