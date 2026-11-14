@@ -2,7 +2,7 @@
   "name": "Nomo Scholar",
   "slug": "nomo",
   "identifier": "com.nomo.scholar",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "icon": "desktop/packaging/icons/nomo/source/nomo-app-light-1024.png",
   "main": "./desktop",
   "out": "target/mygo",
