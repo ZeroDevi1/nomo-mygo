@@ -1,0 +1,8 @@
+{
+  "name": "Nomo Asuka Dev",
+  "id": "com.nomo.asuka-dev",
+  "version": "0.1.0",
+  "fileTypes": [
+    { "name": "Markdown", "extensions": ["md", "markdown"], "mimeTypes": ["text/markdown"] }
+  ]
+}

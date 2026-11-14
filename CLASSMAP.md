@@ -23,6 +23,12 @@
 | 原生界面启动、外部打开投递、托盘菜单、PDF 与更新检查接入 | `desktop/native.go` | `desktop/external_open.go`, `desktop/tray.go`, `desktop/export.go`, `desktop/update_check.go` | 修改外壳选项、第二实例与 macOS 打开文件事件的投递、托盘菜单 |
 | 启动参数识别 | `desktop/external_open.go` | `desktop/native.go` | 修改受支持文档与文件夹的识别、去重与路径规范化 |
 
+### Asuka Markdown 开发实验
+
+| Responsibility | Primary code | Related code | Change when |
+|---|---|---|---|
+| 独立原生源码编辑与 Markdown 预览 | `desktop/asuka-dev/main.go` | `asuka.json`、`README.md`、`desktop/internal/textcodec` | 修改实验入口、文件编码、预览更新或 Asuka 工具链 |
+
 ### 原生语义编辑器原型（Go，P0）
 
 | Responsibility | Primary code | Related code | Change when |
