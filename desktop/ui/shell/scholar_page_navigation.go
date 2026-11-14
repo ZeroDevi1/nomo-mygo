@@ -17,10 +17,6 @@ func (s *Shell) scholarPageStatus(c *ui.Context, p *scholarState, tab *Tab) {
 	if p.references.catalog || p.agent.trial.show {
 		return
 	}
-	width, _ := c.Size()
-	if s.scholarInspectorVisible(p, width) && s.scholarInspectorPrimary(p, width) {
-		return
-	}
 	if reading := p.references.focused; reading != nil {
 		if reading.pages > 0 {
 			s.scholarPageControl(c.Key(reading), &reading.pageNavigation, reading.title, reading.page, reading.pages, reading.setPage)
@@ -28,7 +24,14 @@ func (s *Shell) scholarPageStatus(c *ui.Context, p *scholarState, tab *Tab) {
 		return
 	}
 	pane := s.compile
-	if pane == nil || pane.tab != tab || pane.parkedPage != 0 || pane.pages == 0 {
+	if pane == nil || pane.tab != tab || pane.pages == 0 {
+		return
+	}
+	if pane.parkedPage != 0 {
+		s.scholarPageControl(c.Key(pane), &pane.pageNavigation, filepath.Base(pane.path), pane.parkedPage, pane.pages, func(page int) {
+			pane.parkedPage = page
+			tab.typesetPage, tab.typesetPagePath = page, pane.path
+		})
 		return
 	}
 	page := pane.page

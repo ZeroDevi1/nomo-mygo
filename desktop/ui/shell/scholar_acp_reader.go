@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"math"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,15 +19,26 @@ import (
 	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
 
+	"nomo/desktop/internal/scholar"
 	"nomo/desktop/typeset"
 )
 
 type scholarPDFQuote struct {
-	selecting, dragging bool
-	popup               bool
-	x, y                float32
-	region, anchor      ui.Rect
-	err                 string
+	selecting, dragging, popup, picture bool
+	focusReader, focusActions           bool
+	x, y                                float32
+	region, bounds                      ui.Rect
+	err                                 string
+	cancel                              context.CancelFunc
+	attempt                             uint64
+}
+
+func (q *scholarPDFQuote) cancelCapture() {
+	if q.cancel != nil {
+		q.cancel()
+		q.cancel = nil
+	}
+	q.attempt++
 }
 
 func (s *Shell) scholarPDFQuoteControls(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
@@ -35,45 +48,113 @@ func (s *Shell) scholarPDFQuoteControls(c *ui.Context, p *scholarState, t *schol
 		if q.selecting {
 			label = s.tr("cancel")
 		}
-		if s.scholarACPAction(c.Key("region"), "maximize-2", label, q.selecting).Disabled(p.busy).Clicked() {
-			*q = scholarPDFQuote{selecting: !q.selecting}
+		button := s.scholarACPAction(c.Key("region"), "maximize-2", label, q.selecting)
+		if button.Disabled(p.busy && !q.selecting).Clicked() {
+			if p.references.focused != t {
+				if group := s.groups.root.containing(workspaceItem{reference: t}); group != nil {
+					s.activateWorkspaceItem(group, workspaceItem{reference: t})
+				}
+			}
+			q.cancelCapture()
+			*q = scholarPDFQuote{selecting: !q.selecting, focusReader: true, attempt: q.attempt}
 		}
-		if q.selecting && q.region.W > 0 && q.region.H > 0 && !q.dragging && !q.popup {
+		if q.selecting && q.region.W > 0 && !q.dragging && !q.popup {
 			s.scholarPDFQuoteActions(c.Key("actions"), p, t)
 		} else if q.selecting && !q.popup {
-			ui.Text(c, s.tr("scholarACPDragRegion")).FontSize(11).SingleLine().TextColor(s.ch.muted)
+			ui.Text(c, s.tr("scholarACPDragRegion")).FontSize(11).SingleLine().MinWidth(0).TextColor(s.ch.muted).
+				Tooltip(s.tr("scholarACPPDFKeyboard"))
 		}
 	})
-	if q.err != "" {
-		ui.Text(c.Key("error"), q.err).Wrap().Padding(0, 8).FontSize(11).TextColor(scholarInk(c, "warning"))
+	message := q.err
+	if known, available := scholarACPImageCapability(); message == "" && q.picture && known && !available {
+		message = s.tr("scholarACPImageUnsupported")
 	}
+	if message != "" {
+		ui.Text(c.Key("error"), message).Wrap().Padding(0, 8).FontSize(11).TextColor(scholarInk(c, "warning")).
+			Role(ui.RoleStatus).Label(message)
+	}
+}
+
+func scholarACPImageCapability() (known, available bool) {
+	info := registry.acp.info
+	prompt := info.Capabilities.Session.Prompt
+	return info.ProtocolVersion != 0, prompt != nil && prompt.Image != nil
 }
 
 func (s *Shell) scholarPDFQuoteActions(c *ui.Context, p *scholarState, t *scholarReferenceTab) {
 	q := &t.quote
-	ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-		if s.scholarACPAction(c.Key("copy"), "copy", s.tr("scholarACPCopyText"), false).Disabled(p.busy).Clicked() {
-			q.popup = false
-			s.captureScholarPDFQuote(p, t, q.region, false, true, false)
+	ref := scholarACPQuote{scope: scholarReferenceScope(t), label: t.title}
+	thread := s.scholarACPQuoteThread(p, ref, false)
+	current := p.agent.acp.thread
+	conflict := p.agent.hasDraft() && (current.ID != thread.ID || current.Scope != thread.Scope)
+	disabled := p.busy || p.agent.pendingPatch() != nil
+	known, imageOK := scholarACPImageCapability()
+	imageBlocked := q.picture && known && !imageOK
+	label, glyph := "scholarACPAskText", "quote"
+	mode, modeIcon := "scholarACPSwitchImage", "image"
+	if q.picture {
+		label, glyph = "scholarACPAskImage", "image"
+		mode, modeIcon = "scholarACPSwitchText", "type"
+	}
+	ui.Row(c).Grow(1).MinWidth(0).Gap(4).AlignItems(ui.Center).Role(ui.RoleToolbar).
+		Label(s.tr("scholarACPPDFRegion")).Children(func() {
+		if q.cancel != nil {
+			label := s.tr("cancel")
+			if s.scholarACPAction(c.Key("cancel-capture"), "x", label, false).Clicked() {
+				q.cancelCapture()
+				q.focusActions = true
+			}
+			return
 		}
-		for _, action := range []struct {
-			key, label, icon string
-			picture          bool
-		}{
-			{"text", s.tr("scholarACPText"), "type", false},
-			{"image", s.tr("scholarACPImage"), "image", true},
-		} {
-			s.scholarACPAction(c.Key(action.key), action.icon, action.label, false).
-				Disabled(p.busy || p.agent.pendingPatch() != nil).Menu(func(m *ui.Menu) {
-				if m.Item(s.tr("scholarACPAppend")).Chosen() {
-					q.popup = false
-					s.captureScholarPDFQuote(p, t, q.region, action.picture, false, false)
+		secondary := func(m *ui.Menu) {
+			if m.Item(s.tr("scholarACPNew")).Disabled(disabled || imageBlocked).Chosen() {
+				s.captureScholarPDFQuote(p, t, s.scholarACPQuoteThread(p, ref, true), true, false, "")
+			}
+			if m.Item(s.tr("scholarACPCopyText")).Chosen() {
+				s.captureScholarPDFQuote(p, t, current, false, true, "")
+			}
+			m.Separator()
+			if m.Item(s.tr(mode)).Chosen() {
+				q.picture, q.err = !q.picture, ""
+			}
+		}
+		var ask ui.Element
+		if s.pf.windows && !conflict {
+			split := ui.PrimarySplitButton(c.Key("ask-split"), s.tr(label))
+			split.Group.Grow(1).MinWidth(0)
+			ask = split.Button.MinWidth(0).Shrink(1)
+			split.Arrow.Label(s.tr("scholarACPOptions")).Tooltip(s.tr("scholarACPOptions")).Menu(secondary)
+		} else {
+			ask = s.scholarACPAction(c.Key("ask"), glyph, s.tr(label), true).Grow(1)
+			s.toolButton(c.Key("more"), "ellipsis", s.tr("scholarACPOptions"), false).
+				Label(s.tr("scholarACPOptions")).FocusRing(true).Shrink(0).Menu(secondary)
+		}
+		ask.Disabled(disabled || imageBlocked).Tooltip(s.tr(label))
+		if q.focusActions {
+			if disabled || imageBlocked {
+				q.focusActions = false
+			} else if ask.Bounds().W > 0 {
+				ask.Focus(ui.FocusOptions{PreventScroll: true})
+				q.focusActions = false
+			} else {
+				c.After(time.Millisecond)
+			}
+		}
+		if conflict {
+			ask.Menu(func(m *ui.Menu) {
+				if m.Item(s.tr("scholarACPJoinDraft")).Chosen() {
+					s.captureScholarPDFQuote(p, t, current, false, false, "")
 				}
-				if m.Item(s.tr("scholarACPNew")).Chosen() {
-					q.popup = false
-					s.captureScholarPDFQuote(p, t, q.region, action.picture, false, true)
+				if m.Item(s.tr("scholarACPSwitchThread")).Chosen() {
+					s.captureScholarPDFQuote(p, t, thread, false, false, "")
 				}
 			})
+		} else if ask.Clicked() {
+			s.captureScholarPDFQuote(p, t, thread, false, false, "")
+		}
+		if s.toolButton(c.Key("mode"), modeIcon, s.tr(mode), q.picture).Label(s.tr(mode)).
+			FocusRing(true).Shrink(0).Clicked() {
+			q.picture, q.err = !q.picture, ""
 		}
 	})
 }
@@ -85,32 +166,63 @@ func (s *Shell) scholarPDFQuotePopup(c *ui.Context, p *scholarState) {
 	}
 	q := &t.quote
 	w, h := c.Size()
-	width := min(float32(342), max(1, w-24))
-	x := max(12, min(q.anchor.X, w-width-12))
-	y := max(44, min(q.anchor.Y+6, h-62))
+	if s.scholarInspectorVisible(p, w) && s.scholarInspectorPrimary(p, w) {
+		return
+	}
+	width := min(float32(250), max(1, w-24))
+	left := q.bounds.X + q.region.X*q.bounds.W
+	top := q.bounds.Y + q.region.Y*q.bounds.H
+	bottom := top + q.region.H*q.bounds.H
+	x := max(12, min(left, w-width-12))
+	y := bottom + 6
+	if y+36 > h-28 {
+		y = top - 42
+	}
+	y = max(44, min(y, h-64))
 	panel := s.scholarACPSelectionBar(c.Key(t).Key("pdf-selection"), x, y, width, func() {
 		s.scholarPDFQuoteActions(c, p, t)
 	})
-	if panel.OverlayShortcut(0, ui.KeyEscape) || panel.PressedOutside() {
+	if panel.OverlayShortcut(0, ui.KeyEscape) {
+		q.cancelCapture()
+		q.popup, q.selecting, q.focusReader, q.err = false, false, true, ""
+	} else if panel.PressedOutside() {
 		q.popup = false
 	}
 }
 
-func (s *Shell) scholarPDFQuotePage(c *ui.Context, t *scholarReferenceTab, width float32) {
+func (s *Shell) scholarPDFQuotePage(c *ui.Context, p *scholarState, t *scholarReferenceTab, width float32) {
 	q := &t.quote
-	if !q.selecting {
-		ui.Image(c.Key("page"), t.bitmap).WidthPercent(width).AspectRatio(t.pageAspect).Label(t.title)
-		return
-	}
-	ui.Column(c.Key("region")).WidthPercent(width).AspectRatio(t.pageAspect).Children(func() {
-		el := ui.Image(c.Key("selectable-page"), t.bitmap).FillWidth().AspectRatio(t.pageAspect).
-			Label(t.title).Cursor(ui.CursorCrosshair)
+	ui.Column(c.Key("pdf-image")).WidthPercent(width).AspectRatio(t.pageAspect).Children(func() {
+		el := ui.Image(c.Key("page"), t.bitmap).FillWidth().AspectRatio(t.pageAspect).Label(t.title).Focusable().FocusRing(true)
 		bounds := el.Bounds()
-		el.HandleInput(func(ev ui.InputEvent) bool { return q.regionInput(bounds, ev) })
-		if r := q.region; r.W > 0 && r.H > 0 {
-			ui.Box(c.Key("highlight")).Absolute().Left(r.X*bounds.W).Top(r.Y*bounds.H).Size(r.W*bounds.W, r.H*bounds.H).
-				Background(ui.RGBA(31, 128, 255, 38)).Border(1, s.ch.accent).PassThrough()
+		q.bounds = bounds
+		if q.focusReader || t.focusPage {
+			if bounds.W > 0 {
+				el.Focus(ui.FocusOptions{PreventScroll: true})
+				q.focusReader, t.focusPage = false, false
+			} else {
+				c.After(time.Millisecond)
+			}
 		}
+		if q.selecting {
+			el.Description(s.tr("scholarACPPDFKeyboard")).KeyShortcuts(0, ui.KeyEnter).KeyShortcuts(0, ui.KeyEscape)
+			el.Cursor(ui.CursorCrosshair).HandleInput(func(ev ui.InputEvent) bool { return q.regionInput(bounds, ev) })
+			if el.Shortcut(0, ui.KeyEscape) {
+				q.cancelCapture()
+				q.selecting, q.popup, q.err = false, false, ""
+			}
+			if el.Shortcut(0, ui.KeyEnter) {
+				if !scholarValidPDFRegion(q.region) {
+					q.region = ui.Rect{W: 1, H: 1}
+				}
+				q.popup, q.focusActions = true, true
+			}
+			if r := q.region; scholarValidPDFRegion(r) {
+				ui.Box(c.Key("selection")).Absolute().Left(r.X*bounds.W).Top(r.Y*bounds.H).Size(r.W*bounds.W, r.H*bounds.H).
+					Background(s.ch.accent.Alpha(.16)).Border(1, s.ch.accent).PassThrough()
+			}
+		}
+		s.scholarPDFSourceHighlight(c, p, t, bounds)
 	})
 }
 
@@ -121,6 +233,7 @@ func (q *scholarPDFQuote) regionInput(bounds ui.Rect, ev ui.InputEvent) bool {
 	x, y := max(0, min(1, ev.X/bounds.W)), max(0, min(1, ev.Y/bounds.H))
 	switch ev.Kind {
 	case ui.InputPointerDown:
+		q.cancelCapture()
 		q.x, q.y, q.dragging, q.popup, q.region, q.err = x, y, true, false, ui.Rect{}, ""
 		return true
 	case ui.InputPointerMove, ui.InputPointerUp:
@@ -133,8 +246,7 @@ func (q *scholarPDFQuote) regionInput(bounds ui.Rect, ev ui.InputEvent) bool {
 			if ev.Canceled || q.region.W*bounds.W < 3 || q.region.H*bounds.H < 3 {
 				q.region = ui.Rect{}
 			} else {
-				q.anchor = ui.Rect{X: bounds.X + q.region.X*bounds.W, Y: bounds.Y + (q.region.Y+q.region.H)*bounds.H}
-				q.popup = true
+				q.popup, q.focusActions = true, true
 			}
 		}
 		return true
@@ -142,15 +254,41 @@ func (q *scholarPDFQuote) regionInput(bounds ui.Rect, ev ui.InputEvent) bool {
 	return false
 }
 
-func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, region ui.Rect, picture, copyText, newChat bool) {
-	path, page, generation := t.path, t.page, t.generation
-	ref := scholarACPQuote{scope: scholarReferenceScope(t), label: t.title, locator: fmt.Sprintf(s.tr("scholarACPPage"), page)}
-	empty := s.tr("scholarACPNoSelection")
-	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
-		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, thread scholarACPThread, newChat, copyText bool, prompt string) {
+	q := &t.quote
+	if q.cancel != nil || !scholarValidPDFRegion(q.region) {
+		return
+	}
+	path, page, generation, shown := t.path, t.page, t.generation, t.fileInfo
+	picture, region := q.picture && !copyText, q.region
+	pdf := scholarPDFSource{Item: t.entry.RemoteID, Library: t.zotero.Group, Attachment: t.key, Page: page, Region: region}
+	if t.key == "" {
+		name, err := scholar.Relative(p.project.Root, path)
+		if err != nil {
+			q.err = s.tr("scholarACPSourceUnavailable")
+			return
+		}
+		pdf.Path = filepath.ToSlash(name)
+	}
+	label := t.title
+	if t.entry.Author != "" && t.entry.Year != "" {
+		label = strings.TrimSpace(t.entry.Author) + " " + strings.TrimSpace(t.entry.Year)
+	}
+	ref := scholarACPQuote{scope: scholarReferenceScope(t), label: label}
+	empty, unavailable := s.tr("scholarACPEmptyPDFText"), s.tr("scholarACPSourceUnavailable")
+	ctx, cancel := context.WithTimeout(p.ctx, 20*time.Second)
+	q.cancel, q.err = cancel, ""
+	attempt := q.attempt
+	original := p.agent.acp.thread
+	draft, instruction := p.agent.hasDraft(), p.agent.instruction
+	switching := newChat || original.ID != thread.ID || original.Scope != thread.Scope
+	go func() {
 		defer cancel()
 		var err error
-		if picture {
+		pdf.Version, err = scholarPDFVersion(ctx, path, shown)
+		if err != nil {
+			err = errors.New(unavailable)
+		} else if picture {
 			img, readErr := typeset.ReadPDFPage(ctx, path, page, scholarReferenceEdge)
 			if readErr != nil {
 				err = readErr
@@ -163,22 +301,45 @@ func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, 
 				err = errors.New(empty)
 			}
 		}
-		return func() {
-			if p.references.focused != t || t.generation != generation {
+		if err == nil && !copyText {
+			pdf.PageLabel = typeset.PDFPageLabel(ctx, path, page)
+			ref.pdf = pdf
+			label := pdf.PageLabel
+			if label == "" {
+				label = strconv.Itoa(page)
+			}
+			ref.locator = "p." + label
+		}
+		if err == nil {
+			err = ctx.Err()
+			if after, statErr := os.Stat(path); err == nil && (statErr != nil || shown == nil || !scholarSamePDFVersion(shown, after)) {
+				err = errors.New(unavailable)
+			}
+		}
+		s.post(func() {
+			if s.scholar != p || p.references.catalog || p.references.focused != t || t.generation != generation || q.attempt != attempt {
 				return
 			}
+			q.cancel = nil
 			if err != nil {
-				t.quote.err = err.Error()
-				return
-			}
-			if copyText {
+				q.err = err.Error()
+			} else if copyText {
 				s.svc.WriteClipboard(ref.text)
-			} else {
-				t.quote = scholarPDFQuote{}
-				s.quoteScholar(p, ref, newChat)
+			} else if p.busy || p.agent.acp.thread != original ||
+				switching && (instruction != p.agent.instruction || !draft && p.agent.hasDraft()) {
+				q.err = s.tr("scholarACPChooseDraft")
+			} else if known, available := scholarACPImageCapability(); picture && known && !available {
+				q.err = s.tr("scholarACPImageUnsupported")
+			} else if s.attachScholarACPQuote(p, ref, thread, newChat) {
+				if prompt != "" && strings.TrimSpace(p.agent.instruction) == "" {
+					p.agent.instruction = prompt
+				}
+				*q = scholarPDFQuote{attempt: q.attempt + 1}
+			} else if p.err != "" {
+				q.err = p.err
 			}
-		}, ctx.Err()
-	})
+		})
+	}()
 }
 
 func (s *Shell) scholarWebNativeQuoteMenu(p *scholarState, t *scholarReferenceTab, event *mygo.ContextMenuEvent) {

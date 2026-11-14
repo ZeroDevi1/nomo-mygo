@@ -238,6 +238,7 @@ func (c *ACPConnection) RunTurn(ctx context.Context, id acp.SessionId, blocks []
 		return false, err
 	}
 	c.events.acknowledge(res.MessageId)
+	progress(c.Progress())
 	defer func() { progress(c.Progress()) }()
 	ticker := time.NewTicker(65 * time.Millisecond)
 	defer ticker.Stop()

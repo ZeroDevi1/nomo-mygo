@@ -14,6 +14,7 @@ import (
 )
 
 type ACPMessage struct {
+	ID   acp.MessageId
 	Role string
 	Text string
 	meta map[string]json.RawMessage
@@ -26,6 +27,7 @@ type ACPActivity struct {
 }
 
 type ACPProgress struct {
+	PromptID      acp.MessageId
 	Messages      []ACPMessage
 	Activity      []ACPActivity
 	Config        []acp.SessionConfigOption
@@ -87,7 +89,7 @@ func (c *ACPConnection) Progress() ACPProgress {
 	e := c.events
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := ACPProgress{State: e.state, Usage: e.usage, ContextWindow: e.contextWindow, Title: e.title, Config: e.config, Commands: e.commands}
+	out := ACPProgress{PromptID: e.ack, State: e.state, Usage: e.usage, ContextWindow: e.contextWindow, Title: e.title, Config: e.config, Commands: e.commands}
 	if e.cost != nil {
 		out.Usage += fmt.Sprintf(" · %.4g %s", e.cost.Amount, acpTail(e.cost.Currency, 12))
 	}
@@ -337,17 +339,28 @@ func (e *acpEvents) message(id acp.MessageId, role string, appendContent bool, b
 	if !appendContent {
 		m.Text = ""
 	}
-	m.Role = role
+	m.ID, m.Role = id, role
+	limit := 16 << 10
+	if role == "user" {
+		limit = 96 << 10 // Text, staged manuscript copies, and their ACP framing.
+	}
 	for _, block := range blocks {
 		switch {
 		case block.Text != nil:
-			m.Text = acpTail(m.Text+block.Text.Text, 16<<10)
+			content := block.Text.Text
+			// Codex ACP replays images as Markdown links to inline data URLs.
+			// Keep the transcript and its adjacent citation markers in bounds.
+			if role == "user" && strings.HasPrefix(content, "[@image](data:image/") &&
+				strings.HasSuffix(content, ")") && strings.Contains(content, ";base64,") {
+				content = "\n[图片]"
+			}
+			m.Text = acpTail(m.Text+content, limit)
 		case block.Image != nil:
-			m.Text = acpTail(m.Text+"\n[图片]", 16<<10)
+			m.Text = acpTail(m.Text+"\n[图片]", limit)
 		case block.Resource != nil && block.Resource.Resource.TextResourceContents != nil:
-			m.Text = acpTail(m.Text+"\n"+block.Resource.Resource.TextResourceContents.Text, 16<<10)
+			m.Text = acpTail(m.Text+"\n"+block.Resource.Resource.TextResourceContents.Text, limit)
 		case block.ResourceLink != nil:
-			m.Text = acpTail(m.Text+"\n"+block.ResourceLink.Name, 16<<10)
+			m.Text = acpTail(m.Text+"\n"+block.ResourceLink.Name, limit)
 		}
 	}
 	e.messages[id] = m

@@ -33,8 +33,9 @@ type scholarACPThread struct {
 }
 
 type scholarACPQuote struct {
-	scope, label, locator, text string
-	png                         []byte
+	id, scope, label, locator, text string
+	pdf                             scholarPDFSource
+	png                             []byte
 }
 
 type scholarACPState struct {
@@ -52,15 +53,36 @@ type scholarACPState struct {
 	forms                     []scholarACPFormDraft
 	previewQuote              int
 	previewImage              *ui.Bitmap
+	scroll, reviewScroll      ui.ScrollState
+	focusTranscript           bool
+	sourcePreview             string
+	sourcePreviewError        string
+	sourcePreviewImage        *ui.Bitmap
+	cancelSourcePreview       context.CancelFunc
+	sourcePreviewContext      context.Context
 }
 
 func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState, singlePane bool) {
 	a := &p.agent
 	state := &a.acp
-	sessions := state.historyOpen || state.thread.ID == "" && !a.running
-	ui.Column(c).Fill().Grow(1).MinHeight(0).Children(func() {
+	sessions := state.historyOpen
+	review := a.pendingPatch() != nil
+	ui.Column(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 		s.scholarACPHeader(c.Key("header"), p, singlePane, sessions)
-		body := ui.Scroll(c.Key("chat-body")).Grow(1).FillWidth().MinHeight(0)
+		body := ui.Scroll(c.Key("chat-body").Key(sessions).Key(review)).Grow(1).FillWidth().MinHeight(0)
+		if review {
+			body.TrackScroll(&state.reviewScroll)
+		} else if !sessions {
+			body.TrackScroll(&state.scroll).Focusable().Label(s.tr("scholarACPChat"))
+			if state.focusTranscript {
+				if body.Bounds().W > 0 {
+					body.Focus(ui.FocusOptions{PreventScroll: true})
+					state.focusTranscript = false
+				} else {
+					c.After(time.Millisecond)
+				}
+			}
+		}
 		body.Children(func() {
 			ui.Column(c).FillWidth().Padding(2, 10, 8).Gap(6).Children(func() {
 				switch {
@@ -76,6 +98,9 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState, singlePane bool
 					if state.thread.Title != "" {
 						ui.Text(c.Key("title"), state.thread.Title).FontSize(12).Bold().SingleLine().MinWidth(0).
 							Tooltip(state.thread.Title)
+					}
+					if len(state.history) == 0 && !a.running {
+						s.scholarACPStarter(c.Key("starter"), p)
 					}
 					s.scholarACPTranscript(c, p, body.Bounds())
 				}
@@ -99,9 +124,18 @@ func (s *Shell) scholarACPHeader(c *ui.Context, p *scholarState, singlePane, ses
 	a := &p.agent
 	state := &a.acp
 	ui.Row(c).Height(s.pf.scholarNavHeight()+3).FillWidth().Padding(0, 8).Gap(3).AlignItems(ui.Center).Children(func() {
-		ui.Text(c.Key("chat"), s.tr("scholarACPChat")).Padding(4, 8).FontSize(12).Bold().
-			Radius(5).Background(s.ch.hover)
-		ui.Box(c).Grow(1)
+		title := s.tr("scholarACPChat")
+		if a.pendingPatch() != nil {
+			title = s.tr("scholarShowReview")
+		}
+		label := state.thread.Label
+		if label == "" {
+			label = s.scholarDefaultACPThread(p).Label
+		}
+		if label != "" {
+			title += " · " + label
+		}
+		ui.Text(c.Key("chat"), title).Grow(1).MinWidth(0).SingleLine().Tooltip(title).FontSize(12).Bold()
 		blocked := p.busy || a.pendingPatch() != nil
 		if len(state.forms) > 0 && p.cancelJob != nil &&
 			s.toolButton(c.Key("stop-form"), "x", s.tr("scholarAgentCancel"), false).Clicked() {
@@ -111,8 +145,9 @@ func (s *Shell) scholarACPHeader(c *ui.Context, p *scholarState, singlePane, ses
 			s.selectScholarACPThread(p, s.scholarDefaultACPThread(p))
 		}
 		if s.toolButton(c.Key("history"), "history", s.tr("scholarACPHistory"), sessions).
-			Disabled(a.pendingPatch() != nil || state.thread.ID == "" && !a.running).Clicked() {
+			Disabled(a.pendingPatch() != nil || p.busy).Clicked() {
 			state.historyOpen = !state.historyOpen
+			state.closeSourcePreview()
 		}
 		s.toolButton(c.Key("more"), "ellipsis", s.tr("scholarACPOptions"), false).Menu(func(m *ui.Menu) {
 			if m.Item(s.tr("scholarACPRefresh")).Disabled(blocked || state.thread.ID == "").Chosen() {
@@ -125,10 +160,9 @@ func (s *Shell) scholarACPHeader(c *ui.Context, p *scholarState, singlePane, ses
 				startScholarACP()
 			}
 		})
-		label := s.tr("scholarCloseDrawer")
-		icon := "x"
+		label, icon := s.tr("scholarCloseDrawer"), "x"
 		if singlePane {
-			label, icon = s.tr("scholarReturnManuscript"), "chevron-left"
+			label, icon = s.scholarInspectorBackLabel(p), "chevron-left"
 		}
 		if s.toolButton(c.Key("close"), icon, label, false).Label(label).FocusRing(true).Clicked() {
 			s.closeScholarInspector(p)
@@ -178,15 +212,17 @@ func (s *Shell) scholarACPSessions(c *ui.Context, p *scholarState) {
 
 func (s *Shell) scholarACPTranscript(c *ui.Context, p *scholarState, viewport ui.Rect) {
 	state := &p.agent.acp
+	sources, attachments := s.indexScholarACPSources(p)
 	for i, m := range state.history {
-		s.scholarACPMessage(c.Key("history-message").Key(i), m)
+		s.scholarACPMessage(c.Key("history-message").Key(i), p, m, sources, attachments[m.ID])
 	}
 	if p.agent.running {
-		s.scholarACPMessage(c.Key("pending-message"), scholar.ACPMessage{Role: "user", Text: p.agent.instruction})
+		m := scholarACPUserMessage(state.progress, p.agent.instruction)
+		s.scholarACPMessage(c.Key("pending-message"), p, m, sources, attachments[m.ID])
 	}
 	for i, m := range state.progress.Messages {
 		if m.Role != "user" {
-			s.scholarACPMessage(c.Key("message").Key(i), m)
+			s.scholarACPMessage(c.Key("message").Key(i), p, m, sources, nil)
 		}
 	}
 	end := ui.Box(c.Key("chat-end")).Height(1).FillWidth()
@@ -221,22 +257,54 @@ func (s *Shell) scholarACPTranscript(c *ui.Context, p *scholarState, viewport ui
 	}
 }
 
-func (s *Shell) scholarACPMessage(c *ui.Context, m scholar.ACPMessage) {
-	if m.Text == "" || m.Role == "thought" {
+func (s *Shell) scholarACPMessage(c *ui.Context, p *scholarState, m scholar.ACPMessage, sources map[string]scholarACPSentSource, attached []scholarACPSentSource) {
+	if m.Role == "thought" {
 		return
 	}
 	if m.Role == "user" {
+		if m.Text == "" && len(attached) == 0 {
+			return
+		}
+		text := m.Text
+		var previews map[string]string
+		for _, source := range attached {
+			if before, excerpt, after, ok := source.replay(text); ok {
+				if previews == nil {
+					previews = make(map[string]string)
+				}
+				previews[source.ID], text = excerpt, before+after
+			}
+		}
+		if len(attached) > 0 {
+			text = strings.TrimSuffix(strings.TrimSpace(text), scholarACPCitationInstruction)
+		}
 		ui.Row(c).FillWidth().Justify(ui.End).Padding(4, 0, 2, 16).Children(func() {
-			ui.Column(c.Key("bubble")).MinWidth(0).Padding(7, 9).Radius(c.Theme().Radius+3).
+			ui.Column(c.Key("bubble")).MinWidth(0).Padding(7, 9).Gap(3).Radius(c.Theme().Radius+3).
 				Background(s.ch.content).Border(1, s.ch.separator).Children(func() {
-				ui.Text(c.Key("text"), m.Text).FontSize(13).Wrap().MinWidth(0)
+				ui.Text(c.Key("text"), strings.TrimSpace(text)).FontSize(13).Wrap().MinWidth(0)
+				if len(attached) > 0 {
+					ui.Text(c.Key("attached"), s.tr("scholarACPAttached")).FontSize(11).TextColor(s.ch.muted)
+				}
+				for _, source := range attached {
+					s.scholarACPSentSource(c.Key(source.ID), p, source, previews[source.ID], fmt.Sprint("user/", m.ID, "/", source.ID), 0)
+				}
 			})
 		})
 		return
 	}
+	if m.Text == "" {
+		return
+	}
 	ui.Column(c).FillWidth().Gap(4).Padding(5, 2).Children(func() {
 		ui.Text(c.Key("author"), "Codex").Bold().FontSize(11).TextColor(s.ch.muted)
-		ui.Text(c.Key("text"), m.Text).Wrap().FontSize(13)
+		body, matched := scholarACPCitationLinks(m.Text, sources)
+		ui.Text(c.Key("text"), body).Wrap().FontSize(13)
+		if len(matched) > 0 {
+			ui.Text(c.Key("sources"), s.tr("scholarACPCitedSources")).FontSize(11).TextColor(s.ch.muted)
+			for i, source := range matched {
+				s.scholarACPSentSource(c.Key(source.ID), p, source, "", fmt.Sprint("agent/", m.ID, "/", source.ID), i+1)
+			}
+		}
 	})
 }
 
@@ -264,8 +332,12 @@ func (s *Shell) scholarACPComposer(c *ui.Context, p *scholarState) {
 		input := ui.TextAreaBase(c.Key("text"), &a.instruction).FillWidth().Height(52).Padding(7, 5, 0).
 			FontSize(13).Placeholder(s.tr("scholarAgentInput")).Disabled(a.running)
 		if state.focusComposer && !a.running {
-			input.Focus()
-			state.focusComposer = false
+			if input.Bounds().W > 0 {
+				input.Focus()
+				state.focusComposer = false
+			} else {
+				c.After(time.Millisecond)
+			}
 		}
 		ui.Row(c.Key("tools")).FillWidth().MinWidth(0).Gap(4).AlignItems(ui.Center).Children(func() {
 			s.scholarAgentAttachmentButton(c.Key("attach"), p, input.Shortcut(ui.Cmd, ui.KeySlash))
@@ -364,10 +436,7 @@ func (s *Shell) scholarACPFooter(c *ui.Context, p *scholarState) {
 
 func (s *Shell) scholarACPQuotePreview(c *ui.Context, p *scholarState, i int, ref scholarACPQuote) {
 	state := &p.agent.acp
-	title := ref.label + " · " + ref.locator
-	if len(ref.png) > 0 {
-		title = s.tr("scholarACPImage") + " · " + title
-	}
+	title := s.scholarACPSourceLabel(ref.sentSource("", ""))
 	icon := "quote"
 	if len(ref.png) > 0 {
 		icon = "image"
@@ -558,9 +627,13 @@ func (s *Shell) selectScholarACPThread(p *scholarState, thread scholarACPThread)
 	if state.thread.ID != "" && state.thread.ID == thread.ID {
 		return
 	}
+	p.returnConversation = false
+	state.focusTranscript = false
 	p.err = ""
 	state.thread, state.progress, state.history, state.quotes, state.settings = thread, scholar.ACPProgress{}, nil, nil, nil
 	state.previewQuote, state.previewImage, state.requestedContextWindow = 0, nil, 0
+	state.closeSourcePreview()
+	state.scroll.X, state.scroll.Y = 0, 0
 	a.instruction, a.conversation, a.files = "", "", nil
 	a.target, a.multi, a.parts, a.include = scholarTarget{}, false, [4]string{}, [4]bool{}
 }
@@ -604,13 +677,14 @@ func (s *Shell) restoreScholarACPThread(p *scholarState, thread scholarACPThread
 	})
 }
 
-func (s *Shell) rememberScholarACPThread(p *scholarState, thread scholarACPThread) {
+func (s *Shell) rememberScholarACPThread(p *scholarState, thread scholarACPThread, message acp.MessageId, quotes []scholarACPQuote) {
 	if s.prefs.ScholarProjects == nil {
 		s.prefs.ScholarProjects = make(map[string]scholarProjectPrefs)
 	}
 	pref := s.prefs.ScholarProjects[p.project.Root]
 	recent := slices.DeleteFunc(slices.Clone(pref.ACPThreads), func(old scholarACPThread) bool { return old.ID == thread.ID })
 	pref.ACPThreads = append([]scholarACPThread{thread}, recent[:min(len(recent), scholarACPThreadLimit-1)]...)
+	rememberScholarACPSources(&pref, thread.ID, message, quotes)
 	s.prefs.ScholarProjects[p.project.Root] = pref
 	s.setPref("scholarProjects")
 }
@@ -675,38 +749,60 @@ func (s *Shell) scholarACPAction(c *ui.Context, glyph, label string, accent bool
 	return button
 }
 
-func (s *Shell) quoteScholar(p *scholarState, ref scholarACPQuote, newChat bool) {
-	if p.busy || p.agent.pendingPatch() != nil {
-		return
-	}
-	if len(ref.png) > scholarACPImageLimit || len(ref.text) > scholarSelectionLimit {
-		p.err = s.tr("scholarACPQuoteLimit")
-		return
-	}
-	state := &p.agent.acp
-	thread := scholarACPThread{Scope: ref.scope, Label: ref.label}
+func (s *Shell) scholarACPQuoteThread(p *scholarState, ref scholarACPQuote, newChat bool) scholarACPThread {
 	if !newChat {
-		for _, old := range s.prefs.ScholarProjects[p.project.Root].ACPThreads {
-			if old.Scope == ref.scope {
-				thread = old
-				break
+		for _, thread := range s.prefs.ScholarProjects[p.project.Root].ACPThreads {
+			if thread.Scope == ref.scope {
+				return thread
 			}
 		}
-		if state.thread.ID == "" && state.thread.Scope == ref.scope && thread.ID == "" {
-			thread = state.thread
+		if thread := p.agent.acp.thread; thread.Scope == ref.scope {
+			return thread
 		}
 	}
-	sameDraft := !newChat && state.thread.ID == thread.ID && state.thread.Scope == thread.Scope
+	return scholarACPThread{Scope: ref.scope, Label: ref.label}
+}
+
+func (a *scholarAgentState) hasDraft() bool {
+	return strings.TrimSpace(a.instruction) != "" || len(a.acp.quotes) > 0 ||
+		len(a.files) > 0 || slices.Contains(a.include[:], true) || a.conversation != ""
+}
+
+func (s *Shell) quoteScholar(p *scholarState, ref scholarACPQuote, newChat bool) {
+	thread := s.scholarACPQuoteThread(p, ref, newChat)
+	if !newChat && p.agent.hasDraft() {
+		thread = p.agent.acp.thread
+	}
+	s.attachScholarACPQuote(p, ref, thread, newChat)
+}
+
+func (s *Shell) attachScholarACPQuote(p *scholarState, ref scholarACPQuote, thread scholarACPThread, forceNew bool) bool {
+	if p.busy || p.agent.pendingPatch() != nil {
+		return false
+	}
+	state := &p.agent.acp
+	sameDraft := !forceNew && state.thread.ID == thread.ID && state.thread.Scope == thread.Scope
+	textBytes := len(ref.text) + len(ref.label) + len(ref.locator)
+	hasImage := false
+	if sameDraft {
+		textBytes += len(p.agent.instruction)
+		for i, part := range p.agent.parts {
+			if i != 0 && p.agent.include[i] {
+				textBytes += len(part)
+			}
+		}
+		for _, quote := range state.quotes {
+			textBytes += len(quote.text) + len(quote.label) + len(quote.locator)
+			hasImage = hasImage || len(quote.png) > 0
+		}
+	}
+	if len(ref.png) > scholarACPImageLimit || len(ref.text) > scholarSelectionLimit || textBytes > 48<<10 ||
+		sameDraft && (len(state.quotes) >= 8 || hasImage && len(ref.png) > 0) {
+		p.err = s.tr("scholarACPQuoteLimit")
+		return false
+	}
 	if !sameDraft {
 		s.selectScholarACPThread(p, thread)
-	}
-	if len(state.quotes) >= 8 && (ref.text != "" || len(ref.png) > 0) {
-		p.err = s.tr("scholarACPQuoteLimit")
-		return
-	}
-	if len(ref.png) > 0 && slices.ContainsFunc(state.quotes, func(q scholarACPQuote) bool { return len(q.png) > 0 }) {
-		p.err = s.tr("scholarACPQuoteLimit")
-		return
 	}
 	if ref.text != "" || len(ref.png) != 0 {
 		state.quotes = append(state.quotes, ref)
@@ -717,6 +813,7 @@ func (s *Shell) quoteScholar(p *scholarState, ref scholarACPQuote, newChat bool)
 	if !sameDraft && thread.ID != "" {
 		s.restoreScholarACPThread(p, thread)
 	}
+	return true
 }
 
 const scholarACPImageLimit = 2 << 20
@@ -724,17 +821,32 @@ const scholarACPImageLimit = 2 << 20
 func acpQuoteBlocks(info acp.InitializeResponse, quote scholarACPQuote) []acp.ContentBlock {
 	label := quote.label + " · " + quote.locator
 	var blocks []acp.ContentBlock
+	if quote.id != "" {
+		source := quote.sentSource("", "")
+		label = "\n" + source.marker() + " " + strings.Join(strings.Fields(label), " ") + "\n"
+		if len(quote.png) > 0 {
+			return []acp.ContentBlock{acp.TextBlock(label), {Image: &acp.ContentBlockImage{
+				Type: "image", MimeType: "image/png", Data: base64.StdEncoding.EncodeToString(quote.png),
+			}}, acp.TextBlock("\n" + source.endMarker())}
+		}
+		label += quote.text + "\n" + source.endMarker()
+	} else if quote.text != "" {
+		label += "\n" + quote.text
+	}
 	if quote.text != "" {
 		uri := "nomo://reference/" + url.PathEscape(quote.label)
+		if quote.id != "" {
+			uri = "nomo://reference/" + quote.id
+		}
 		prompt := info.Capabilities.Session.Prompt
 		if prompt != nil && prompt.EmbeddedContext != nil {
 			blocks = append(blocks, acp.ContentBlock{Resource: &acp.ContentBlockResource{
 				Type: "resource", Resource: acp.EmbeddedResourceResource{TextResourceContents: &acp.TextResourceContents{
-					Uri: uri, Text: label + "\n" + quote.text,
+					Uri: uri, Text: label,
 				}},
 			}})
 		} else {
-			blocks = append(blocks, acp.TextBlock(label+"\n"+quote.text))
+			blocks = append(blocks, acp.TextBlock(label))
 		}
 	}
 	if len(quote.png) > 0 {
@@ -760,7 +872,9 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 	instruction := strings.TrimSpace(a.instruction)
 	quotes := slices.Clone(a.acp.quotes)
 	var textBytes = len(instruction)
-	for _, ref := range quotes {
+	hasSources := len(quotes) > 0
+	for i, ref := range quotes {
+		quotes[i].id = scholarACPSourceID()
 		textBytes += len(ref.text) + len(ref.label) + len(ref.locator)
 	}
 	for i, part := range a.parts {
@@ -804,12 +918,14 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 	review, wasMulti := a.conversation, a.multi
 	noEdits := s.tr("scholarACPNoEdits")
 	a.running, a.acp.progress.Messages, a.acp.progress.Activity = true, nil, nil
+	a.acp.progress.PromptID = ""
+	a.acp.closeSourcePreview()
 	a.acp.previewQuote, a.acp.previewImage = 0, nil
 	a.acp.modelDetails = false
 	a.acp.requestedContextWindow, a.acp.progress.ContextWindow = contextWindow, 0
 	a.acp.thread = thread
 	cancelActivities := make(chan scholar.ACPActivity, 2)
-	a.acp.cancelActivities, a.acp.scrollToEnd = cancelActivities, true
+	a.acp.cancelActivities, a.acp.scrollToEnd, a.acp.historyOpen = cancelActivities, true, false
 	s.scholarJob(p, func(ctx context.Context, job uint64) (func(), error) {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
@@ -891,12 +1007,21 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 		if review != "" {
 			blocks = append(blocks, acp.TextBlock(review))
 		}
+		if hasSources {
+			blocks = append(blocks, acp.TextBlock("\n"+scholarACPCitationInstruction))
+		}
 		for _, ref := range quotes {
 			blocks = append(blocks, acpQuoteBlocks(client.Info, ref)...)
 		}
 		var mu sync.Mutex
 		var latest scholar.ACPProgress
 		queued := false
+		// Both completion and streaming callbacks execute on the UI thread.
+		var saved acp.MessageId
+		acceptedThread := thread
+		if acceptedThread.Title == "" {
+			acceptedThread.Title = scholarACPTitle(instruction)
+		}
 		accepted, err := client.RunTurn(ctx, id, blocks, cancelActivities, func(progress scholar.ACPProgress) {
 			mu.Lock()
 			latest = progress
@@ -911,6 +1036,11 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 					mu.Unlock()
 					if s.scholar == p && p.job == job && a.running {
 						a.acp.progress = value
+						if value.PromptID != "" && saved == "" {
+							saved = value.PromptID
+							a.acp.thread = acceptedThread
+							s.rememberScholarACPThread(p, acceptedThread, saved, quotes)
+						}
 					}
 				})
 			}
@@ -952,11 +1082,15 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 					thread.Title = scholarACPTitle(instruction)
 				}
 				a.acp.thread = thread
-				a.acp.scrollToEnd = true
-				s.rememberScholarACPThread(p, thread)
+				a.acp.scrollToEnd = !p.returnConversation
+				if saved == "" {
+					s.rememberScholarACPThread(p, thread, progress.PromptID, quotes)
+				} else if thread.Title != acceptedThread.Title {
+					s.rememberScholarACPThread(p, thread, "", nil)
+				}
 				a.instruction, a.acp.quotes, a.conversation = "", nil, ""
 				a.parts, a.include, a.target, a.files, a.multi = [4]string{}, [4]bool{}, scholarTarget{}, nil, false
-				a.acp.history = append(a.acp.history, scholar.ACPMessage{Role: "user", Text: instruction})
+				a.acp.history = append(a.acp.history, scholarACPUserMessage(progress, instruction))
 				for _, m := range progress.Messages {
 					if m.Role == "agent" {
 						a.acp.history = append(a.acp.history, m)
@@ -985,6 +1119,7 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 				}
 				switch {
 				case len(patches) > 0:
+					a.acp.reviewScroll.X, a.acp.reviewScroll.Y = 0, 0
 					if len(patches) == 1 && len(bases) == 1 && !wasMulti && warning == "" {
 						a.patch = patches[0]
 					} else {
@@ -1001,7 +1136,17 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 	})
 }
 
+func scholarACPUserMessage(progress scholar.ACPProgress, instruction string) scholar.ACPMessage {
+	for _, m := range progress.Messages {
+		if m.Role == "user" && m.ID != "" && m.ID == progress.PromptID && m.Text != "" {
+			return m
+		}
+	}
+	return scholar.ACPMessage{ID: progress.PromptID, Role: "user", Text: instruction}
+}
+
 func scholarACPTitle(text string) string {
+	text, _, _ = strings.Cut(text, "When using an attached source,")
 	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
 	runes := []rune(line)
 	if len(runes) > 60 {

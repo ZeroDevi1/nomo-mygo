@@ -19,6 +19,7 @@ type scholarAnnotationView struct {
 	start      int
 	more       bool
 	loaded     bool
+	scroll     ui.ScrollState
 }
 
 func (s *Shell) openScholarAnnotations(p *scholarState, entry scholar.Entry, z scholar.Zotero, key, title string) {
@@ -28,10 +29,20 @@ func (s *Shell) openScholarAnnotations(p *scholarState, entry scholar.Entry, z s
 	if title == "" {
 		title = entry.Title
 	}
-	view := &scholarAnnotationView{entry: entry, zotero: z, key: key, title: title}
+	view := p.references.annotation
+	if view == nil || view.key != key || view.zotero.Group != z.Group || !view.zotero.SameSource(z) {
+		view = &scholarAnnotationView{entry: entry, zotero: z, key: key, title: title}
+		p.references.annotation = view
+	}
 	p.literature.annotations = view
 	s.showScholarInspector(p, scholarReader)
-	s.loadScholarAnnotations(p, view, 0)
+	if !view.loaded {
+		s.loadScholarAnnotations(p, view, view.start)
+	}
+}
+
+func (view *scholarAnnotationView) matches(tab *scholarReferenceTab) bool {
+	return view.key != "" && view.key == tab.key && view.zotero.Group == tab.zotero.Group && view.zotero.SameSource(tab.zotero)
 }
 
 func (s *Shell) loadScholarAnnotations(p *scholarState, view *scholarAnnotationView, start int) {
@@ -40,8 +51,9 @@ func (s *Shell) loadScholarAnnotations(p *scholarState, view *scholarAnnotationV
 		defer cancel()
 		items, more, err := view.zotero.Annotations(ctx, view.key, start)
 		return func() {
-			if err == nil && p.literature.annotations == view {
-				view.items, view.more, view.start, view.loaded = items, more, start, true
+			if err == nil {
+				view.items, view.more, view.start, view.loaded = items[:min(len(items), scholar.ZoteroPageSize)], more, start, true
+				view.scroll.X, view.scroll.Y = 0, 0
 			}
 		}, err
 	})
@@ -102,10 +114,14 @@ func (s *Shell) scholarAnnotations(c *ui.Context, p *scholarState, view *scholar
 						return
 					}
 					if s.scholarReaderCommand(ck.Key("page"), "file-text", "PDF · "+label, false).Grow(1).Basis(0).Disabled(p.busy || !currentLibrary).Clicked() {
-						s.openScholarAttachment(p, view.entry, view.key, "", view.title, annotation.Page)
+						t := s.openScholarAttachmentFrom(p, view.entry, view.zotero, view.key, "", view.title, annotation.Page)
 						width, _ := c.Size()
-						if p.err == "" && !s.scholarSinglePane(width) {
-							s.showScholarInspector(p, scholarReader)
+						if t != nil {
+							p.references.annotation = view
+							if !s.scholarReadingInspectorPrimary(width) {
+								p.literature.annotations = view
+								s.showScholarInspector(p, scholarReader)
+							}
 						}
 					}
 				})

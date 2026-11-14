@@ -53,6 +53,27 @@ func (g *editorGroup) containing(item workspaceItem) (found *editorGroup) {
 	return found
 }
 
+func (g *editorGroup) itemWidth(item workspaceItem, width float32) float32 {
+	if g == nil {
+		return 0
+	}
+	if g.first == nil {
+		if slices.Contains(g.tabs, item) {
+			return width
+		}
+		return 0
+	}
+	first, second := width, width
+	if !g.vertical {
+		first = width * g.percent / 100
+		second = width - first
+	}
+	if found := g.first.itemWidth(item, first); found > 0 {
+		return found
+	}
+	return g.second.itemWidth(item, second)
+}
+
 func (g *editorGroup) removeTab(item workspaceItem) {
 	i := slices.Index(g.tabs, item)
 	g.tabs = slices.Delete(g.tabs, i, i+1)
@@ -316,11 +337,15 @@ func (s *Shell) editorGroupMenu(m *ui.Menu, item workspaceItem) {
 }
 
 func (s *Shell) workspaceGroupDocument(c *ui.Context, p *scholarState, tab *Tab) {
-	if s.compile != nil {
-		s.closeCompile()
-	}
 	total, _ := c.Size()
 	inspector := p != nil && s.scholarInspectorVisible(p, total)
+	if s.compile != nil {
+		if p == nil {
+			s.closeCompile()
+		} else if p.references.catalog || p.references.focused != nil || inspector && s.scholarInspectorPrimary(p, total) {
+			s.hideTypesetPreview(p, tab)
+		}
+	}
 	if p == nil && !s.prefs.ToolbarHidden {
 		s.toolbar(c)
 	}
@@ -527,7 +552,12 @@ func (s *Shell) editorGroupSource(c *ui.Context, p *scholarState, g *editorGroup
 		s.applyProviderSyntax(t)
 		s.applyEditorStyle(t)
 		focused := false
-		if left, right, ok := s.comparisonOf(t); ok {
+		manuscript := p != nil && isManuscript(t) && t == s.activeTab() &&
+			s.groups.focused == g && s.workspaceSelection() == item
+		if manuscript {
+			el = s.sourceDocument(c, t)
+			focused = el.FocusWithin()
+		} else if left, right, ok := s.comparisonOf(t); ok {
 			el = s.comparisonView(c, left, right)
 			focused = el.Focused()
 		} else if source {
@@ -556,7 +586,7 @@ func (s *Shell) editorGroupSource(c *ui.Context, p *scholarState, g *editorGroup
 				s.linkPopover(c, t, el)
 				s.emojiSuggest(c, t, el)
 			}
-			if p != nil && s.scholarForTab(t) == p {
+			if p != nil && s.scholarForTab(t) == p && !s.manuscriptVisible && !s.scholarPDFOnly(c, p, t) {
 				p.agent.anchor = el.Bounds()
 				s.scholarInlineCitations(c, p, t, el)
 				s.scholarInlineReview(c, p, t, el)

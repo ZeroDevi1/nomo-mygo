@@ -37,8 +37,7 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 	p.changes.compare = false
 	p.agent.trial.close()
 	p.agent.reviewHidden = true
-	p.references.selectTab(nil)
-	s.closeScholarInspector(p)
+	s.selectScholarPDF(p, nil)
 	if tab.typesetMode != mode {
 		tab.typesetPaused = false
 	}
@@ -62,13 +61,28 @@ func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int
 	if review && (mode == typesetPreview || mode == typesetSemantic) {
 		mode = typesetSplit
 	}
-	if mode == typesetSplit && s.scholarSinglePane(width) {
+	if mode == typesetSplit && s.scholarManuscriptCompact(p, tab, width) {
 		if tab.typesetCompactPDF && !review {
 			return typesetPreview
 		}
 		return typesetSource
 	}
 	return mode
+}
+
+func (s *Shell) scholarManuscriptCompact(p *scholarState, tab *Tab, window float32) bool {
+	if s.scholarSinglePane(window) {
+		return true
+	}
+	if !s.editorGroupsVisible(p) {
+		return false
+	}
+	width := s.scholarWorkspaceWidthAt(window)
+	if s.scholarInspectorVisible(p, window) && !s.scholarInspectorPrimary(p, window) {
+		width -= s.scholarInspectorWidth(p, width) + scholarInspectorGripWidth
+	}
+	pane := s.groups.root.itemWidth(s.workspaceDocumentItem(tab), width)
+	return pane > 0 && pane < scholarSplitWidth
 }
 
 func (s *Shell) scholarPDFOnly(c *ui.Context, p *scholarState, tab *Tab) bool {
@@ -78,8 +92,7 @@ func (s *Shell) scholarPDFOnly(c *ui.Context, p *scholarState, tab *Tab) bool {
 func (s *Shell) revealScholarSource(tab *Tab) {
 	if p := s.scholar; p != nil {
 		p.dismissWindowsPage()
-		p.references.catalog = false
-		p.references.focused = nil
+		p.references.selectTab(nil)
 		if s.win != nil {
 			width, _ := s.win.ContentSize()
 			if p.activeTabID != tab.ID || s.scholarSinglePane(float32(width)) {
@@ -120,7 +133,7 @@ func (s *Shell) scholarManuscriptLayout(c *ui.Context, p *scholarState, tab *Tab
 		mode = typesetSource
 	}
 	shown := s.scholarPreviewMode(c, p, tab)
-	compact := s.scholarSinglePane(total)
+	compact := s.scholarManuscriptCompact(p, tab, total)
 	label := s.tr(scholarViewLabels[mode])
 	icon := [...]string{"code-xml", "book-open-text", "columns-2", "file-pen-line"}[mode]
 	compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
@@ -159,14 +172,13 @@ func (s *Shell) scholarManuscriptLayout(c *ui.Context, p *scholarState, tab *Tab
 func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 	c = c.Key(tab.ID)
 	width, _ := c.Size()
+	s.scholarReadingReturnControls(c, p, s.scholarWorkspaceWidthAt(width) < 720 || s.pf.windows)
 	if reading := p.references.focused; reading != nil && reading.web == nil && !s.editorGroupsVisible(p) &&
 		!p.references.catalog && !p.agent.trial.show && !(s.scholarInspectorVisible(p, width) && s.scholarInspectorPrimary(p, width)) {
 		s.scholarPDFTabControls(c, p, reading)
 	}
 	if isManuscript(tab) {
-		if s.groups.root == nil {
-			s.scholarManuscriptLayout(c, p, tab)
-		}
+		s.scholarManuscriptLayout(c, p, tab)
 		label := s.tr("scholarOutline")
 		open := &p.navigation.outlineOpen
 		outline := s.toolButton(c.Key("outline"), "list-tree", label, *open).Label(label).FocusRing(true)
@@ -213,11 +225,11 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 		if visible {
 			s.closeScholarInspector(p)
 		} else if reading := p.references.focused; reading != nil && !p.references.catalog && !p.busy {
-			if reading.key != "" {
-				s.openScholarAnnotations(p, reading.entry, reading.zotero, reading.key, reading.title)
-			} else {
-				s.selectScholarEntry(p, reading.entry)
+			if !scholarSameCatalogItem(p.literature.selected, reading.entry) {
+				s.setScholarEntry(p, reading.entry)
 			}
+			p.literature.annotations = nil
+			s.showScholarInspector(p, scholarReader)
 		} else {
 			drawer := p.lastInspector
 			if drawer == scholarClosed || p.references.catalog && p.literature.selected != (scholar.Entry{}) {

@@ -86,6 +86,7 @@ type Prefs struct {
 
 type scholarProjectPrefs struct {
 	ACPThreads   []scholarACPThread           `json:"acpThreads,omitempty"`
+	ACPSources   []scholarACPSentSource       `json:"acpSources,omitempty"`
 	Sources      map[string]scholarSourceLink `json:"sources,omitempty"`
 	MainSelected bool                         `json:"mainSelected,omitempty"`
 	Main         string                       `json:"main,omitempty"`

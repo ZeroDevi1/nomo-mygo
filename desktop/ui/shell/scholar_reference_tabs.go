@@ -27,6 +27,8 @@ type scholarReferenceTabs struct {
 	focused     *scholarReferenceTab
 	catalog     bool
 	catalogOpen bool
+	sourceJump  *scholarReferenceTab
+	annotation  *scholarAnnotationView
 }
 
 type scholarReferenceTab struct {
@@ -38,12 +40,20 @@ type scholarReferenceTab struct {
 	pageNavigation   scholarPageNavigation
 	pinned           bool
 	bitmap           *ui.Bitmap
-	pageDark         bool
 	pageAspect       float32
 	err              string
 	cancel           context.CancelFunc
 	generation       uint64
 	quote            scholarPDFQuote
+	fileInfo         os.FileInfo
+	scroll           ui.ScrollState
+	detailScroll     ui.ScrollState
+	jump             *scholarPDFSource
+	highlight        ui.Rect
+	highlightUntil   time.Time
+	sourceNotice     string
+	revealRegion     bool
+	focusPage        bool
 }
 
 func (t *scholarReferenceTab) releasePage() {
@@ -52,11 +62,23 @@ func (t *scholarReferenceTab) releasePage() {
 		t.cancel = nil
 	}
 	t.generation++
-	t.bitmap, t.pageAspect = nil, 0
+	t.bitmap, t.pageAspect, t.fileInfo = nil, 0, nil
+	t.quote.cancelCapture()
 	t.quote = scholarPDFQuote{}
+	t.highlight, t.highlightUntil, t.revealRegion = ui.Rect{}, time.Time{}, false
 }
 
 func (r *scholarReferenceTabs) selectTab(t *scholarReferenceTab) {
+	if r.focused != nil && r.focused != t {
+		q := &r.focused.quote
+		q.cancelCapture()
+		q.popup, q.focusReader, q.focusActions = false, false, false
+		r.focused.focusPage = false
+	}
+	if r.sourceJump != nil && r.sourceJump != t {
+		r.sourceJump.clearSourceJump()
+		r.sourceJump = nil
+	}
 	r.catalog, r.focused = false, t
 }
 
@@ -70,6 +92,12 @@ func (t *scholarReferenceTab) releaseContent(remember bool) {
 
 func (r *scholarReferenceTabs) close(t *scholarReferenceTab) {
 	t.releaseContent(false)
+	if r.sourceJump == t {
+		r.sourceJump = nil
+	}
+	if r.annotation != nil && r.annotation.matches(t) {
+		r.annotation = nil
+	}
 	r.tabs = slices.DeleteFunc(r.tabs, func(candidate *scholarReferenceTab) bool { return candidate == t })
 	if r.focused == t {
 		r.focused = nil
@@ -94,6 +122,8 @@ func (r *scholarReferenceTabs) releaseHidden(shown ...*scholarReferenceTab) {
 }
 
 func (s *Shell) showScholarCatalog(p *scholarState) {
+	s.rememberScholarManuscript(p)
+	p.references.selectTab(nil)
 	p.literature.annotations = nil
 	s.closeScholarInspector(p)
 	if p.nav != scholarLiterature {
@@ -105,10 +135,17 @@ func (s *Shell) showScholarCatalog(p *scholarState) {
 }
 
 func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, path, title string, page int) {
-	r := &p.references
 	z := p.literature.zotero
 	z.Group = e.Library
+	s.openScholarAttachmentFrom(p, e, z, key, path, title, page)
+}
+
+func (s *Shell) openScholarAttachmentFrom(p *scholarState, e scholar.Entry, z scholar.Zotero, key, path, title string, page int) *scholarReferenceTab {
+	r := &p.references
 	for _, t := range r.tabs {
+		if t.web != nil {
+			continue
+		}
 		if (key != "" && t.key == key && t.zotero.SameSource(z) && t.zotero.Group == z.Group) ||
 			(key == "" && t.key == "" && samePath(t.path, path)) {
 			s.selectScholarPDF(p, t)
@@ -118,12 +155,12 @@ func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, pat
 			if page > 0 {
 				t.setPage(page)
 			}
-			return
+			return t
 		}
 	}
 	if len(r.tabs) >= scholarPDFTabLimit {
 		p.err = s.tr("scholarPDFTabLimit")
-		return
+		return nil
 	}
 	if title == "" {
 		title = e.Title
@@ -136,20 +173,37 @@ func (s *Shell) openScholarAttachment(p *scholarState, e scholar.Entry, key, pat
 	if key != "" {
 		p.literature.rememberReading(e)
 	}
+	return t
 }
 
 func (s *Shell) selectScholarPDF(p *scholarState, t *scholarReferenceTab) {
+	if t != nil {
+		s.rememberScholarManuscript(p)
+	} else {
+		p.returnManuscript = scholarManuscriptReturn{}
+		p.returnConversation = false
+	}
 	s.closeScholarInspector(p)
 	if t == nil && p.nav == scholarLiterature {
 		p.nav = p.lastProjectNav
 	}
 	p.references.selectTab(t)
+	p.literature.annotations = nil
 	p.accountOpen, p.winRailPopup, p.winCompactProject = false, false, false
 	p.drawer, p.compactNav = scholarClosed, false
 	p.err = ""
 }
 
+func (t *scholarReferenceTab) clearSourceJump() {
+	if t.jump != nil && t.cancel != nil {
+		t.releasePage()
+	}
+	t.jump, t.sourceNotice, t.highlight = nil, "", ui.Rect{}
+	t.highlightUntil, t.revealRegion, t.focusPage = time.Time{}, false, false
+}
+
 func (t *scholarReferenceTab) setPage(page int) {
+	t.clearSourceJump()
 	if t.pages > 0 {
 		page = min(page, t.pages)
 	}
@@ -157,24 +211,18 @@ func (t *scholarReferenceTab) setPage(page int) {
 	if t.page != page || t.err != "" {
 		t.releasePage()
 		t.err = ""
+		t.scroll.X, t.scroll.Y = 0, 0
 	}
 	t.page = page
 }
 
-func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab, dark bool) {
-	if t.pageDark != dark {
-		t.pageDark = dark
-		if t.bitmap != nil || t.cancel != nil {
-			// Keep the scroll extent while the same page is rasterized again.
-			aspect := t.pageAspect
-			t.releasePage()
-			t.pageAspect = aspect
-		}
-	}
+func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab) {
 	if t.cancel != nil || t.bitmap != nil || t.err != "" {
 		return
 	}
 	path, key, z, page := t.path, t.key, t.zotero, t.page
+	jump := t.jump
+	unavailable, stale := s.tr("scholarACPSourceUnavailable"), s.tr("scholarACPSourceStale")
 	ctx, cancel := context.WithTimeout(p.ctx, 20*time.Second)
 	t.cancel = cancel
 	t.generation++
@@ -182,14 +230,17 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab, dark
 	go func() {
 		defer cancel()
 		pages, err := 0, error(nil)
-		if path == "" {
+		var info os.FileInfo
+		var message string
+		if jump != nil && key == "" {
+			path, err = p.project.Path(jump.Path)
+		}
+		if err == nil && (path == "" || jump != nil && key != "") {
 			path, err = z.AttachmentPath(ctx, key)
 		}
 		if err == nil {
-			info, statErr := os.Stat(path)
-			if statErr != nil {
-				err = statErr
-			} else if !info.Mode().IsRegular() || info.Size() > scholarReferenceFileLimit {
+			info, err = os.Stat(path)
+			if err == nil && (!info.Mode().IsRegular() || info.Size() > scholarReferenceFileLimit) {
 				err = fmt.Errorf("PDF attachment exceeds the 128 MiB limit or is not a regular file")
 			}
 		}
@@ -197,15 +248,28 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab, dark
 			pages, err = typeset.PDFPages(ctx, path)
 		}
 		var bitmap *ui.Bitmap
+		var region ui.Rect
+		if err == nil && jump != nil {
+			if page < 1 || page > pages {
+				err = fmt.Errorf("%s", unavailable)
+			} else {
+				version, versionErr := scholarPDFVersion(ctx, path, info)
+				if versionErr == nil && version == jump.Version && scholarValidPDFRegion(jump.Region) {
+					region = jump.Region
+				} else {
+					message = stale
+				}
+			}
+		}
 		if err == nil {
 			page = min(page, pages)
 			if img, renderErr := typeset.ReadPDFPage(ctx, path, page, scholarReferenceEdge); renderErr != nil {
 				err = renderErr
 			} else if err = ctx.Err(); err == nil {
-				if dark {
-					img = darkPDFPage(img)
-				}
 				bitmap = ui.NewBitmap(img)
+				if after, statErr := os.Stat(path); statErr != nil || !scholarSamePDFVersion(info, after) {
+					err = fmt.Errorf("%s", unavailable)
+				}
 			}
 		}
 		s.post(func() {
@@ -215,9 +279,17 @@ func (s *Shell) loadScholarPDFPage(p *scholarState, t *scholarReferenceTab, dark
 			t.cancel = nil
 			if err != nil {
 				t.err = err.Error()
+				if jump != nil {
+					t.err = unavailable
+				}
 				return
 			}
-			t.path, t.page, t.pages, t.bitmap = path, page, pages, bitmap
+			t.path, t.page, t.pages, t.bitmap, t.fileInfo = path, page, pages, bitmap, info
+			if jump != nil {
+				t.jump, t.sourceNotice, t.highlight = nil, message, region
+				t.revealRegion = scholarValidPDFRegion(region)
+				t.focusPage = true
+			}
 			w, h := bitmap.Size()
 			t.pageAspect = float32(w) / float32(h)
 		})
@@ -418,7 +490,7 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarR
 		s.scholarWebPage(c, p, t)
 		return
 	}
-	s.loadScholarPDFPage(p, t, c.Theme().Dark)
+	s.loadScholarPDFPage(p, t)
 	ui.Column(c).Grow(1).Fill().MinWidth(0).Clip().Children(func() {
 		if t.err != "" {
 			s.scholarReferenceError(c, t.err, func() {
@@ -441,12 +513,16 @@ func (s *Shell) scholarReferencePage(c *ui.Context, p *scholarState, t *scholarR
 				}
 			})
 		} else if t.pageAspect > 0 {
+			if t.sourceNotice != "" {
+				scholarReaderText(c.Key("source-notice"), t.sourceNotice).Padding(4, 8).TextColor(scholarInk(c, "warning")).
+					Role(ui.RoleStatus).Label(t.sourceNotice)
+			}
 			s.scholarPDFQuoteControls(c.Key("pdf-quote"), p, t)
-			ui.Scroll(c.Key("pdf-page")).Grow(1).MinHeight(0).FillWidth().Background(s.ch.tabBar).Children(func() {
+			ui.Scroll(c.Key("pdf-page")).TrackScroll(&t.scroll).Grow(1).MinHeight(0).FillWidth().Background(s.ch.tabBar).Children(func() {
 				ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(10).Children(func() {
 					width := float32(s.documentWidth(s.activeTab()))
 					if t.bitmap != nil {
-						s.scholarPDFQuotePage(c, t, width)
+						s.scholarPDFQuotePage(c, p, t, width)
 					} else {
 						ui.Box(c).WidthPercent(width).AspectRatio(t.pageAspect)
 					}

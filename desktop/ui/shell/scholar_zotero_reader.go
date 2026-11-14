@@ -18,7 +18,11 @@ func (s *Shell) scholarReaderPane(c *ui.Context, p *scholarState, width float32,
 		background = s.ch.sidebar
 	}
 	closePane := func() {
-		if (singlePane || !zoteroCatalog) && s.scholarCompactIcon(c.Key("close"), "x", s.tr("scholarCloseDrawer"), false).Clicked() {
+		label, icon := s.tr("scholarCloseDrawer"), "x"
+		if singlePane {
+			label, icon = s.scholarInspectorBackLabel(p), "chevron-left"
+		}
+		if (singlePane || !zoteroCatalog) && s.scholarCompactIcon(c.Key("close"), icon, label, false).Clicked() {
 			s.closeScholarInspector(p)
 		}
 	}
@@ -34,6 +38,9 @@ func (s *Shell) scholarReaderPane(c *ui.Context, p *scholarState, width float32,
 				return
 			}
 			title, subtitle := e.Title, ""
+			if t := p.references.focused; t != nil && !p.references.catalog && note == nil {
+				title, subtitle = s.tr("scholarReferenceDetails"), t.title
+			}
 			var back func()
 			switch {
 			case annotations != nil:
@@ -79,7 +86,13 @@ func (s *Shell) scholarReaderPane(c *ui.Context, p *scholarState, width float32,
 			if p.err != "" {
 				s.scholarReaderNotice(c.Key("error"), p.err, nil)
 			}
-			ui.Scroll(c.Key("details")).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			scroll := ui.Scroll(c.Key("details")).Grow(1).FillWidth().MinHeight(0)
+			if annotations != nil {
+				scroll.TrackScroll(&annotations.scroll)
+			} else if t := p.references.focused; t != nil && !p.references.catalog {
+				scroll.TrackScroll(&t.detailScroll)
+			}
+			scroll.Children(func() {
 				ui.Column(c).FillWidth().Padding(0, scholarReaderInset).FontSize(12).LineHeight(1.5).Children(func() {
 					s.scholarReaderView(c, p)
 				})

@@ -301,7 +301,14 @@ func (s *Shell) widthControl(c *ui.Context, tab *Tab) {
 		st.widthOpen = !st.widthOpen
 		st.width = value
 	}
-	ui.Popover(c, b, &st.widthOpen, func() {
+	s.documentWidthPopover(c, b, tab, limit)
+}
+
+func (s *Shell) documentWidthPopover(c *ui.Context, anchor ui.Element, tab *Tab, limit float64) {
+	st := &s.tbar
+	value := s.documentWidth(tab)
+	pct := fmt.Sprintf("%.0f%%", value)
+	ui.Popover(c, anchor, &st.widthOpen, func() {
 		ui.Column(c).Padding(12).Gap(6).Width(220).Role(ui.RoleDialog).Label(s.tr("contentWidth")).Children(func() {
 			ui.Row(c).FillWidth().Children(func() {
 				ui.Text(c, s.tr("contentWidth")).FontSize(12).Bold().Grow(1)

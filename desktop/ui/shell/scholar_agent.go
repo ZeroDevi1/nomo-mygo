@@ -410,12 +410,15 @@ func (p *compilePane) report() scholarCompileReport {
 
 func (s *Shell) scholarDiagnosticsView(c *ui.Context, p *scholarState) {
 	tab := s.activeTab()
-	report := p.diagnostics
-	if pane := s.compile; pane != nil && pane.tab == tab && !pane.busy {
-		report = pane.report()
+	report := s.scholarCurrentDiagnostics(p, tab)
+	origin := tab
+	if report.tabID == p.diagnosticOrigin {
+		if source := s.tabWithID(p.diagnosticOrigin); source != nil {
+			origin = source
+		}
 	}
 	switch {
-	case report.tabID == tab.ID && samePath(report.source, tab.Path):
+	case report.tabID == origin.ID && samePath(report.source, origin.Path):
 		ui.Text(c, s.tr("scholarLastTypeset")).FontSize(11).TextColor(s.ch.muted)
 		if report.message == "" {
 			ui.Text(c, s.tr("scholarTypesetSuccess"))
@@ -433,12 +436,13 @@ func (s *Shell) scholarDiagnosticsView(c *ui.Context, p *scholarState) {
 					s.jumpScholarDiagnostic(p, report.path, location)
 				}
 			}
-			if ui.Button(c, s.tr("scholarAttachDiagnostics")).Disabled(p.busy || p.agent.patch != nil).Clicked() {
-				s.showScholarInspector(p, scholarCodex)
-				s.captureScholarTarget(p)
-				if p.agent.target.tabID != 0 {
-					p.agent.parts[3], p.agent.include[3] = report.message, true
+			if ui.Button(c, s.tr("scholarAttachDiagnostics")).Disabled(p.busy || p.agent.pendingPatch() != nil).Clicked() {
+				p.agent.parts[3], p.agent.include[3] = report.message, true
+				if strings.TrimSpace(p.agent.instruction) == "" {
+					p.agent.instruction = s.tr("scholarACPExplainDiagnostic")
 				}
+				p.agent.acp.focusComposer = true
+				s.showScholarInspector(p, scholarCodex)
 			}
 		}
 	case tab.typesetPaused:
@@ -454,7 +458,7 @@ func (s *Shell) scholarDiagnosticsView(c *ui.Context, p *scholarState) {
 	}
 }
 
-func (s *Shell) jumpScholarDiagnostic(p *scholarState, main string, note typeset.Diagnostic) {
+func (s *Shell) jumpScholarDiagnostic(p *scholarState, main string, note typeset.Diagnostic) bool {
 	path := note.File
 	switch filepath.Clean(path) {
 	case "-", "<stdin>", "preview.tex":
@@ -466,20 +470,22 @@ func (s *Shell) jumpScholarDiagnostic(p *scholarState, main string, note typeset
 	name, err := scholar.Relative(p.project.Root, path)
 	if err != nil {
 		p.err = err.Error()
-		return
+		return false
 	}
 	path, err = p.project.Path(name)
 	if err != nil {
 		p.err = err.Error()
-		return
+		return false
 	}
 	s.OpenFiles([]string{path})
-	if t := s.scholarTab(path); t != nil {
+	if t := s.activeTab(); t != nil && samePath(t.Path, path) {
 		snap := t.Source().Buffer.Snapshot()
-		if note.Line <= snap.LineCount() {
+		if note.Line > 0 && note.Line <= snap.LineCount() {
 			s.jumpScholarOutline(t, snap.LineStart(note.Line-1))
+			return true
 		}
 	}
+	return false
 }
 
 func (s *Shell) rejectScholarSingle(p *scholarState) {

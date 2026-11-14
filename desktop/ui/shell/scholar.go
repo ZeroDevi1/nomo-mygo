@@ -71,6 +71,8 @@ type scholarState struct {
 	drawerNav                                                                      bool // 紧凑导航让出空间前的展开状态。
 	files                                                                          *folderNode
 	diagnostics                                                                    scholarCompileReport
+	diagnosticOrigin                                                               int
+	diagnosticScroll                                                               ui.ScrollState
 	drawerSize                                                                     float32
 	drawerSave                                                                     time.Time
 	winRailCollapsed, winRailPopup, winProjectOpen, winCompactProject, accountOpen bool
@@ -82,23 +84,25 @@ type scholarState struct {
 	busy              bool
 	err               string
 
-	library          *scholar.Library
-	libraryReady     bool
-	libraryError     string
-	bibNames         []string
-	mainVersion      uint64
-	mainTabID        int
-	bibVersions      map[int]uint64
-	reloadAt         time.Time
-	citations        scholarCitations
-	literature       scholarLiteratureState
-	references       scholarReferenceTabs
-	changes          scholarChangeState
-	navigation       scholarNavigation
-	agent            scholarAgentState
-	watchAt, probeAt time.Time
-	watchPending     bool
-	watchSignature   string
+	library            *scholar.Library
+	libraryReady       bool
+	libraryError       string
+	bibNames           []string
+	mainVersion        uint64
+	mainTabID          int
+	bibVersions        map[int]uint64
+	reloadAt           time.Time
+	citations          scholarCitations
+	literature         scholarLiteratureState
+	references         scholarReferenceTabs
+	returnManuscript   scholarManuscriptReturn
+	returnConversation bool
+	changes            scholarChangeState
+	navigation         scholarNavigation
+	agent              scholarAgentState
+	watchAt, probeAt   time.Time
+	watchPending       bool
+	watchSignature     string
 }
 
 type scholarCitations struct {
@@ -125,6 +129,7 @@ func isManuscript(tab *Tab) bool {
 func (s *Shell) closeScholar() {
 	if p := s.scholar; p != nil {
 		p.cancel()
+		p.agent.acp.closeSourcePreview()
 		p.agent.trial.close()
 		p.closeWindowsSettings()
 		for _, t := range p.references.tabs {
@@ -783,9 +788,13 @@ func (s *Shell) scholarInspectorVisible(p *scholarState, width float32) bool {
 
 func (s *Shell) showScholarInspector(p *scholarState, drawer int) {
 	p.dismissWindowsPage()
+	if drawer != scholarDiagnostics {
+		p.diagnosticOrigin = 0
+	}
 	if drawer != scholarCodex {
 		p.agent.acp.previewQuote, p.agent.acp.previewImage = 0, nil
 		p.agent.acp.modelDetails = false
+		p.agent.acp.closeSourcePreview()
 	}
 	if p.drawer == scholarClosed || p.compactNav {
 		p.drawerNav = p.compactNav
@@ -799,12 +808,19 @@ func (s *Shell) showScholarInspector(p *scholarState, drawer int) {
 func (s *Shell) closeScholarInspector(p *scholarState) {
 	p.agent.acp.previewQuote, p.agent.acp.previewImage = 0, nil
 	p.agent.acp.modelDetails = false
+	p.agent.acp.closeSourcePreview()
 	if p.drawer != scholarClosed {
 		s.persistScholarDrawer(p)
 		p.drawer = scholarClosed
+		p.diagnosticOrigin = 0
 		p.compactNav = p.compactNav || p.drawerNav
 		p.drawerNav = false
-		s.focusEditor = true
+		if t := p.references.focused; t != nil {
+			t.focusPage = true
+			s.focusEditor = false
+		} else {
+			s.focusEditor = true
+		}
 	}
 }
 
@@ -837,18 +853,22 @@ func (s *Shell) scholarInspectorWidth(p *scholarState, window float32) float32 {
 	if width == 0 {
 		width = float32(p.drawerWidth(s.prefs))
 	}
-	if s.pf.windows && p.drawer == scholarCodex {
+	if s.pf.windows && (p.drawer == scholarCodex || p.references.focused != nil) {
 		return min(width, max(scholarInspectorMinWidth, window-scholarSplitWidth-scholarInspectorGripWidth))
 	}
 	return min(width, max(240, window-340))
 }
 
 func (s *Shell) scholarInspectorPrimary(p *scholarState, width float32) bool {
+	if p.drawer == scholarCodex || p.references.focused != nil {
+		return s.scholarReadingInspectorPrimary(width)
+	}
+	return s.scholarSinglePane(width)
+}
+
+func (s *Shell) scholarReadingInspectorPrimary(width float32) bool {
 	if s.scholarSinglePane(width) {
 		return true
-	}
-	if p.drawer != scholarCodex {
-		return false
 	}
 	workspace := s.scholarWorkspaceWidthAt(width)
 	if s.pf.windows {
@@ -858,6 +878,7 @@ func (s *Shell) scholarInspectorPrimary(p *scholarState, width float32) bool {
 }
 
 func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, singlePane bool) {
+	drawer := p.drawer
 	if p.drawerSize == 0 {
 		p.drawerSize = float32(p.drawerWidth(s.prefs))
 	}
@@ -887,29 +908,53 @@ func (s *Shell) scholarInspector(c *ui.Context, p *scholarState, w float32, sing
 			s.persistScholarDrawer(p)
 		}
 	}
-	if p.drawer == scholarReader {
-		s.scholarReaderPane(c, p, width, singlePane)
-		return
-	}
-	if p.drawer == scholarCodex {
-		ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.sidebar).Children(func() {
-			s.scholarAgentView(c.Key("codex"), p, singlePane)
-		})
-		return
-	}
-	ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.content).Children(func() {
-		ui.Row(c).Height(s.pf.scholarNavHeight()).FillWidth().Padding(0, 8).Gap(4).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, s.tr("scholarDiagnostics")).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
-			label := s.tr("scholarCloseDrawer")
-			if s.toolButton(c, "x", label, false).Label(label).FocusRing(true).Clicked() {
-				s.closeScholarInspector(p)
+	ui.Column(c).Width(width).FillHeight().MinHeight(0).Clip().Background(s.ch.sidebar).Children(func() {
+		reading := p.references.focused != nil && !p.references.catalog && (drawer == scholarReader || drawer == scholarCodex)
+		if t := p.references.focused; reading {
+			s.scholarReadingPanelTabs(c.Key("reading-panels"), p, t)
+		}
+		label := "scholarDiagnostics"
+		switch drawer {
+		case scholarReader:
+			label = "scholarReferenceDetails"
+			if p.literature.annotations != nil {
+				label = "scholarReadAnnotations"
+			}
+		case scholarCodex:
+			label = "scholarACPChat"
+		}
+		panel := ui.Column(c.Key(drawer)).Grow(1).FillWidth().MinHeight(0)
+		if reading {
+			panel.Role(ui.RoleTabPanel).Label(s.tr(label))
+		}
+		panel.Children(func() {
+			switch drawer {
+			case scholarReader:
+				s.scholarReaderPane(c.Key("reader"), p, width, singlePane)
+			case scholarCodex:
+				s.scholarAgentView(c.Key("codex"), p, singlePane)
+			default:
+				s.scholarDiagnosticsPane(c.Key("diagnostics"), p, singlePane)
 			}
 		})
-		ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
-		ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Padding(8).Gap(6).Children(func() {
-				s.scholarDiagnosticsView(c, p)
-			})
+	})
+}
+
+func (s *Shell) scholarDiagnosticsPane(c *ui.Context, p *scholarState, singlePane bool) {
+	ui.Row(c).Height(s.pf.scholarNavHeight()).FillWidth().Padding(0, 8).Gap(4).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, s.tr("scholarDiagnostics")).FontSize(12).Bold().SingleLine().Grow(1).MinWidth(0)
+		label, glyph := s.tr("scholarCloseDrawer"), "x"
+		if singlePane {
+			label, glyph = s.scholarInspectorBackLabel(p), "chevron-left"
+		}
+		if s.toolButton(c, glyph, label, false).Label(label).FocusRing(true).Clicked() {
+			s.closeScholarInspector(p)
+		}
+	})
+	ui.Box(c).Height(1).FillWidth().Background(s.ch.separator)
+	ui.Scroll(c).TrackScroll(&p.diagnosticScroll).Grow(1).FillWidth().MinHeight(0).Children(func() {
+		ui.Column(c).FillWidth().Padding(8).Gap(6).Children(func() {
+			s.scholarDiagnosticsView(c, p)
 		})
 	})
 }
@@ -939,7 +984,7 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 					Menu(func(m *ui.Menu) { s.scholarCompileActions(m, tab) })
 			case pane.err != "":
 				if s.scholarStatusButton(c, "triangle-alert", "warning", s.tr("scholarCompileFailed"), s.tr("scholarOpenDiagnostics")+" · "+pane.path).Clicked() {
-					s.showScholarInspector(p, scholarDiagnostics)
+					s.openScholarDiagnostics(p, tab)
 				}
 			case pane.pages > 0:
 				engine := "XeLaTeX"
@@ -949,12 +994,21 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 				status := fmt.Sprintf("%s · %d ms", engine, pane.elapsed.Milliseconds())
 				if len(pane.warnings) > 0 {
 					if s.scholarStatusButton(c, "triangle-alert", "warning", status, s.tr("scholarOpenDiagnostics")+" · "+pane.path).Clicked() {
-						s.showScholarInspector(p, scholarDiagnostics)
+						s.openScholarDiagnostics(p, tab)
 					}
 				} else {
 					s.scholarStatusButton(c, "check", "brand", status, s.tr("scholarTypesetSuccess")+" · "+pane.path).
 						Menu(func(m *ui.Menu) { s.scholarCompileActions(m, tab) })
 				}
+			}
+		} else if report := p.diagnostics; report.tabID == tab.ID && samePath(report.source, tab.Path) &&
+			!tab.typesetPaused && (report.message != "" || len(report.warnings) > 0) {
+			label := s.tr("scholarDiagnostics")
+			if report.message != "" {
+				label = s.tr("scholarCompileFailed")
+			}
+			if s.scholarStatusButton(c, "triangle-alert", "warning", label, s.tr("scholarOpenDiagnostics")).Clicked() {
+				s.openScholarDiagnostics(p, tab)
 			}
 		} else if tab.typesetPaused && s.canPreviewTypeset(tab) && s.scholarPreviewMode(c, p, tab) != typesetSource {
 			if s.scholarStatusButton(c, "refresh-cw", "brand", s.tr("scholarTypesetPaused"), s.tr("scholarRebuildPreview")).Clicked() {
@@ -967,6 +1021,14 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 				count = len(p.agent.batch.hunks)
 			}
 			if s.scholarStatusButton(c.Key("review"), "file-diff", "agent", fmt.Sprintf(s.tr("scholarPendingCount"), count), s.tr("scholarShowReview")).Clicked() {
+				if batch := p.agent.batch; batch != nil {
+					for i, hunk := range batch.hunks {
+						if s.scholarTargetCurrent(hunk.target) {
+							batch.selected = i
+							break
+						}
+					}
+				}
 				s.openScholarReview(p)
 			}
 		}
@@ -1002,8 +1064,24 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 			part(s.tr("scholarManuscriptUnsaved"), "warning")
 		}
 		s.scholarPageStatus(c.Key("page-navigation"), p, tab)
-		if isManuscript(tab) && !p.agent.trial.show {
+		if width >= 660 && isManuscript(tab) && !p.agent.trial.show {
 			s.widthControl(c.Key("document-width"), tab)
+		}
+		if width < 660 {
+			label := s.tr("scholarStatusOptions")
+			more := s.scholarCompactIcon(c.Key("status-more"), "ellipsis", label, false)
+			more.Menu(func(m *ui.Menu) {
+				s.scholarCompileActions(m, tab)
+				if m.Item(s.tr("scholarViewRecentEdit")).Disabled(p.changes.latest(tab.ID) == nil).Chosen() {
+					s.openScholarChange(p, 0)
+				}
+				if isManuscript(tab) && !p.agent.trial.show && m.Item(s.tr("contentWidth")).Chosen() {
+					s.tbar.widthTab, s.tbar.widthOpen, s.tbar.width = tab.ID, true, s.documentWidth(tab)
+				}
+			})
+			if isManuscript(tab) && !p.agent.trial.show && s.tbar.widthTab == tab.ID {
+				s.documentWidthPopover(c.Key("status-width"), more, tab, 100)
+			}
 		}
 		s.zoomControl(c)
 	})
