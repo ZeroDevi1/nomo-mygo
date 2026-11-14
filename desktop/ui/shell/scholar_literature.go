@@ -611,10 +611,10 @@ func (s *Shell) scholarReaderAttachments(c *ui.Context, p *scholarState, e schol
 			if pdf.LinkOnly {
 				return
 			}
+			if s.pf.mac && s.scholarCompactIcon(ck.Key("quick-look"), "search", "Quick Look", false).Disabled(p.busy).Clicked() {
+				s.quickLookScholarAttachment(p, e, pdf.Key)
+			}
 			s.scholarCompactIcon(ck.Key("actions"), "ellipsis", s.tr("scholarAttachmentActions"), false).Disabled(p.busy).Menu(func(m *ui.Menu) {
-				if s.pf.mac && m.Item("Quick Look · Space").Chosen() {
-					s.quickLookScholarAttachment(p, pdf.Key)
-				}
 				if m.Item(s.tr("scholarReadAnnotations")).Chosen() {
 					z := l.zotero
 					z.Group = e.Library

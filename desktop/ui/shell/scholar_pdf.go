@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 	"nomo/desktop/internal/scholar"
@@ -142,17 +143,21 @@ func (s *Shell) showScholarReferenceAt(st *editor.State, p *scholarState, ref sc
 	}()
 }
 
-func (s *Shell) quickLookScholarAttachment(p *scholarState, key string) {
+func (s *Shell) quickLookScholarAttachment(p *scholarState, e scholar.Entry, key string) {
 	z := p.literature.zotero
-	z.Group = p.literature.selected.Library
+	z.Group = e.Library
 	s.scholarJob(p, func(ctx context.Context, _ uint64) (func(), error) {
 		lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 		path, err := z.AttachmentPath(lookup, key)
-		cancel()
 		if err != nil {
 			return nil, err
 		}
-		return nil, scholarQuickLook(ctx, path)
+		return func() {
+			if err := mygo.Shell.PreviewItem(path); err != nil {
+				p.err = err.Error()
+			}
+		}, nil
 	})
 }
 
