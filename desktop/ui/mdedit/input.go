@@ -51,13 +51,19 @@ func (e *Editor) target(r *ui.TextInputRange) (int, int) {
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	e.SyncManuscript()
 	a, z := e.target(r)
+	text = e.tableInput(a, z, text)
 	e.applyEdit(e.Doc.CommitMarked(a, z, text))
 }
 
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
 	e.SyncManuscript()
 	a, z := e.target(r)
-	e.applyEdit(e.Doc.SetMarked(a, z, text, u16ToByte(text, selected.Start), u16ToByte(text, selected.End)))
+	sa, sz := u16ToByte(text, selected.Start), u16ToByte(text, selected.End)
+	if escaped := e.tableInput(a, z, text); escaped != text {
+		sa, sz = len(e.tableInput(a, z, text[:sa])), len(e.tableInput(a, z, text[:sz]))
+		text = escaped
+	}
+	e.applyEdit(e.Doc.SetMarked(a, z, text, sa, sz))
 	e.dirty = true
 }
 
@@ -313,6 +319,7 @@ func wordEdge(src string, pos, dir int) int {
 
 func (e *Editor) replaceSel(text string, kind editKind) {
 	a, z := e.Doc.Sel.Range()
+	text = e.tableInput(a, z, text)
 	e.applyEdit(e.Doc.Replace(a, z, text, kind))
 }
 
@@ -442,6 +449,10 @@ func (e *Editor) rowParts(a, z int) [][2]int {
 }
 
 func (e *Editor) copySel(cut bool) {
+	if e.cells != nil {
+		e.copyTableCells(cut)
+		return
+	}
 	a, z := e.Doc.Sel.Range()
 	if a == z || !e.hasSvc {
 		return
@@ -502,14 +513,21 @@ func (e *Editor) command(name string) bool {
 				break
 			}
 			if s := e.svc.ReadClipboard(); s != "" {
-				e.replaceSel(s, editOther)
-				e.Doc.hist.seal()
+				if name == "pasteAndMatchStyle" || !e.pasteTableCells(s) {
+					e.replaceSel(s, editOther)
+					e.Doc.hist.seal()
+				}
 			}
 		}
 	case "selectAll":
+		e.cells = nil
 		e.Doc.SetSelection(Selection{Anchor: 0, Head: e.Doc.len()})
 		e.dirty = true
 	case "delete":
+		if e.cells != nil {
+			e.clearTableCells()
+			return true
+		}
 		e.replaceSel("", editOther)
 	case "undo":
 		e.undo(false)
@@ -542,6 +560,18 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 	alt := ev.Mods&ui.Alt != 0
 	sel := e.Doc.Sel
 	keepGoal := false
+	if e.cells != nil {
+		switch {
+		case ev.Key == ui.KeyBackspace || ev.Key == ui.KeyDelete:
+			e.clearTableCells()
+			return true
+		case ev.Key == ui.KeyEscape:
+			e.cells = nil
+			return true
+		case ev.Key != ui.KeyUnknown && (!cmd || ev.Key != ui.KeyC && ev.Key != ui.KeyX && ev.Key != ui.KeyV):
+			e.cells = nil
+		}
+	}
 	switch ev.Key {
 	case ui.KeyLeft, ui.KeyRight:
 		dir := 1
@@ -637,6 +667,9 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 	case ui.InputCommand:
 		return e.command(ev.Text)
 	case ui.InputScroll:
+		e.noteHover = nil
+		e.noteBack = false
+		e.CloseEmbedEdit()
 		// 按住 Ctrl 滚动交给外壳缩放（原版 ctrlWheelZoomEnabled），不滚动文档。
 		if ev.Mods&ui.Ctrl != 0 && e.CtrlWheel != nil && e.CtrlWheel(ev.DY) {
 			return true
@@ -657,12 +690,21 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 		return true
 	case ui.InputPointerDown:
 		if ev.Button == 1 {
+			e.noteHover = nil
+			e.noteBack = false
 			// 右键：记下位置供 ContextTarget 判断目标；点在选区外时光标移到该处（与浏览器一致），菜单由外壳弹出。
 			e.sync()
 			pos := e.hit(ui.Point{X: ev.X, Y: ev.Y})
 			e.ctxPos, e.ctxDetails = pos, -1
 			if f, ok := e.detailsHeaderHit(ui.Point{X: ev.X, Y: ev.Y}); ok {
 				e.ctxDetails = f.key
+			}
+			if e.cells != nil {
+				if s, f, ok := e.cellAtPoint(ui.Point{X: ev.X, Y: ev.Y}); ok &&
+					e.Doc.blocks[s.i].Start+e.entries[s.i].rows[f.first].a == e.cells.frameStart {
+					return false
+				}
+				e.cells = nil
 			}
 			if a, z := e.Doc.Sel.Range(); pos < a || pos > z || a == z {
 				e.setHead(pos, false)
@@ -673,6 +715,19 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			return false
 		}
 		e.sync()
+		if ev.Mods&ui.Alt != 0 {
+			if s, f, ok := e.cellAtPoint(ui.Point{X: ev.X, Y: ev.Y}); ok {
+				e.startCellSelection(s, f)
+				return true
+			}
+		}
+		e.cells = nil
+		if ev.Mods&ui.Cmd != 0 && e.OnLinkOpen != nil {
+			if href := e.linkHit(ui.Point{X: ev.X, Y: ev.Y}); href != "" {
+				e.OnLinkOpen(e.svc, href)
+				return true
+			}
+		}
 		if ev.X >= e.viewW-scrollbarHit {
 			total, pos := e.scrollMetrics()
 			if total > e.viewH {
@@ -711,6 +766,9 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			if e.OnManuscriptObject != nil && e.OnManuscriptObject(at) {
 				return true
 			}
+			if e.BeginEmbedEdit(at) {
+				return true
+			}
 			// 图片：按下后拖动换位置，没有拖动时松开按单击处理（光标进入图片原文）。
 			if e.Doc.manuscript == nil {
 				if ref, ok := e.ImageAt(at); ok {
@@ -723,10 +781,10 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			e.hasGoal = false
 			return true
 		}
-		if def, ok := e.footnoteHit(ui.Point{X: ev.X, Y: ev.Y}); ok && ev.Clicks == 1 && ev.Mods&ui.Shift == 0 {
-			e.JumpTo(def)
+		if ev.Clicks == 1 && ev.Mods&ui.Shift == 0 && e.followFootnote(ui.Point{X: ev.X, Y: ev.Y}) {
 			return true
 		}
+		e.noteHover = nil
 		pos := e.hit(ui.Point{X: ev.X, Y: ev.Y})
 		switch ev.Clicks {
 		case 2:
@@ -749,15 +807,18 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 		e.hasGoal = false
 		return true
 	case ui.InputPointerMove:
-		if ev.Button < 0 { // 未按键的悬停：只更新图片右边缘的调整光标
-			_, _, edge := e.imageEdgeHit(ui.Point{X: ev.X, Y: ev.Y})
-			if edge != e.edgeHover {
-				e.edgeHover = edge
-				return true
-			}
-			return false
+		if ev.Button < 0 {
+			pt := ui.Point{X: ev.X, Y: ev.Y}
+			_, _, edge := e.imageEdgeHit(pt)
+			back := e.footnoteReturnHit(pt)
+			changed := edge != e.edgeHover || back != e.noteBack
+			e.edgeHover, e.noteBack = edge, back
+			return e.hoverFootnote(pt) || changed
 		}
 		switch {
+		case e.drag == dragTableCells && e.cells != nil:
+			e.extendCellSelection(ui.Point{X: ev.X, Y: ev.Y})
+			return true
 		case e.drag == dragImageMove && ev.Button == 0 && e.move != nil:
 			mv := e.move
 			if !mv.moved && (ev.X-mv.x0)*(ev.X-mv.x0)+(ev.Y-mv.y0)*(ev.Y-mv.y0) < imageMoveStart*imageMoveStart {
@@ -779,6 +840,9 @@ func (e *Editor) input(ev ui.InputEvent) bool {
 			return true
 		}
 	case ui.InputPointerUp:
+		if ev.Canceled && e.drag == dragTableCells {
+			e.cells = nil
+		}
 		if e.drag == dragImageMove {
 			mv := e.move
 			e.drag, e.move, e.dirty = dragNone, nil, true

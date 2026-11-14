@@ -41,10 +41,14 @@
 | 绘制 | `desktop/ui/mdedit/draw.go` | `view.go` | 修改装饰（引用条、提示块标题、代码卡片、表格网格）、列表符号与任务框绘制 |
 | 代码块语法高亮 | `desktop/ui/mdedit/highlight.go` | `view.go`, `blocks.go` | 修改代码块着色、Tokenizer 跨行状态缓存 |
 | 语义模式图片（行内对象、加载缓存） | `desktop/ui/mdedit/imageview.go` | `images.go`, `projection.go`, `desktop/ui/shell/appearance.go` | 修改图片显示尺寸、点击展开、只含图片的 HTML 块、图片缓存预算与淘汰、后台加载、GIF 动画 |
-| 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `view.go`（`rowBox`）, `draw.go`, `input.go` | 修改列宽策略（原版 widths.ts）、超宽表格横向滚动、单元格裁剪 |
+| 表格列宽与横向滚动 | `desktop/ui/mdedit/tablelayout.go` | `htmlpreview.go`、`view.go`（`rowBox`）、`draw.go` | 修改内容宽度与 Unicode 断行度量、超宽表格滚动、单元格裁剪 |
+| 表格插入、结构命令与剪贴板 | `desktop/ui/mdedit/inserts.go`、`blockedit.go`、`tableclipboard.go` | `structure.go`、`input.go`、`desktop/ui/shell/editormenu.go` | 修改容器内插表与行列事务、列分隔符转义、矩形选区、TSV 复制与粘贴 |
 | 文档元数据卡片（front matter） | `desktop/ui/mdedit/frontmatter.go` | `blocks.go`（front matter 一行）、`htmlpreview.go`（`previewFrontMatter`）、`draw.go`（展开时的代码框） | 修改卡片字段解析（同原版 parseFrontMatterFields）与版式、点击进入原文 |
 | HTML 块预览、注释卡片、目录卡片 | `desktop/ui/mdedit/htmlpreview.go` | `blocks.go`, `document.go`（`KindToc`）, `imageview.go` | 修改可预览的 HTML 白名单与排版、注释/目录卡片样式、目录点击跳转 |
 | 公式与 Mermaid 渲染 | `desktop/ui/shell/render.go`（离屏 WebView 渲染服务） | `desktop/ui/render`（渲染页 render.html / render.js 与随附的 KaTeX 0.17.0、Mermaid 11.15.0）, `desktop/ui/mdedit/images.go`（`RenderFunc`、`rasterizeSVG`）, `export.go`（`renderExportMarkup`） | 修改离屏渲染窗口的生命周期、截图裁剪、渲染配色、行内公式基线；升级 KaTeX / Mermaid 时替换 assets 并更新 THIRD_PARTY_NOTICES.md |
+| Markdown 公式定界符与原位草稿 | `desktop/ui/mdedit/projection.go`、`embededit.go` | `view.go`、`chunks.go`（`Lines`）、`desktop/ui/word/docx.go` | 修改 TeX 投影、围栏和容器前缀的保留、公式与图表的草稿及防抖预览 |
+| 脚注预览与导航 | `desktop/ui/mdedit/footnote.go` | `projection.go`（脚注引用）、`draw.go`（返回标记） | 修改悬停预览、引用到定义及返回引用 |
+| Markdown 链接与标题锚点 | `desktop/ui/shell/editormenu.go`、`desktop/ui/mdedit/api.go`（`HeadingAnchor`） | `inserts.go`（`HeadingIDs`） | 修改文内与跨文件定位、源码菜单入口以及正文目录锚点 |
 | Word（.docx）导出 | `desktop/ui/word`（`Build`：docx.go、media.go、parts.go） | `desktop/ui/shell/export.go`（`exportWord`）, `mdedit.HeadingIDs`（目录锚点） | 修改 Word 版式与样式、块与行内的转换、图片与公式嵌入、资源预算与降级说明 |
 | 图片编辑（拖边缩放、拖动移位、右键菜单、预览） | `desktop/ui/mdedit/imageedit.go` | `input.go`（拖动与双击）, `desktop/ui/shell/imagemenu.go`（菜单与全屏预览） | 修改宽度/对齐写回原文的规则、拖动命中与绘制、图片菜单项 |
 | 文字颜色 | `desktop/ui/mdedit/textcolor.go` | `projection.go`（`style` 高位颜色索引）, `desktop/ui/shell/toolbar.go`（`colorPicker`） | 修改颜色解析、`<span style="color">` 写回、调色板 |

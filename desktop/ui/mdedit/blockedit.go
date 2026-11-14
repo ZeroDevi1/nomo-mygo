@@ -1,15 +1,15 @@
 package mdedit
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
-// 块级右键命令（原版 contextMenu.ts 的代码块、表格、公式与图表菜单）：只作用于顶层块，按原文改写，每条命令为
-// 一次独立的撤销步。表格命令整表重写为规范的管道表格（单元格去首尾空白、每行首尾带“|”），对齐方式保留。
+// 块级右键命令按原文改写，每条命令为一次独立的撤销步。表格保留容器前缀和列对齐。
 
-// codeFence 返回顶层代码、公式块 i 的内容范围 [a, z)（不含开闭围栏行）与开围栏行末；未闭合的块内容到块尾。
+// codeFence 返回顶层围栏代码块 i 的内容范围 [a, z) 与开围栏行末。
 func (d *Document) codeFence(i int) (a, z, fenceEnd int, ok bool) {
 	b := d.blocks[i]
 	src := d.Source()
@@ -19,13 +19,9 @@ func (d *Document) codeFence(i int) (a, z, fenceEnd int, ok bool) {
 	}
 	fenceEnd = b.Start + nl
 	a, z = fenceEnd+1, b.End
-	// 闭合的块尾含闭围栏行（公式块的闭合行由 blockSourceEnd 补入），内容止于其前一行；未闭合时内容到块尾。
+	// 已闭合的块尾包含闭围栏行。
 	pb := d.md.Block(b.Index)
-	closed := !pb.Open
-	if b.Kind == parser.MathBlock {
-		closed = blockSourceEnd(src, pb.Kind, pb.Start, pb.End) != pb.End
-	}
-	if closed {
+	if !pb.Open {
 		if k := strings.LastIndexByte(src[a:b.End], '\n'); k >= 0 {
 			z = a + k
 		} else {
@@ -49,7 +45,9 @@ func (e *Editor) BlockContent(pos int) (string, bool) {
 			lines[k] = strings.TrimPrefix(l, "    ")
 		}
 		return strings.Join(lines, "\n"), true
-	case b.Kind == parser.CodeBlock || b.Kind == parser.MathBlock:
+	case b.Kind == parser.MathBlock:
+		return strings.TrimSuffix(e.Doc.md.Lines(b.Index), "\n"), true
+	case b.Kind == parser.CodeBlock:
 		a, z, _, ok := e.Doc.codeFence(i)
 		if !ok {
 			return "", false
@@ -57,6 +55,16 @@ func (e *Editor) BlockContent(pos int) (string, bool) {
 		return e.Doc.Source()[a:z], true
 	}
 	return "", false
+}
+
+// FormulaSource 返回完整的公式原文，包括定界符。
+func (e *Editor) FormulaSource(pos int) (string, bool) {
+	i, _ := e.Doc.BlockAt(pos)
+	if i < 0 || e.Doc.blocks[i].Kind != parser.MathBlock {
+		return "", false
+	}
+	b := e.Doc.blocks[i]
+	return e.Doc.slice(b.Start, b.End), true
 }
 
 // SetCodeLanguage 把 pos 所在围栏代码块的语言改为 lang（空串为无语言），保留围栏字符与其后的其他信息。
@@ -112,7 +120,7 @@ func (e *Editor) DeleteBlock(pos int) bool {
 	return true
 }
 
-// TableCell 报告 pos 所在的表格单元格：row 为表格行（0 为表头，分隔行不计），col 为列；不在顶层表格中时 ok 为 false。
+// TableCell 报告 pos 所在的表格单元格：row 为表格行（0 为表头，分隔行不计），col 为列。
 func (e *Editor) TableCell(pos int) (row, col, rows, cols int, ok bool) {
 	t, ok := e.tableAtPos(pos)
 	if !ok {
@@ -124,15 +132,24 @@ func (e *Editor) TableCell(pos int) (row, col, rows, cols int, ok bool) {
 // TableCommand 在 pos 所在的表格上执行 op：addRowBefore、addRowAfter、deleteRow、addColumnBefore、addColumnAfter、
 // deleteColumn、alignLeft、alignCenter、alignRight、alignNone、deleteTable。不适用（如删除表头行）时返回 false。
 func (e *Editor) TableCommand(pos int, op string) bool {
-	if op == "deleteTable" {
-		if _, ok := e.tableAtPos(pos); !ok {
-			return false
-		}
-		return e.DeleteBlock(pos)
-	}
 	t, ok := e.tableAtPos(pos)
 	if !ok {
 		return false
+	}
+	if op == "deleteTable" || op == "deleteColumn" && len(t.align) == 1 {
+		if !t.nested {
+			return e.DeleteBlock(pos)
+		}
+		// 首行之前可能是列表标记，保留该标记及相邻段落的分隔行。
+		src := e.Doc.Source()
+		prefix := src[lineStart(src, t.start):t.start]
+		if strings.HasSuffix(prefix, "[ ] ") || strings.HasSuffix(prefix, "[x] ") || strings.HasSuffix(prefix, "[X] ") {
+			// An empty GFM task needs body text for the task marker to survive parsing.
+			e.Replace(t.start, t.end, "<!-- -->")
+		} else {
+			e.Replace(t.start, t.end, "")
+		}
+		return true
 	}
 	n := len(t.align)
 	blank := func() []string { return make([]string, n) }
@@ -140,16 +157,22 @@ func (e *Editor) TableCommand(pos int, op string) bool {
 	switch op {
 	case "addRowBefore":
 		at := max(1, row) // 表头之前不能插入：插到表头之后
-		t.cells = append(t.cells[:at], append([][]string{blank()}, t.cells[at:]...)...)
+		t.cells = slices.Insert(t.cells, at, blank())
+		t.prefixes = slices.Insert(t.prefixes, at, t.separator)
+		t.extra = slices.Insert(t.extra, at, "")
 		row = at
 	case "addRowAfter":
-		t.cells = append(t.cells[:row+1], append([][]string{blank()}, t.cells[row+1:]...)...)
+		t.cells = slices.Insert(t.cells, row+1, blank())
+		t.prefixes = slices.Insert(t.prefixes, row+1, t.separator)
+		t.extra = slices.Insert(t.extra, row+1, "")
 		row++
 	case "deleteRow":
 		if row == 0 {
 			return false
 		}
 		t.cells = append(t.cells[:row], t.cells[row+1:]...)
+		t.prefixes = slices.Delete(t.prefixes, row, row+1)
+		t.extra = slices.Delete(t.extra, row, row+1)
 		row = min(row, len(t.cells)-1)
 	case "addColumnBefore", "addColumnAfter":
 		at := col
@@ -157,14 +180,11 @@ func (e *Editor) TableCommand(pos int, op string) bool {
 			at++
 		}
 		for k := range t.cells {
-			t.cells[k] = append(t.cells[k][:at], append([]string{""}, t.cells[k][at:]...)...)
+			t.cells[k] = slices.Insert(t.cells[k], at, "")
 		}
-		t.align = append(t.align[:at], append([]parser.Align{parser.AlignNone}, t.align[at:]...)...)
+		t.align = slices.Insert(t.align, at, parser.AlignNone)
 		col = at
 	case "deleteColumn":
-		if n == 1 {
-			return e.DeleteBlock(pos)
-		}
 		for k := range t.cells {
 			t.cells[k] = append(t.cells[k][:col], t.cells[k][col+1:]...)
 		}
@@ -176,11 +196,7 @@ func (e *Editor) TableCommand(pos int, op string) bool {
 	default:
 		return false
 	}
-	text, caret := t.render(row, col)
-	e.Replace(t.start, t.end, text)
-	// 光标在单元格内容起点；空单元格（“|  |”）为两个空格之间，输入后即为“| X |”。
-	at := t.start + caret
-	e.Doc.Sel = Selection{Anchor: at, Head: at}
+	e.replaceTable(t, row, col)
 	return true
 }
 
@@ -190,36 +206,74 @@ type tableEdit struct {
 	cells      [][]string
 	align      []parser.Align
 	row, col   int // pos 所在单元格
+	nested     bool
+	prefixes   []string
+	extra      []string // 超出表头列数的原文，GFM 不显示，结构编辑仍保留
+	separator  string
+}
+
+func (e *Editor) tableBlockAt(pos int) int {
+	i, _ := e.Doc.BlockAt(pos)
+	if i < 0 {
+		return 0
+	}
+	top := e.Doc.blocks[i]
+	if top.Kind == parser.Table {
+		return top.Index
+	}
+	if top.Kind != parser.List && top.Kind != parser.Quote && top.Kind != parser.FootnoteDefinition {
+		return 0
+	}
+	s, ok := e.segAt(pos)
+	if !ok || e.entries[s.i].rows[s.k].ncol == 0 {
+		return 0
+	}
+	cell := e.Doc.md.Block(top.Index + e.entries[s.i].rows[s.k].rel)
+	if cell.Kind != parser.TableCell {
+		return 0
+	}
+	table := e.Doc.md.Block(cell.Parent).Parent
+	b := e.Doc.md.Block(table)
+	if pos < b.Start || pos > trailingEnd(e.Doc.Source(), b.End) {
+		return 0
+	}
+	return table
 }
 
 func (e *Editor) tableAtPos(pos int) (tableEdit, bool) {
-	i, _ := e.Doc.BlockAt(pos)
-	if i < 0 || e.Doc.blocks[i].Kind != parser.Table {
+	i := e.tableBlockAt(pos)
+	if i == 0 {
 		return tableEdit{}, false
 	}
-	b := e.Doc.blocks[i]
-	src := e.Doc.Source()[b.Start:b.End]
-	lines := strings.Split(src, "\n")
-	if len(lines) < 2 {
-		return tableEdit{}, false
-	}
-	t := tableEdit{start: b.Start, end: b.End, align: append([]parser.Align(nil), e.Doc.md.Block(b.Index).Align...)}
+	b := e.Doc.md.Block(i)
+	src := e.Doc.Source()
+	t := tableEdit{start: b.Start, end: trailingEnd(src, b.End), align: slices.Clone(b.Align), nested: b.Parent != 0}
 	n := len(t.align)
 	if n == 0 {
 		return tableEdit{}, false
 	}
-	off, rel := 0, pos-b.Start
-	for k, l := range lines {
-		cells, bounds := splitRow(l)
-		if k == 1 {
-			off += len(l) + 1
-			continue // 分隔行
+	for child := range e.Doc.md.Children(i) {
+		r := e.Doc.md.Block(child)
+		end := trailingEnd(src, r.Start)
+		prefix := ""
+		if r.Header {
+			if end == len(src) {
+				return tableEdit{}, false
+			}
+			sep := src[end+1 : trailingEnd(src, end+1)]
+			at := strings.IndexAny(sep, "|:-")
+			if at < 0 {
+				return tableEdit{}, false
+			}
+			t.separator = sep[:at]
+		} else {
+			prefix = src[lineStart(src, r.Start):r.Start]
 		}
-		r := len(t.cells)
-		if rel >= off && rel <= off+len(l) {
-			t.row, t.col = r, 0
+		cells, bounds := splitRow(src[r.Start:end])
+		if pos >= r.Start && pos <= end {
+			t.row, t.col = len(t.cells), 0
 			for c, bd := range bounds {
-				if rel-off >= bd {
+				if pos-r.Start >= bd {
 					t.col = c
 				}
 			}
@@ -228,9 +282,27 @@ func (e *Editor) tableAtPos(pos int) (tableEdit, bool) {
 		row := make([]string, n)
 		copy(row, cells)
 		t.cells = append(t.cells, row)
-		off += len(l) + 1
+		t.prefixes = append(t.prefixes, prefix)
+		suffix := ""
+		if len(cells) > n {
+			suffix = src[r.Start+bounds[n] : end]
+		}
+		t.extra = append(t.extra, suffix)
 	}
-	return t, true
+	return t, len(t.cells) > 0
+}
+
+func (e *Editor) replaceTable(t tableEdit, row, col int) {
+	text, caret := t.render(row, col)
+	version := e.Doc.Version()
+	e.Replace(t.start, t.end, text)
+	at := t.start + caret
+	e.Doc.SetSelection(Selection{Anchor: at, Head: at})
+	if n := len(e.Doc.hist.undo); version != e.Doc.Version() && n > 0 {
+		e.Doc.hist.undo[n-1].after = e.Doc.Sel
+	}
+	e.cells = nil
+	e.reveal, e.dirty = true, true
 }
 
 // splitRow 把一行表格拆为单元格（去首尾空白），并返回各单元格在行内的起点。只有“\|”不分隔；与 GFM 一致，
@@ -281,10 +353,14 @@ func (t tableEdit) render(row, col int) (string, int) {
 	for r, cells := range t.cells {
 		if r > 0 {
 			b.WriteByte('\n')
+			b.WriteString(t.prefixes[r])
 		}
 		line(cells, r)
+		b.WriteString(t.extra[r])
 		if r == 0 {
-			b.WriteString("\n|")
+			b.WriteByte('\n')
+			b.WriteString(t.separator)
+			b.WriteByte('|')
 			for _, a := range t.align {
 				b.WriteString(delimiterCell(a))
 			}
@@ -304,4 +380,58 @@ func delimiterCell(a parser.Align) string {
 		return " ---: |"
 	}
 	return " --- |"
+}
+
+// tableInput keeps plain input and paste inside one GFM cell. Tabs are left
+// intact here so a structured table paste can be handled before this path.
+func (e *Editor) tableInput(a, z int, text string) string {
+	if !strings.ContainsAny(text, "|\r\n") || e.Doc.manuscript != nil {
+		return text
+	}
+	s, ok := e.segAt(a)
+	if !ok || e.entries[s.i].rows[s.k].ncol == 0 {
+		return text
+	}
+	src := e.Doc.Source()
+	lo, hi := s.base, s.end
+	for lo > 0 && (src[lo-1] == ' ' || src[lo-1] == '\t') {
+		lo--
+	}
+	for hi < len(src) && (src[hi] == ' ' || src[hi] == '\t') {
+		hi++
+	}
+	if a < lo || z > hi {
+		return text
+	}
+	slashes := 0
+	for k := a; k > lo && src[k-1] == '\\'; k-- {
+		slashes++
+	}
+	return escapeTableText(text, slashes)
+}
+
+func escapeTableText(text string, slashes int) string {
+	var b strings.Builder
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\\':
+			slashes++
+			b.WriteByte('\\')
+			continue
+		case '|':
+			if slashes%2 == 0 {
+				b.WriteByte('\\')
+			}
+			b.WriteByte('|')
+		case '\r', '\n':
+			if text[i] == '\r' && i+1 < len(text) && text[i+1] == '\n' {
+				i++
+			}
+			b.WriteString("<br>")
+		default:
+			b.WriteByte(text[i])
+		}
+		slashes = 0
+	}
+	return b.String()
 }

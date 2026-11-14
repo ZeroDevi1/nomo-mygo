@@ -31,6 +31,7 @@ func (s *Shell) splitView(c *ui.Context, tab *Tab, ck *ui.Context) (semantic ui.
 	tab.syncFromSource()
 	tab.syncToSource()
 	st := tab.Source()
+	s.sourceLinkMenu(c, tab)
 	if st.OnCompletion == nil {
 		st.OnCompletion = func(req editor.CompletionRequest) { s.sourceCompletion(tab, req) }
 	}
@@ -39,7 +40,11 @@ func (s *Shell) splitView(c *ui.Context, tab *Tab, ck *ui.Context) (semantic ui.
 	}
 	srcPane := func() {
 		ui.Row(ck).Fill().Padding(16, 0, 0, 12).Children(func() {
-			editor.View(ck, st).Fill()
+			el := editor.View(ck, st).Fill()
+			if s.focusEditor && s.splitActive == modeSource {
+				el.Focus()
+				s.focusEditor = false
+			}
 		})
 	}
 	first, second := semPane, srcPane

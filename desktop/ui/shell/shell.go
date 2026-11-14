@@ -415,6 +415,7 @@ func (s *Shell) activate(i int) {
 	}
 	s.closeManuscriptEditor()
 	if prev := s.activeTab(); prev != nil {
+		prev.Ed.CloseEmbedEdit()
 		if p := s.scholar; p != nil && p.changes.tabID == prev.ID {
 			s.captureScholarChangeSnapshot(p, prev.Source().Buffer.Snapshot(), time.Now())
 			s.flushScholarChanges(p)
@@ -459,6 +460,7 @@ func (s *Shell) addTab(t *Tab) {
 func (s *Shell) wirePaste(t *Tab) {
 	t.Ed.PasteData = func(d transfer.Data) bool { return s.pasteData(t, d) }
 	t.Ed.OnImageOpen = func(src string) { s.openImagePreview(t, src) }
+	t.Ed.OnLinkOpen = func(svc ui.Services, href string) { s.openLink(svc, t, href) }
 }
 
 // OpenExternal 打开从系统传入的文档（启动参数、Finder 双击、第二实例）：窗口尚未打开文件夹且没有已保存路径或
@@ -810,6 +812,7 @@ func (s *Shell) setMode(mode string) {
 		return
 	}
 	if t := s.activeTab(); t != nil {
+		t.Ed.CloseEmbedEdit()
 		switch mode {
 		case modeSource:
 			t.syncFromSource()

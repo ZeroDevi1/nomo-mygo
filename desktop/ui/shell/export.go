@@ -311,18 +311,29 @@ var (
 // renderExportMarkup 把导出 HTML 中的公式与 Mermaid 源码替换为渲染结果（在后台调用，可能耗时数秒）。没有
 // 公式与图表、或离屏渲染不可用（测试中没有窗口）时原样返回；单项失败时保留源码并附错误说明（原版同样处理）。
 func (s *Shell) renderExportMarkup(doc string, dark bool) string {
-	if s.win == nil || !strings.Contains(doc, `class="math `) && !strings.Contains(doc, "language-mermaid") {
+	if s.win == nil {
+		return doc
+	}
+	return replaceExportMarkup(doc, func(reqs []mdedit.RenderRequest) ([]markupItem, string, error) {
+		return s.rend.markup(reqs, dark)
+	})
+}
+
+func replaceExportMarkup(doc string, render func([]mdedit.RenderRequest) ([]markupItem, string, error)) string {
+	if !strings.Contains(doc, `class="math `) && !strings.Contains(doc, "language-mermaid") {
 		return doc
 	}
 	type hit struct {
 		a, z int
 		kind string
 		src  string
+		span bool
 	}
 	var hits []hit
 	for _, m := range exportMathRe.FindAllStringSubmatchIndex(doc, -1) {
 		h := hit{a: m[0], z: m[1]}
 		if m[2] >= 0 {
+			h.span = true
 			h.kind, h.src = map[string]string{"inline": mdedit.RenderMathInline, "display": mdedit.RenderMathDisplay}[doc[m[2]:m[3]]], doc[m[4]:m[5]]
 		} else {
 			h.kind, h.src = mdedit.RenderMathDisplay, doc[m[6]:m[7]]
@@ -340,7 +351,7 @@ func (s *Shell) renderExportMarkup(doc string, dark bool) string {
 	for k, h := range hits {
 		reqs[k] = mdedit.RenderRequest{Kind: h.kind, Src: html.UnescapeString(h.src)}
 	}
-	items, css, err := s.rend.markup(reqs, dark)
+	items, css, err := render(reqs)
 	if err != nil {
 		applog.Warn("Export", "导出时渲染公式与图表失败，保留源码："+err.Error())
 		return doc
@@ -351,8 +362,11 @@ func (s *Shell) renderExportMarkup(doc string, dark bool) string {
 		b.WriteString(doc[at:h.a])
 		it := items[k]
 		tag, class := "div", "math-block"
+		if h.span {
+			tag = "span"
+		}
 		if h.kind == mdedit.RenderMathInline {
-			tag, class = "span", "math-inline"
+			class = "math-inline"
 		}
 		if it.err != "" {
 			b.WriteString(doc[h.a:h.z] + `<span class="nomo-render-error">` + html.EscapeString(it.err) + `</span>`)

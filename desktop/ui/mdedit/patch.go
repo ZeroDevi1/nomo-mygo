@@ -83,7 +83,7 @@ func (e *Editor) patchRowEdit(i int, ch Change) bool {
 		fr.hlUpTo = min(fr.hlUpTo, k)
 	}
 	if top.Kind == parser.Table {
-		e.layoutTables(src, top.Start, en.rows, en.frames, e.width()-en.rinset)
+		e.layoutTables(top, en.rows, en.frames, e.width()-en.rinset)
 	}
 	return true
 }

@@ -312,6 +312,12 @@ func (t *tree) Inlines(g int) []parser.Inline {
 	return out
 }
 
+// Lines 返回去掉容器前缀和围栏的块内容。
+func (t *tree) Lines(g int) string {
+	k := t.chunkOf(g)
+	return t.doc(k).Lines(g - t.chunks[k].base)
+}
+
 // Edit 把原文 [from, to) 替换为 text：跨段的编辑先合并所涉各段；编辑后检查所在段与前后段的切分条件，
 // 不再满足时与相邻段合并重解析；编辑引入链接引用或脚注定义时合并为一段。
 func (t *tree) Edit(from, to int, text string) {

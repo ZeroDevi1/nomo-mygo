@@ -203,7 +203,8 @@ func blockSourceEnd(src string, kind parser.Kind, start, end int) int {
 	if strings.TrimSpace(src[end:lineEnd]) == closer {
 		return lineEnd
 	}
-	if first, _, _ := strings.Cut(src[start:end], "\n"); strings.Contains(first[len(closer):], closer) || lineEnd == len(src) {
+	if first, _, _ := strings.Cut(src[start:end], "\n"); len(first) < len(closer) ||
+		strings.Contains(first[len(closer):], closer) || lineEnd == len(src) {
 		return end
 	}
 	next := src[lineEnd+1:]

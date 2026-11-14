@@ -1,95 +1,57 @@
 package mdedit
 
 import (
-	"slices"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/go-text/typesetting/segmenter"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// 表格列宽与横向滚动。列宽策略移植自原版 src/lib/table-layout/widths.ts（TABLE_WIDTH_POLICY）：每列的
-// 最小宽度保证表头与短值可读，首选宽度取表头、正文 p90 与最长值（各有 em 上限）；可用宽度介于两者之间时
-// 按比例插值，放不下最小宽度时整表横向滚动（原版 .nomo-table-scroll 的 overflow-x: auto）。与原版的差异：
-// 整表已需横向滚动时按首选宽度排（原版仍压到最小宽度），避免短值（如编号）在每格里折行。
-
-// 原版 TABLE_WIDTH_POLICY 的 em 倍数。
 const (
-	tableEmptyEm   = 3
-	tableMinimumEm = 6
-	tableHeaderEm  = 12
-	tableBodyEm    = 28
-	tableLongEm    = 12
-	// tableSampleRows 是参与列宽计算的正文行数上限：超长表格（万行）只取前若干行估计，避免每次编辑
-	// 表格都遍历全部单元格；p90 在样本上已稳定。
-	tableSampleRows = 500
-	// tableScrollbarH 是表格横向滚动条的高度（溢出时画在表格底边内侧）。
-	tableScrollbarH = 6
+	// 在大表中采样，避免按键逐格排版或测量整张表。
+	tableSampleRows   = 500
+	tableSampleCells  = 4096
+	tableMeasureBytes = 512
+	tableScrollbarH   = 6
 )
 
 // layoutTables 为 rows/frames 中的每张表格计算列宽，写入各单元格行的 cellX、cellW 与 shift。avail 为
 // 内容区宽度（不含表格缩进）。frames 中已有的 scrollX 会被夹到新的可滚动范围内。
-func (e *Editor) layoutTables(src string, start int, rows []row, frames []frame, avail float32) {
+func (e *Editor) layoutTables(top Block, rows []row, frames []frame, avail float32) {
+	src := e.Doc.Source()
 	for fi := range frames {
 		f := &frames[fi]
 		if f.kind != frameTable {
 			continue
 		}
 		ncol := max(1, rows[f.first].ncol)
-		em := e.rowFont(&rows[f.first]).Size
 		chrome := float32(2*cellPadX + 1)
-		type colStat struct {
-			header float32
-			body   []float32
-		}
-		stats := make([]colStat, ncol)
+		widths := make([]tableWidth, ncol)
 		bands := 0
 		for k := f.first; k <= f.last; k++ {
 			r := &rows[k]
 			if r.col == 0 {
 				bands++
-				if bands > tableSampleRows+1 {
+				if bands > tableSampleRows+1 || bands > 2 && k-f.first >= tableSampleCells {
 					break
 				}
 			}
 			if r.col >= ncol {
 				continue
 			}
-			w := cellTextWidth(src[start+r.a:start+r.b], em)
-			if r.role == roleCellHead {
-				stats[r.col].header = max(stats[r.col].header, w)
-			} else if w > 0 {
-				stats[r.col].body = append(stats[r.col].body, w)
+			a, z := top.Start+r.a, top.Start+r.b
+			text := src[a:z]
+			if len(text) <= tableMeasureBytes && strings.ContainsAny(text, "*_`~[<&$\\") {
+				text = projectLeaf(e.Doc, top.Index+r.rel, a, z, expansion{}, leafOpts{}).text
 			}
+			size := tableContentWidth(text, e.rowFont(r).Size)
+			widths[r.col].add(size)
 		}
-		minimum := make([]float32, ncol)
-		preferred := make([]float32, ncol)
-		var sumMin, sumPref float32
-		for c := range stats {
-			st := &stats[c]
-			slices.Sort(st.body)
-			var p90, longest float32
-			if n := len(st.body); n > 0 {
-				p90 = st.body[(n*9+9)/10-1]
-				longest = st.body[n-1]
-			}
-			natural := max(st.header, longest)
-			minimum[c] = chrome + max(tableEmptyEm*em, min(natural, tableMinimumEm*em), min(st.header, tableHeaderEm*em))
-			preferred[c] = max(minimum[c], chrome+max(min(st.header, tableHeaderEm*em), min(p90, tableBodyEm*em), min(longest, tableLongEm*em)))
-			sumMin += minimum[c]
-			sumPref += preferred[c]
-		}
-		target := max(sumMin, min(avail-f.indent, sumPref))
-		if sumMin > avail-f.indent {
-			target = sumPref
-		}
-		ratio := float32(0)
-		if sumPref > sumMin {
-			ratio = (target - sumMin) / (sumPref - sumMin)
-		}
-		f.cols = f.cols[:0]
-		for c := range ncol {
-			f.cols = append(f.cols, minimum[c]+ratio*(preferred[c]-minimum[c]))
-		}
-		f.tableW, f.viewW = target, max(0, avail-f.indent)
+		f.viewW = max(0, avail-f.indent)
+		f.cols, f.tableW = fitTableColumns(f.cols[:0], widths, f.viewW, chrome)
 		f.scrollX = clampF(f.scrollX, 0, max(0, f.tableW-f.viewW))
 		e.applyTableColumns(rows, f)
 	}
@@ -108,19 +70,77 @@ func (e *Editor) applyTableColumns(rows []row, f *frame) {
 	}
 }
 
-// cellTextWidth 估算单元格文字不换行时的宽度：全角字符 1em，其余 0.6em（比 textWidth 的 0.55 略宽，
-// 列宽宁可略宽也不让短值折行）。
-func cellTextWidth(s string, fs float32) float32 {
-	wide, narrow := 0, 0
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case c >= 0xE0:
-			wide++
-		case c < 0x80:
-			narrow++
+type tableWidth struct{ minimum, natural float32 }
+
+func (w *tableWidth) add(other tableWidth) {
+	w.minimum = max(w.minimum, other.minimum)
+	w.natural = max(w.natural, other.natural)
+}
+
+// tableContentWidth uses Unicode break opportunities to estimate the longest
+// unbreakable fragment and the natural line width.
+func tableContentWidth(s string, em float32) tableWidth {
+	var w tableWidth
+	if len(s) == 0 {
+		return w
+	}
+	if len(s) > tableMeasureBytes {
+		s = s[:chunkCut(s, 0, tableMeasureBytes)]
+	}
+	if len(s) <= 12 && !strings.ContainsAny(s, " -/\r\n\t") && utf8.RuneCountInString(s) == len(s) {
+		estimate := float32(len(s)) * em * .6
+		return tableWidth{estimate, estimate}
+	}
+	var sg segmenter.Segmenter
+	sg.Init([]rune(s))
+	iter := sg.LineIterator()
+	var line float32
+	for iter.Next() {
+		part := iter.Line()
+		var width, trailing float32
+		for _, r := range part.Text {
+			if r == '\n' || r == '\r' {
+				continue
+			}
+			size := em * .6
+			if r >= 0x2e80 {
+				size = em
+			}
+			width += size
+			if unicode.IsSpace(r) {
+				trailing += size
+			} else {
+				trailing = 0
+			}
+		}
+		line += width
+		w.minimum = max(w.minimum, width-trailing)
+		w.natural = max(w.natural, line-trailing)
+		if part.IsMandatoryBreak {
+			line = 0
 		}
 	}
-	return float32(wide)*fs + float32(narrow)*fs*0.6
+	return w
+}
+
+func fitTableColumns(dst []float32, widths []tableWidth, avail, chrome float32) ([]float32, float32) {
+	var low, high float32
+	for i := range widths {
+		w := &widths[i]
+		w.minimum = max(32, w.minimum+chrome)
+		w.natural = max(w.minimum, w.natural+chrome)
+		low += w.minimum
+		high += w.natural
+	}
+	target := max(low, min(avail, high))
+	ratio := float32(0)
+	if high > low {
+		ratio = (target - low) / (high - low)
+	}
+	for _, w := range widths {
+		dst = append(dst, w.minimum+ratio*(w.natural-w.minimum))
+	}
+	return dst, target
 }
 
 func clampF(v, lo, hi float32) float32 { return min(max(v, lo), hi) }

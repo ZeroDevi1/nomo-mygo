@@ -140,22 +140,20 @@ func (im *Images) requestRender(req RenderRequest) *imageEntry {
 			im.bytes -= en.bytes
 		}
 		en = &imageEntry{key: key, req: &req, used: im.clock}
+		en.bytes = 256 + len(req.Src)
 		if native {
-			en.bytes = 256 + len(req.Src)
 			if style := req.Manuscript; style != nil {
 				en.bytes += len(style.Preamble) + len(style.Bibliography) + len(style.References)
 			}
-			im.bytes += en.bytes
 		}
+		im.bytes += en.bytes
 		im.m[key] = en
 		if im.render == nil {
 			en.state, en.failedAt = imageFailed, time.Now()
 		} else {
 			im.enqueue(en)
 		}
-		if native {
-			im.evict()
-		}
+		im.evict()
 	} else if en.state == imageDeferred && en.queuedGen != im.gen {
 		im.enqueue(en)
 	}

@@ -650,37 +650,21 @@ func (c *hpCtx) table(t *hnode, x, y, w float32, st hpStyle) float32 {
 	}
 	em := st.size
 	pad := float32(cellPadX)
-	cols := make([]float32, ncol)
+	widths := make([]tableWidth, ncol)
 	for _, cl := range cells {
-		if cl.cs == 1 {
-			cols[cl.col] = max(cols[cl.col], min(cellTextWidth(collapseSpace(textOf(cl.n)), em), tableBodyEm*em)+2*pad)
+		size := tableContentWidth(collapseSpace(textOf(cl.n)), em)
+		size.minimum /= float32(cl.cs)
+		size.natural /= float32(cl.cs)
+		for k := cl.col; k < cl.col+cl.cs; k++ {
+			widths[k].add(size)
 		}
 	}
-	for k := range cols {
-		cols[k] = max(cols[k], tableEmptyEm*em)
-	}
-	for _, cl := range cells {
-		if cl.cs > 1 {
-			need := min(cellTextWidth(collapseSpace(textOf(cl.n)), em), tableBodyEm*em) + 2*pad
-			var have float32
-			for k := cl.col; k < cl.col+cl.cs; k++ {
-				have += cols[k]
-			}
-			if have < need {
-				cols[cl.col+cl.cs-1] += need - have
-			}
-		}
-	}
-	var total float32
-	for _, cw := range cols {
-		total += cw
-	}
+	cols, total := fitTableColumns(nil, widths, w, 2*pad)
 	if total > w {
 		f := w / total
 		for k := range cols {
 			cols[k] *= f
 		}
-		total = w
 	}
 	colX := make([]float32, ncol+1)
 	for k, cw := range cols {
@@ -701,7 +685,7 @@ func (c *hpCtx) table(t *hnode, x, y, w float32, st hpStyle) float32 {
 			s.bold = true
 		}
 		from := len(c.lay.ops)
-		h := c.blocks(cl.n.children, 0, 0, cw-2*pad, s)
+		h := c.blocks(cl.n.children, 0, 0, max(1, cw-2*pad), s)
 		ps = append(ps, placed{cl, from, len(c.lay.ops), h + 2*cellPadY})
 	}
 	rowH := make([]float32, len(rows))
@@ -787,20 +771,6 @@ func (e *Editor) commentLabel() string {
 	return "Comment"
 }
 
-// fencedContent 返回围栏代码块原文去掉首尾围栏行后的内容。
-func fencedContent(text string) string {
-	lines := strings.Split(text, "\n")
-	if len(lines) > 0 {
-		lines = lines[1:]
-	}
-	if n := len(lines); n > 0 {
-		if l := strings.TrimSpace(lines[n-1]); strings.HasPrefix(l, "```") || strings.HasPrefix(l, "~~~") {
-			lines = lines[:n-1]
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 // htmlBlockKind 判断 HTML 块的显示方式：注释块、可预览的 HTML，或按原文显示（0）。
 func htmlBlockKind(src string) uint8 {
 	s := strings.TrimSpace(src)
@@ -822,7 +792,7 @@ const (
 	previewHTML
 	previewComment
 	previewToc
-	previewMath    // 公式块（$$…$$）
+	previewMath    // 公式块（$$…$$ 或 \[…\]）
 	previewMermaid // ```mermaid 代码块
 	previewDetails // 折叠块标记（details.go）
 	// previewDetailsMark 是不构成折叠框架的折叠块标记（列表、引用中的折叠块，或未配对的标记）：开始标记显示为
@@ -831,20 +801,9 @@ const (
 	previewFrontMatter // 文档开头的 YAML front matter：元数据卡片
 )
 
-// projectHTMLPreview 生成 HTML 块、公式块与 Mermaid 块收起时的投影：整块为一个对象。
+// projectHTMLPreview 生成 HTML 块收起时的投影：整块为一个对象。
 func projectHTMLPreview(text string, kind uint8) *projection {
 	pb := projBuilder{src: text, p: &projection{}}
-	switch kind {
-	case previewMath:
-		src := strings.TrimSpace(text)
-		src = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(src, "$$"), "$$"))
-		pb.object(0, len(text), imgObj{render: RenderMathDisplay, src: src, alt: src}, 0)
-		return pb.finish()
-	case previewMermaid:
-		code := fencedContent(text)
-		pb.object(0, len(text), imgObj{render: RenderMermaid, src: code, alt: code}, 0)
-		return pb.finish()
-	}
 	if kind == previewDetailsMark {
 		pb.object(0, len(text), imgObj{html: &htmlBlockPreview{src: detailsMarkHTML(text)}}, 0)
 		return pb.finish()

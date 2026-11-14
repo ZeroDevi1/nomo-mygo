@@ -94,9 +94,30 @@ func TestFootnoteRefLabelAndJump(t *testing.T) {
 			y = v.y
 		}
 	}
-	tt.ClickAt(ed.left()+s.x+cr.X, y+s.padTop+cr.Y+cr.H/2)
+	x, clickY := ed.left()+s.x+cr.X, y+s.padTop+cr.Y+cr.H/2
+	tt.Move(x, clickY)
+	tt.Frame()
+	if ed.noteHover == nil || ed.noteHover.text != "定义内容。" {
+		t.Fatalf("hover preview = %+v", ed.noteHover)
+	}
+	tt.ClickAt(x, clickY)
 	tt.Frame()
 	if head := ed.Doc.Sel.Head; head != strings.Index(src, "定义") {
 		t.Fatalf("点击后光标 %d，期望在定义处 %d", head, strings.Index(src, "定义"))
+	}
+	if !ed.noteReturn.valid {
+		t.Fatal("return to the source reference is unavailable")
+	}
+	for _, v := range ed.vsegs {
+		if v.i == 1 && v.k == 0 {
+			def := ed.segOf(v.i, v.k)
+			box := ed.footnoteMarkerBox(&ed.entries[v.i].rows[v.k], def)
+			tt.ClickAt(box.X+box.W/2, v.y+def.padTop+box.Y+box.H/2)
+			tt.Frame()
+			break
+		}
+	}
+	if ed.Doc.Sel.Head != strings.Index(src, "[^n1]") || ed.noteReturn.valid {
+		t.Fatalf("return did not restore the original reference: %+v", ed.Doc.Sel)
 	}
 }

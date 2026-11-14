@@ -504,7 +504,7 @@ struct MarkdownRenderer {
     }
 
     /// 解析前的逐行预处理（只作用于围栏代码块以外）：
-    /// - `$$` 公式块转为围栏代码块、行内 `$…$` 转为行内代码，原文（含反斜杠）原样显示；`^上标^`、`~下标~`
+    /// - `$$` 或 `\[…\]` 公式块转为围栏代码块，行内公式转为行内代码，TeX 原样显示；`^上标^`、`~下标~`
     ///   转为 <sup>、<sub>（规则同编辑区 mdedit/script.go），行内代码中的内容不变；
     /// - 去掉整行的 HTML 注释（如 `<!-- toc -->`、markdownlint 配置注释）：解析器会把它们当作正文，
     ///   而主应用不显示注释；
@@ -514,18 +514,16 @@ struct MarkdownRenderer {
     ///   标题保留，其余标签去掉只留文字，空行丢弃。
     private func preprocess(_ source: String) -> String {
         var fence: String? = nil
-        var math = false
+        var mathClose: String?
         var out: [Substring] = []
         for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
             let t = line.trimmingCharacters(in: .whitespaces)
-            if math {
-                if t == "$$" {
+            if let close = mathClose {
+                if t.hasSuffix(close) {
+                    let content = t.dropLast(close.count)
+                    if !content.isEmpty { out.append(content) }
                     out.append("```")
-                    math = false
-                } else if t.hasSuffix("$$") {
-                    out.append(Substring(line.replacingOccurrences(of: "$$", with: "")))
-                    out.append("```")
-                    math = false
+                    mathClose = nil
                 } else {
                     out.append(line)
                 }
@@ -533,20 +531,28 @@ struct MarkdownRenderer {
             }
             if let f = fence {
                 if t.hasPrefix(f) { fence = nil }
+                out.append(line)
+                continue
             } else if t.hasPrefix("```") || t.hasPrefix("~~~") {
                 fence = String(t.prefix(3))
-            } else if t.hasPrefix("$$") {
-                // 公式块：单行 $$…$$ 或多行，按源码显示（围栏代码块不再解释反斜杠）。
-                let rest = t.dropFirst(2)
-                out.append("```math")
-                if rest.count >= 2, rest.hasSuffix("$$") {
-                    out.append(Substring(rest.dropLast(2).trimmingCharacters(in: .whitespaces)))
-                    out.append("```")
-                } else {
-                    if !rest.trimmingCharacters(in: .whitespaces).isEmpty { out.append(Substring(rest)) }
-                    math = true
-                }
+                out.append(line)
                 continue
+            } else if t.hasPrefix("$$") || t.hasPrefix(#"\["#) {
+                let close = t.hasPrefix("$$") ? "$$" : #"\]"#
+                let rest = t.dropFirst(2)
+                if let end = rest.range(of: close) {
+                    if rest[end.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty {
+                        out.append("```math")
+                        out.append(rest[..<end.lowerBound])
+                        out.append("```")
+                        continue
+                    }
+                } else {
+                    out.append("```math")
+                    if !rest.isEmpty { out.append(rest) }
+                    mathClose = close
+                    continue
+                }
             } else if t.hasPrefix("<!--"), t.hasSuffix("-->") {
                 continue
             } else if t.range(of: #"^</?[A-Za-z][A-Za-z0-9-]*(\s|>|/|$)"#, options: .regularExpression) != nil {
@@ -560,19 +566,23 @@ struct MarkdownRenderer {
             }
             out.append(Substring(inlineSyntax(String(line))))
         }
-        if math { out.append("```") }
+        if mathClose != nil { out.append("```") }
         return out.joined(separator: "\n")
     }
 
     private static let codeSpanRegex = try! NSRegularExpression(pattern: #"(`+)[\s\S]*?\1"#)
     // 行内公式 $…$：开头后与结尾前不是空白，结尾 $ 后不跟数字（同 markdown-it dollarmath），内容可含转义字符（如 \$）。
     private static let inlineMathRegex = try! NSRegularExpression(pattern: #"(?<![\\$])\$(?=\S)((?:\\.|[^$\\\n])*?[^\s\\])\$(?![\d$])"#)
+    private static let latexInlineRegex = try! NSRegularExpression(
+        pattern: #"(?<!\\)\\\(((?:\\(?!\)).|[^\\\n])+?)\\\)|(?<!\\)\\\[((?:\\(?!\]).|[^\\\n])+?)\\\]"#
+    )
     private static let supRegex = try! NSRegularExpression(pattern: #"(?<![\^\[\\])\^([^\s^]+)\^(?!\^)"#)
     private static let subRegex = try! NSRegularExpression(pattern: #"(?<![~\\])~([^\s~]+)~(?!~)"#)
 
     /// 行内语法改写（只作用于行内代码以外）：行内公式转为行内代码，上下标转为 <sup>、<sub>。
     private func inlineSyntax(_ line: String) -> String {
-        guard line.contains("$") || line.contains("^") || line.contains("~") else { return line }
+        guard line.contains("$") || line.contains("^") || line.contains("~") ||
+                line.contains(#"\("#) || line.contains(#"\["#) else { return line }
         let ns = line as NSString
         var out = ""
         var last = 0
@@ -583,9 +593,21 @@ struct MarkdownRenderer {
             p = Self.subRegex.stringByReplacingMatches(in: p, range: NSRange(p.startIndex..., in: p), withTemplate: "<sub>$1</sub>")
             return p
         }
-        for m in Self.codeSpanRegex.matches(in: line, range: NSRange(location: 0, length: ns.length)) {
+        let range = NSRange(location: 0, length: ns.length)
+        let code = Self.codeSpanRegex.matches(in: line, range: range)
+        let formulas = Self.latexInlineRegex.matches(in: line, range: range).filter { formula in
+            !code.contains { NSIntersectionRange($0.range, formula.range).length > 0 }
+        }
+        for m in (code + formulas).sorted(by: { $0.range.location < $1.range.location }) {
             out += transform(ns.substring(with: NSRange(location: last, length: m.range.location - last)))
-            out += ns.substring(with: m.range)
+            let token = ns.substring(with: m.range)
+            if token.hasPrefix("`") {
+                out += token
+            } else {
+                let longest = token.split(whereSeparator: { $0 != "`" }).map(\.count).max() ?? 0
+                let delimiter = String(repeating: "`", count: longest + 1)
+                out += delimiter + " " + token + " " + delimiter
+            }
             last = m.range.location + m.range.length
         }
         return out + transform(ns.substring(from: last))

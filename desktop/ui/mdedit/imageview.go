@@ -38,7 +38,9 @@ type Labels struct {
 	InlineComment string
 	// 文档元数据卡片（front matter）：无标题时的标题与日期、其余字段数的模板（{date}、{count}），
 	// 原版 t.documentMetadata()、t.metadataCreated()、t.metadataUpdated()、t.metadataMoreFields()
-	Metadata, MetadataCreated, MetadataUpdated, MetadataMore string
+	Metadata, MetadataCreated, MetadataUpdated, MetadataMore         string
+	EmbedFormula, EmbedDiagram, EmbedSave, EmbedCancel, EmbedInvalid string
+	FootnoteEmpty                                                    string
 }
 
 // SetLabels 设置界面文字；变化时全部布局作废（注释卡片含标签文字）。

@@ -192,3 +192,44 @@ func TestBuildDocxBudget(t *testing.T) {
 		t.Fatalf("应因预算失败：%v", err)
 	}
 }
+
+func TestBuildDocxMathDelimiters(t *testing.T) {
+	const src = "Inline $x^2$ and \\(y_1\\).\n\n" +
+		"$$\na\n=\nb\n$$\n\n" +
+		"> \\[\n> \\frac{c}{d}\n> =\n> e\n> \\]\n\n" +
+		"Code: `\\(code\\)`, escaped: \\\\(literal\\\\).\n"
+	want := map[string]string{
+		"x^2":                mdedit.RenderMathInline,
+		"y_1":                mdedit.RenderMathInline,
+		"a\n=\nb":            mdedit.RenderMathDisplay,
+		"\\frac{c}{d}\n=\ne": mdedit.RenderMathDisplay,
+	}
+	count := 0
+	data, warnings, err := Build(src, Options{Render: func(reqs []mdedit.RenderRequest) []mdedit.RenderResult {
+		results := make([]mdedit.RenderResult, len(reqs))
+		for i, req := range reqs {
+			if want[req.Src] != req.Kind || req.Kind == "" {
+				t.Errorf("unexpected formula request: %q %q", req.Kind, req.Src)
+			}
+			delete(want, req.Src)
+			count++
+			img := image.NewRGBA(image.Rect(0, 0, 60, 30))
+			img.Set(i, 1, color.Black)
+			results[i] = mdedit.RenderResult{Img: img, W: 30, H: 15, Depth: 4}
+		}
+		return results
+	}})
+	if err != nil || len(warnings) != 0 || len(want) != 0 || count != 4 {
+		t.Fatalf("export: pending=%v count=%d err=%v warnings=%v", want, count, err, warnings)
+	}
+	parts := unzipDocx(t, data)
+	doc := parts["word/document.xml"]
+	if n := strings.Count(doc, `<w:drawing>`); n != 4 {
+		t.Errorf("embedded formula count = %d, want 4", n)
+	}
+	for _, part := range []string{`\(code\)`, `\(literal\)`} {
+		if !strings.Contains(doc, part) {
+			t.Errorf("literal %q is missing", part)
+		}
+	}
+}

@@ -429,20 +429,16 @@ loop:
 				pb.emit(a, z, cur|stRaw, true)
 			}
 		case parser.Math:
-			// 原版只认 $…$ 与 $$…$$；\[…\]、\(…\) 在原版是转义的括号，按转义显示。
-			if src := pb.src[a:z]; len(src) >= 4 && src[0] == '\\' && (src[1] == '[' || src[1] == '(') {
-				pb.emit(a, a+1, cur|stMarker, pb.ex.inBlock)
-				pb.emit(a+1, z-2, cur, true)
-				pb.emit(z-2, z-1, cur|stMarker, pb.ex.inBlock)
-				pb.emit(z-1, z, cur, true)
-				break
-			}
-			// $…$ 与 $$…$$：光标严格位于原文内时显示原文，否则显示渲染结果（原版 math_inline）。
+			// 公式的定界符仍保留在原文中，渲染器使用解析器给出的 TeX 内容。
 			if pb.noRender {
 				pb.emit(a, z, cur|stCode, true)
 				break
 			}
-			if tex, kind := inlineMath(pb.src[a:z]); tex != "" && !pb.inside(a, z) {
+			if tex := strings.TrimSpace(in.Text); tex != "" && !pb.inside(a, z) {
+				kind := RenderMathInline
+				if in.Display {
+					kind = RenderMathDisplay
+				}
 				pb.object(a, z, imgObj{render: kind, src: tex, alt: tex}, cur)
 				break
 			}
@@ -675,50 +671,6 @@ func (p *projection) toSrc(u int, preferEnd bool) int {
 	}
 	off := u16ToByte(p.text[r.dispByte:p.runEnd(k)], u-r.disp)
 	return r.srcA + off
-}
-
-// inlineMath 返回行内公式原文的 TeX 内容与渲染种类（$$…$$ 为行间样式）；不是 $ 定界的公式时返回空串。
-func inlineMath(src string) (string, string) {
-	switch {
-	case len(src) >= 4 && strings.HasPrefix(src, "$$") && strings.HasSuffix(src, "$$"):
-		return strings.TrimSpace(src[2 : len(src)-2]), RenderMathDisplay
-	case len(src) >= 2 && src[0] == '$' && src[len(src)-1] == '$':
-		return strings.TrimSpace(src[1 : len(src)-1]), RenderMathInline
-	}
-	return "", ""
-}
-
-// footnoteHit 报告 pt 是否点在显示为标签的脚注引用上，是则返回对应脚注定义的内容起点（原版点击引用跳到定义）。
-// 引用正以原文显示（光标触及）或找不到定义时返回 false，点击按普通文字处理。
-func (e *Editor) footnoteHit(pt ui.Point) (int, bool) {
-	pos := e.hit(pt)
-	s, ok := e.segAt(pos)
-	if !ok || s.kind != rowText {
-		return 0, false
-	}
-	r := &e.entries[s.i].rows[s.k]
-	label := ""
-	for _, run := range s.proj.runs {
-		if run.st&stFootRef != 0 && s.base+run.srcA <= pos && pos <= s.base+run.srcB {
-			for _, in := range e.Doc.md.Inlines(e.Doc.blocks[s.i].Index + r.rel) {
-				if in.Kind == parser.FootnoteRef && in.Start == s.base+run.srcA {
-					label = in.Text
-				}
-			}
-		}
-	}
-	if label == "" {
-		return 0, false
-	}
-	for _, b := range e.Doc.blocks {
-		if pb := e.Doc.md.Block(b.Index); pb.Kind == parser.FootnoteDefinition && strings.EqualFold(pb.Label(), label) {
-			if first, ok := e.Doc.firstChildStart(b.Index); ok {
-				return first, true
-			}
-			return b.Start, true
-		}
-	}
-	return 0, false
 }
 
 // colorIndex 返回颜色在投影颜色表中的下标 + 1（相同颜色复用），表满（255 种）时返回 0（默认颜色）。

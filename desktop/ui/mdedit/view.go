@@ -200,11 +200,18 @@ type Editor struct {
 	dragPos float32
 	// resize 为拖动图片右边缘调整宽度的状态（drag == dragImage 时非空）；edgeHover 为指针停在图片右边缘上，
 	// 编辑区光标显示为左右调整。见 imageedit.go。
-	resize    *imageResize
-	move      *imageMove // 拖动图片换位置（drag == dragImageMove 时非空）
-	edgeHover bool
+	resize     *imageResize
+	move       *imageMove // 拖动图片换位置（drag == dragImageMove 时非空）
+	edgeHover  bool
+	noteHover  *footnoteHover
+	noteReturn footnoteReturn
+	noteBack   bool
+	embed      *embedEdit
+	cells      *cellSelection
 	// OnImageOpen 在双击图片时调用（外壳打开预览），src 为图片原文中的地址；为空时双击图片按普通双击处理。
 	OnImageOpen func(src string)
+	// OnLinkOpen handles Ctrl/Cmd-click in the semantic editor.
+	OnLinkOpen func(ui.Services, string)
 	// OnManuscriptObject opens the inspector for a clicked rendered figure or table.
 	OnManuscriptObject func(at int) bool
 
@@ -270,6 +277,7 @@ const (
 	dragScrollbar
 	dragImage
 	dragImageMove
+	dragTableCells
 )
 
 // NewEditor 创建绑定 doc 的编辑器视图。
@@ -289,10 +297,6 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	t := c.Theme()
 	e.setTheme(t)
 	e.svc, e.hasSvc = c.Services(), true
-	cursor := ui.CursorText
-	if e.edgeHover || e.resize != nil {
-		cursor = ui.CursorResizeEW
-	}
 	label := "Markdown"
 	if e.Doc.manuscript != nil {
 		label = "Typst"
@@ -301,14 +305,31 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 		}
 	}
 	box := ui.Box(c).Fill().Clip().Background(e.pal.background).
-		Role(ui.RoleTextField).Label(label).Cursor(cursor).
+		Role(ui.RoleTextField).Label(label).
 		HandleTextInput(e).HandleInput(e.input).Draw(e.draw)
 	e.focused = box.Focused()
+	if !box.Hovered() {
+		e.noteHover = nil
+		e.noteBack = false
+	}
+	switch {
+	case e.edgeHover || e.resize != nil:
+		box.Cursor(ui.CursorResizeEW)
+	case e.noteHover != nil || e.noteBack:
+		box.Cursor(ui.CursorPointer)
+	default:
+		box.Cursor(ui.CursorText)
+	}
+	e.embedEditor(c, box)
 	return box
 }
 
 // ReleaseLayouts 释放全部布局与投影，保留行高和阅读锚点；下次绘制时按需重建。
 func (e *Editor) ReleaseLayouts() {
+	e.noteHover = nil
+	e.noteBack = false
+	e.CloseEmbedEdit()
+	e.cells = nil
 	for i := range e.entries {
 		for k := range e.entries[i].rows {
 			r := &e.entries[i].rows[k]
@@ -442,6 +463,10 @@ func (e *Editor) applyEdit(ed Edit) {
 	if !ed.Applied {
 		return
 	}
+	e.noteHover = nil
+	e.remapFootnoteReturn(ed.Change)
+	e.CloseEmbedEdit()
+	e.cells = nil
 	e.remapFolds(ed.Change)
 	e.remapCalloutFolds(ed.Change)
 	if ed.Removed == 1 && ed.Inserted == 1 && e.patchRowEdit(ed.First, ed.Change) {
@@ -524,7 +549,7 @@ func (e *Editor) split(i int, reuse []row, oldFrames []frame) {
 		}
 	}
 	if len(frames) != 0 {
-		e.layoutTables(e.Doc.Source(), top.Start, rows, frames, e.width()-rinset)
+		e.layoutTables(top, rows, frames, e.width()-rinset)
 	}
 	en.tablesW = e.width()
 	for k := range rows {
@@ -656,7 +681,7 @@ func (e *Editor) ensure(i int) *entry {
 	} else if en.tablesW != e.width() {
 		// 内容区宽度变化：重算表格列宽（单元格行宽变化后，其布局在 ensureRow 中按 shapeW 作废）。
 		if len(en.frames) != 0 {
-			e.layoutTables(e.Doc.Source(), e.Doc.blocks[i].Start, en.rows, en.frames, e.width()-en.rinset)
+			e.layoutTables(e.Doc.blocks[i], en.rows, en.frames, e.width()-en.rinset)
 		}
 		en.tablesW = e.width()
 	}
@@ -732,6 +757,15 @@ func (e *Editor) ensureRow(i, k int) bool {
 			p = projectLeaf(e.Doc, top.Index+r.rel, top.Start+r.a, top.Start+r.b, ex, leafOpts{prefix: r.role == roleHeading, callout: r.callout, rawCode: e.opts.RawInlineCode, noRender: !e.canRender()})
 		} else if r.htmlImg && !ex.inBlock {
 			p = projectHTMLImages(e.Doc.Source()[top.Start+r.a : top.Start+r.b])
+		} else if (r.htmlKind == previewMath || r.htmlKind == previewMermaid) && !ex.inBlock {
+			kind := RenderMathDisplay
+			if r.htmlKind == previewMermaid {
+				kind = RenderMermaid
+			}
+			src := strings.TrimSpace(e.Doc.md.Lines(top.Index + r.rel))
+			pb := projBuilder{src: e.Doc.slice(top.Start+r.a, top.Start+r.b), p: &projection{}}
+			pb.object(0, r.b-r.a, imgObj{render: kind, src: src, alt: src}, 0)
+			p = pb.finish()
 		} else if r.htmlKind != previewNone && !ex.inBlock {
 			p = projectHTMLPreview(e.Doc.Source()[top.Start+r.a:top.Start+r.b], r.htmlKind)
 			if b := p.objs[0].html; b != nil && b.details {

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,20 @@ import (
 // 小窗）都经由这里，保证右键行为一致。
 func (s *Shell) editorView(c *ui.Context, tab *Tab) ui.Element {
 	return tab.Ed.View(c).ContextMenu(func(m *ui.Menu) { s.editorMenu(c, m, tab) })
+}
+
+func (s *Shell) sourceLinkMenu(c *ui.Context, tab *Tab) {
+	if tab.plain {
+		return
+	}
+	st := tab.Source()
+	svc := c.Services()
+	st.ContextMenu = func(m *ui.Menu) {
+		tab.syncFromSource()
+		if href := tab.Ed.LinkDestinationAt(st.Cursor()); href != "" && m.Item(s.tr("openLink")).Chosen() {
+			s.openLink(svc, tab, href)
+		}
+	}
 }
 
 // editorMenu 填充语义编辑区的右键菜单，按右键位置的目标给出不同的项（原版 App.svelte 的
@@ -79,7 +94,7 @@ func (s *Shell) editorMenu(c *ui.Context, m *ui.Menu, tab *Tab) {
 		return
 	case "link":
 		if m.Item(s.tr("openLink")).Chosen() {
-			s.openLink(c, tab, tg.Href)
+			s.openLink(c.Services(), tab, tg.Href)
 		}
 		if m.Item(s.tr("editLink")).Chosen() {
 			tab.Ed.Select(tg.Pos, tg.Pos)
@@ -185,8 +200,18 @@ func (s *Shell) blockMenu(c *ui.Context, m *ui.Menu, tab *Tab, tg mdedit.Context
 			}
 		})
 	case "math":
-		copyContent(s.tr("copyFormulaSource"))
+		if m.Item(s.tr("editFormulaSource")).Chosen() {
+			tab.Ed.BeginEmbedEdit(tg.Pos)
+		}
+		if m.Item(s.tr("copyFormulaSource")).Chosen() {
+			if text, ok := tab.Ed.FormulaSource(tg.Pos); ok {
+				c.Services().WriteClipboard(text)
+			}
+		}
 	case "mermaid":
+		if m.Item(s.tr("editDiagramSource")).Chosen() {
+			tab.Ed.BeginEmbedEdit(tg.Pos)
+		}
 		copyContent(s.tr("copyDiagramSource"))
 	}
 	m.Separator()
@@ -196,31 +221,82 @@ func (s *Shell) blockMenu(c *ui.Context, m *ui.Menu, tab *Tab, tg mdedit.Context
 	}
 }
 
-// openLink 打开链接：带协议的地址交给系统；相对路径按文档目录解析，Markdown 文件在新标签中打开，其余交给系统。
-func (s *Shell) openLink(c *ui.Context, tab *Tab, href string) {
-	if href == "" || strings.HasPrefix(href, "#") {
+// openLink 在编辑器中处理 Markdown 链接和锚点，其他地址交给系统。
+func (s *Shell) openLink(svc ui.Services, tab *Tab, href string) {
+	if href == "" || !linkHrefOK(href) {
 		return
 	}
-	if u, err := url.Parse(href); err == nil && u.Scheme != "" {
-		c.Services().OpenURL(href)
+	path, fragment, hasFragment := strings.Cut(href, "#")
+	if path == "" {
+		s.jumpLinkAnchor(tab, fragment, s.mode() == modeSource)
 		return
 	}
-	p, err := url.PathUnescape(strings.SplitN(href, "#", 2)[0])
-	if err != nil || tab.Path == "" {
+	p, err := url.PathUnescape(path)
+	if !filepath.IsAbs(p) {
+		if u, parseErr := url.Parse(href); parseErr == nil && u.Scheme != "" {
+			if u.Scheme != "file" || u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+				svc.OpenURL(href)
+				return
+			}
+			path = u.Path
+			if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+				path = path[1:]
+			}
+			p, err = filepath.FromSlash(path), nil
+		}
+	}
+	if err != nil || p == "" {
 		return
 	}
 	if !filepath.IsAbs(p) {
+		if tab.Path == "" {
+			return
+		}
 		p = filepath.Join(filepath.Dir(tab.Path), p)
 	}
-	if _, err := os.Stat(p); err != nil {
+	p = filepath.Clean(p)
+	if info, err := os.Stat(p); err != nil || info.IsDir() {
 		return
 	}
+	fromSource := s.mode() == modeSource
 	switch strings.ToLower(filepath.Ext(p)) {
-	case ".md", ".markdown", ".txt":
+	case ".md", ".markdown", ".mdown", ".mkd", ".txt":
 		s.OpenFiles([]string{p})
+		if target := s.activeTab(); hasFragment && target != nil && !target.plain && samePath(target.Path, p) {
+			s.jumpLinkAnchor(target, fragment, fromSource)
+		}
 	default:
-		c.Services().OpenURL((&url.URL{Scheme: "file", Path: p}).String())
+		svc.OpenURL((&url.URL{Scheme: "file", Path: p}).String())
 	}
+}
+
+func (s *Shell) jumpLinkAnchor(tab *Tab, fragment string, fromSource bool) {
+	anchor, err := url.PathUnescape(fragment)
+	if err != nil || anchor == "" {
+		s.status = s.tr("localLinkEmptyAnchor")
+		return
+	}
+	tab.syncFromSource()
+	pos, ok := tab.Doc.HeadingAnchor(anchor)
+	if !ok {
+		s.status = s.tr("localLinkAnchorMissing", "anchor", anchor)
+		return
+	}
+	if s.prefs.EditorMode == modeSource || s.split() {
+		tab.syncToSource()
+		st := tab.Source()
+		st.Select(pos, pos)
+		st.ScrollTo(st.Buffer.Snapshot().LineOf(pos))
+	}
+	tab.Ed.JumpTo(pos)
+	if s.split() {
+		s.splitActive = modeSemantic
+		if fromSource {
+			s.splitActive = modeSource
+		}
+		s.splitSync = splitScroll{}
+	}
+	s.focusEditor = true
 }
 
 // insertSourceDetails 在源码模式下插入折叠块（原版 editorInteractionController 的源码分支）：选中内容作为正文，

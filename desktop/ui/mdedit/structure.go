@@ -97,7 +97,7 @@ func (e *Editor) lineHead(s seg) seg {
 // enterInRow 处理容器内的回车，返回是否已处理。
 //   - 列表项：新建同级项；空项回车退出列表（删除标记）。
 //   - 引用、提示块：在容器内新起段落；空段落回车退出容器。
-//   - 表格单元格：不插入换行（单元格不能跨行）。
+//   - 表格单元格：Shift+Enter 插入行内换行，Enter 保持当前单元格。
 //   - 容器内的代码行：换行并保留容器前缀与本行缩进。
 func (e *Editor) enterInRow(pos int, soft bool) bool {
 	s, ok := e.segAt(pos)
@@ -106,6 +106,9 @@ func (e *Editor) enterInRow(pos int, soft bool) bool {
 	}
 	r := &e.entries[s.i].rows[s.k]
 	if r.ncol > 0 {
+		if soft {
+			e.replaceSel("<br>", editOther)
+		}
 		return true
 	}
 	prefix := e.rowPrefix(s)
@@ -204,7 +207,7 @@ func (e *Editor) tab(back bool) bool {
 		if back {
 			k = s.k - 1
 		}
-		if k >= 0 && k < len(en.rows) && en.rows[k].ncol > 0 {
+		if f := tableFrame(en, s.k); f != nil && k >= f.first && k <= f.last {
 			n := e.segOf(s.i, k)
 			e.Doc.SetSelection(Selection{Anchor: n.base, Head: n.end})
 			e.reveal, e.dirty = true, true

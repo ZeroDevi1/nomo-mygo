@@ -388,6 +388,7 @@ func (p *compilePane) keepPage(n int, bmp *ui.Bitmap) {
 func (s *Shell) sourceEditor(c *ui.Context, t *Tab) ui.Element {
 	st := t.Source()
 	s.bindScholarCitations(t)
+	s.sourceLinkMenu(c, t)
 	s.scholarGutter(c, t)
 	if t.afterSourceInput != nil {
 		t.afterSourceInput()

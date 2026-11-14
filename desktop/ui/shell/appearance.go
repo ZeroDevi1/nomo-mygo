@@ -118,7 +118,10 @@ func (s *Shell) applyDocumentAppearance(c *ui.Context, tab *Tab) {
 		tab.Ed.SetLabels(mdedit.Labels{Comment: s.tr("comment"), Toc: s.tr("toc"), NoHeadings: s.tr("documentHasNoHeadings"),
 			DetailsTitle: s.tr("detailsTitlePlaceholder"), InlineComment: s.tr("inlineComment"),
 			Metadata: s.tr("documentMetadata"), MetadataCreated: s.tr("metadataCreated"), MetadataUpdated: s.tr("metadataUpdated"),
-			MetadataMore: s.tr("metadataMoreFields")})
+			MetadataMore: s.tr("metadataMoreFields"),
+			EmbedFormula: s.tr("editFormulaSource"), EmbedDiagram: s.tr("editDiagramSource"),
+			EmbedSave: s.tr("save"), EmbedCancel: s.tr("cancel"), EmbedInvalid: s.tr("invalidMarkdownEmbedSource"),
+			FootnoteEmpty: s.tr("footnoteEmpty")})
 		if tab.source != nil {
 			mono := s.prefs.MonoFontFamily
 			if mono == "" {

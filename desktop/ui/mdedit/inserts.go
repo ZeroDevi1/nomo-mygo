@@ -5,26 +5,130 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // 工具栏插入命令（原版 editorCommands 的 insertTable、insertFootnote、insertToc、insertCommentInline、
 // insertMathInline）按 Markdown 原文实现：写出与原版序列化结果相同的原文。
 
-// InsertTable 在光标所在块之后插入 rows 行正文、columns 列的空表格（原版 createTableNode：列 2–8、正文行 1–12，
-// 首行为表头，对齐行写 :---），光标置于第一个表头单元格。
+// InsertTable 在当前容器中插入空表格，光标置于第一个表头单元格。
 func (e *Editor) InsertTable(rows, columns int) {
 	columns, rows = clamp(columns, 2, 8), clamp(rows, 1, 12)
+	d := e.Doc
+	src := d.Source()
+	a, z := d.Sel.Range()
+	i, _ := d.BlockAt(z)
+	at, prefix := z, ""
+	emptyContainer := false
+	if i >= 0 {
+		top := d.blocks[i]
+		at = top.End
+		if a < top.Start {
+			return
+		}
+		switch top.Kind {
+		case parser.List, parser.Quote:
+			s, ok := e.segAt(z)
+			if !ok {
+				return
+			}
+			r := &e.entries[i].rows[s.k]
+			leaf := d.md.Block(top.Index + r.rel)
+			if r.empty && a == z && z == s.end {
+				at = z
+				prefix = d.tableContinuation(parser.Block{Start: z, Parent: top.Index + r.rel})
+				if leaf.Kind == parser.Item && z > 0 && src[z-1] != ' ' && src[z-1] != '\t' {
+					prefix += " "
+				}
+				emptyContainer = true
+			} else if r.ncol == 0 && (leaf.Kind == parser.Paragraph || leaf.Kind == parser.Heading) && a >= leaf.Start && z <= trailingEnd(src, leaf.End) {
+				at = trailingEnd(src, leaf.End)
+				prefix = d.tableContinuation(leaf)
+			} else {
+				return
+			}
+		case parser.HTMLBlock:
+			if a != z || !e.tableAfterSummary(i, z) {
+				return
+			}
+		case parser.Table, parser.CodeBlock, parser.MathBlock, KindFrontMatter, KindToc:
+			return
+		}
+	} else if a != z {
+		return
+	}
 	row := "|" + strings.Repeat("  |", columns)
 	sep := "|" + strings.Repeat(" :--- |", columns)
 	lines := []string{row, sep}
 	for range rows {
 		lines = append(lines, row)
 	}
-	e.insertBlock(strings.Join(lines, "\n"))
-	// insertBlock 把光标放在块尾；表格起点 = 块尾 - 块长，“| ” 之后即第一个单元格。
-	p := e.Doc.Sel.Head - len(strings.Join(lines, "\n")) + 2
-	e.Doc.Sel = Selection{Anchor: p, Head: p}
-	e.dirty = true
+	blank := strings.TrimRight(prefix, " \t")
+	lead := "\n" + blank + "\n" + prefix
+	if emptyContainer {
+		lead = ""
+		if at > 0 && src[at-1] != ' ' && src[at-1] != '\t' {
+			lead = " "
+		}
+	} else if at == 0 && prefix == "" {
+		lead = ""
+	}
+	text := lead + strings.Join(lines, "\n"+prefix) + "\n" + blank
+	if at == len(src) || src[at] != '\n' {
+		text += "\n"
+	}
+	e.Replace(at, at, text)
+	p := at + len(lead) + 2
+	d.SetSelection(Selection{Anchor: p, Head: p})
+	if n := len(d.hist.undo); n > 0 {
+		d.hist.undo[n-1].after = d.Sel
+	}
+}
+
+func (e *Editor) tableAfterSummary(i, pos int) bool {
+	d := e.Doc
+	idx := d.details()
+	m := idx.marker(i)
+	if m == nil || len(m.opens) != 1 {
+		return false
+	}
+	f := &idx.frames[m.opens[0]]
+	block := d.blocks[i]
+	parsed := d.detailsParsed(d.slice(block.Start, block.End))
+	return f.open == i && f.close > i && f.openTok < len(parsed.opens) &&
+		pos >= block.Start+parsed.opens[f.openTok].end
+}
+
+// tableContinuation 把叶子块首行的列表标记换成等宽缩进，引用标记原样保留。
+func (d *Document) tableContinuation(leaf parser.Block) string {
+	src := d.Source()
+	start := lineStart(src, leaf.Start)
+	end := leaf.Start
+	prefix := src[start:end]
+	for i := leaf.Parent; i > 0; {
+		b := d.md.Block(i)
+		i = b.Parent
+		if b.Kind != parser.Item || b.Start < start || b.Start >= end {
+			continue
+		}
+		marker := strings.IndexAny(src[b.Start:end], " \t")
+		if marker < 0 {
+			marker = end - b.Start
+		}
+		a, z := b.Start-start, b.Start-start+marker
+		prefix = prefix[:a] + strings.Repeat(" ", marker) + prefix[z:]
+		if b.Task != parser.NoTask {
+			box := z
+			for box < len(prefix) && (prefix[box] == ' ' || prefix[box] == '\t') {
+				box++
+			}
+			if box+4 <= len(prefix) && prefix[box] == '[' && prefix[box+2] == ']' {
+				prefix = prefix[:box] + prefix[box+4:]
+			}
+		}
+	}
+	return prefix
 }
 
 var footnoteIDRe = regexp.MustCompile(`\[\^(\d+)\]`)

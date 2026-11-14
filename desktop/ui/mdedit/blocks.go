@@ -301,9 +301,9 @@ func (bb *blockBuilder) block(i int, c container) {
 		f := len(bb.rows)
 		// 公式块与 Mermaid 代码块整块一行：收起时显示渲染结果（居中），光标严格位于块内时显示原文。
 		if kind := renderBlockKind(b); kind != previewNone && bb.render {
-			z := b.Start + len(strings.TrimRight(bb.src[b.Start:end], "\r\n"))
+			z := trailingEnd(bb.src, end)
 			bb.pending += blockMargin - paraAfter
-			bb.add(row{kind: rowLine, role: role, htmlKind: kind, align: ui.Center, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
+			bb.add(row{kind: rowLine, role: role, rel: i - bb.top.Index, htmlKind: kind, align: ui.Center, a: bb.rel(b.Start), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone})
 			bb.closePad(blockMargin)
 			return
 		}
@@ -358,7 +358,7 @@ func (bb *blockBuilder) block(i int, c container) {
 			bb.block(ch, inner)
 		}
 		if len(bb.rows) == f {
-			bb.emptyRow(b.End, inner)
+			bb.emptyRow(i, b.End, inner)
 		}
 		if n := len(bb.rows); n > 0 {
 			bb.rows[n-1].after = 0
@@ -425,7 +425,7 @@ func (bb *blockBuilder) item(i int, list *parser.Block, n int, c container) {
 	}
 	if len(bb.rows) == f {
 		// 空列表项（只有标记）：给一个空行承载光标。
-		bb.emptyRow(b.End, c)
+		bb.emptyRow(i, b.End, c)
 	}
 	r := &bb.rows[f]
 	if list.Ordered {
@@ -446,9 +446,9 @@ func (bb *blockBuilder) item(i int, list *parser.Block, n int, c container) {
 
 // emptyRow 为没有叶子块的列表项或引用生成占位行，承载光标；区间覆盖标记后的
 // 尾随空白，光标落在其中任一位置都属于这一行。
-func (bb *blockBuilder) emptyRow(at int, c container) {
+func (bb *blockBuilder) emptyRow(i, at int, c container) {
 	z := trailingEnd(bb.src, at)
-	bb.add(row{kind: rowLine, empty: true, a: bb.rel(z), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone, after: paraSpacing(c)})
+	bb.add(row{kind: rowLine, empty: true, rel: i - bb.top.Index, a: bb.rel(z), b: bb.rel(z), indent: c.indent, quoteFg: c.quote, tone: c.tone, after: paraSpacing(c)})
 }
 
 // lines 为 [start, end) 的每一行生成原样行，去掉行首属于外层容器的前缀。

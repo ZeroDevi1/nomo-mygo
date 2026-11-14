@@ -215,7 +215,7 @@ func (b *builder) prerender() {
 			add(mdedit.RenderMermaid, b.md.Lines(i))
 		case blk.Kind == parser.Paragraph || blk.Kind == parser.Heading || blk.Kind == parser.TableCell:
 			for _, in := range b.md.Inlines(i) {
-				if in.Kind == parser.Math && !mathEscaped(b.src[in.Start:in.End]) {
+				if in.Kind == parser.Math {
 					kind := mdedit.RenderMathInline
 					if in.Display {
 						kind = mdedit.RenderMathDisplay
@@ -241,11 +241,6 @@ func (b *builder) prerender() {
 		}
 		reqs = next
 	}
-}
-
-// mathEscaped 报告 \(…\)、\[…\] 写法：原版按转义的括号处理，不渲染。
-func mathEscaped(src string) bool {
-	return len(src) >= 2 && src[0] == '\\' && (src[1] == '(' || src[1] == '[')
 }
 
 // renderedPicture 返回已渲染的公式 / 图表图片（嵌入为 PNG），没有或失败时 ok 为 false。
@@ -819,10 +814,6 @@ func (b *builder) inlines(ins []parser.Inline, i, end int, st runStyle) error {
 			}
 		case parser.Math:
 			src := b.src[in.Start:in.End]
-			if mathEscaped(src) {
-				b.out.WriteString(textRun(src[1:len(src)-2]+src[len(src)-1:], cur.rPr()))
-				break
-			}
 			kind := mdedit.RenderMathInline
 			if in.Display {
 				kind = mdedit.RenderMathDisplay

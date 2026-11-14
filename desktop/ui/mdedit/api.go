@@ -52,6 +52,24 @@ func (d *Document) Headings() []Heading {
 	return out
 }
 
+// HeadingAnchor 使用与正文目录相同的标题 ID 解析锚点。
+func (d *Document) HeadingAnchor(fragment string) (int, bool) {
+	headings := d.Headings()
+	titles := make([]string, len(headings))
+	for i, heading := range headings {
+		titles[i] = heading.Text
+	}
+	ids := HeadingIDs(titles)
+	for _, candidate := range []string{fragment, slugifyHeading(fragment)} {
+		for i, id := range ids {
+			if id == candidate {
+				return headings[i].Pos, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // headingEntry 是 Document.headingMemo 的条目：key 为标题块原文的独立副本，h.Pos 为相对块起点的偏移。
 type headingEntry struct {
 	key string
@@ -205,6 +223,10 @@ func (e *Editor) Select(a, z int) {
 // JumpTo 把光标放到 pos，并把所在块的顶部滚到阅读参考线（大纲跳转，与原版一致：跳转后该标题即为大纲的当前章节），
 // 而不是 Select 那样只滚到刚好可见。
 func (e *Editor) JumpTo(pos int) {
+	e.cells = nil
+	e.noteHover = nil
+	e.noteBack = false
+	e.CloseEmbedEdit()
 	e.Doc.SetSelection(Selection{Anchor: pos, Head: pos})
 	i, after := e.Doc.BlockAt(pos)
 	if i < 0 {
@@ -779,8 +801,6 @@ func (e *Editor) ContextTarget() ContextTarget {
 	}
 	b := d.blocks[i]
 	switch b.Kind {
-	case parser.Table:
-		return ContextTarget{Kind: "table", Pos: pos}
 	case parser.MathBlock:
 		return ContextTarget{Kind: "math", Pos: pos}
 	case parser.CodeBlock:
@@ -799,6 +819,9 @@ func (e *Editor) ContextTarget() ContextTarget {
 	}
 	if ins, k, ok := e.linkInline(pos); ok {
 		return ContextTarget{Kind: "link", Href: ins[k].Dest, Pos: pos}
+	}
+	if e.tableBlockAt(pos) != 0 {
+		return ContextTarget{Kind: "table", Pos: pos}
 	}
 	return ContextTarget{Kind: "text"}
 }
@@ -849,6 +872,39 @@ func (e *Editor) linkInline(pos int) ([]parser.Inline, int, bool) {
 		}
 	}
 	return nil, 0, false
+}
+
+// LinkDestinationAt 返回原文偏移处的 Markdown 链接地址。
+func (e *Editor) LinkDestinationAt(pos int) string {
+	if ins, k, ok := e.linkInline(pos); ok {
+		return ins[k].Dest
+	}
+	return ""
+}
+
+func (e *Editor) linkHit(pt ui.Point) string {
+	pos := e.hit(pt)
+	ins, k, ok := e.linkInline(pos)
+	if !ok {
+		return ""
+	}
+	s, _ := e.segAt(pos)
+	v, visible := e.visibleSeg(s.i, s.k)
+	if !visible || pt.X < e.left()+s.x || pt.X >= e.left()+s.x+s.w {
+		return ""
+	}
+	if e.rangeHit(pt, s, v, ins[k].Start, ins[k].End) {
+		return ins[k].Dest
+	}
+	return ""
+}
+
+func (e *Editor) rangeHit(pt ui.Point, s seg, v vseg, a, z int) bool {
+	hit := false
+	e.rangeRects(s, a, z, e.left()+s.x, v.y+s.padTop, func(r ui.Rect) {
+		hit = hit || r.Contains(pt.X, pt.Y)
+	})
+	return hit
 }
 
 // CodeAt 报告原文偏移 pos 是否位于代码或公式中（代码块、公式块、front matter、行内代码与公式），源码模式的

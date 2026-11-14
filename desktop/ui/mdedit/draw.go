@@ -39,8 +39,10 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		row := &en.rows[v.k]
 		s := e.segOf(v.i, v.k)
 		tx, ty := x0+s.x, r.Y+v.y+row.padTop
-		if row.marker != "" || row.task != parser.NoTask {
-			e.drawMarker(p, row, s, x0, ty)
+		returnLink := e.noteReturn.valid && v.k == 0 && e.Doc.blocks[v.i].Kind == parser.FootnoteDefinition &&
+			e.Doc.blocks[v.i].Start == e.noteReturn.def
+		if row.marker != "" || row.task != parser.NoTask || returnLink {
+			e.drawMarker(p, row, s, x0, ty, returnLink)
 		}
 		if row.lineNo > 0 {
 			e.drawLineNumber(p, row, x0, ty)
@@ -51,6 +53,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		}
 		paint := func() {
 			e.paintHighlights(p, s, tx, ty)
+			e.paintCellSelection(p, s, tx, ty)
 			if selA < selB && selA <= s.end && selB >= s.base {
 				e.paintLines(s, selA, selB, tx, ty, func(rc ui.Rect) { p.Fill(rc, e.pal.selection, 0) })
 			}
@@ -59,7 +62,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 				e.drawImages(p, row, tx, ty)
 			}
 			if marked && mark.Anchor <= s.end && mark.Head >= s.base {
-				e.paintRange(p, s, mark.Anchor, mark.Head, tx, ty, func(rc ui.Rect) {
+				e.rangeRects(s, mark.Anchor, mark.Head, tx, ty, func(rc ui.Rect) {
 					p.Fill(ui.Rect{X: rc.X, Y: rc.Y + rc.H - 1.5, W: rc.W, H: 1.5}, e.pal.text, 0)
 				})
 			}
@@ -91,6 +94,7 @@ func (e *Editor) draw(p *ui.Painter, r ui.Rect) {
 		ty := (r.H - th) * min(1, pos/max(1, total-r.H))
 		p.Fill(ui.Rect{X: r.X + r.W - 8, Y: r.Y + ty, W: 5, H: th}, e.pal.scrollbar, 2.5)
 	}
+	e.drawFootnotePreview(p, r)
 	// 稿件公式按可见块渲染，滚动时不预排视口外的公式。
 	if e.Doc.manuscript != nil {
 		return
@@ -261,12 +265,12 @@ func (e *Editor) drawFrame(p *ui.Painter, i int, en *entry, f frame, x0, top flo
 }
 
 // drawMarker 画列表项目符号、序号、任务复选框或脚注标签，与行的首行文字对齐。
-func (e *Editor) drawMarker(p *ui.Painter, r *row, s seg, x0, ty float32) {
+func (e *Editor) drawMarker(p *ui.Painter, r *row, s seg, x0, ty float32, returnLink bool) {
 	first := s.layout.Caret(0)
 	lineH := max(first.H, e.lineH)
 	ty += first.Y // 加了行距时首行文字下移
 	gx := x0 + r.indent - listIndent
-	if r.task != parser.NoTask {
+	if r.task != parser.NoTask && !returnLink {
 		box := ui.Rect{X: gx + 2, Y: ty + (lineH-taskBox)/2, W: taskBox, H: taskBox}
 		if r.task == parser.Checked {
 			p.Fill(box, e.pal.accentFill, 4)
@@ -284,6 +288,11 @@ func (e *Editor) drawMarker(p *ui.Painter, r *row, s seg, x0, ty float32) {
 	x := gx + (listIndent-w)/2 - 2
 	if len(r.marker) > 1 && r.marker[0] != '[' {
 		x = gx + listIndent - w - 6 // 有序序号右对齐到内容左侧
+	}
+	if returnLink {
+		sp.Text, sp.Color = "↩", e.pal.link
+		w, h = p.MeasureText(0, sp)
+		x = x0 - e.left() + e.footnoteMarkerBox(r, s).X + (listIndent-w)/2
 	}
 	p.RichText(x, ty+(lineH-h)/2, 0, sp)
 }
@@ -307,7 +316,7 @@ func (e *Editor) taskHit(pt ui.Point) (int, bool) {
 	return 0, false
 }
 
-func (e *Editor) paintRange(p *ui.Painter, s seg, a, z int, tx, ty float32, fill func(ui.Rect)) {
+func (e *Editor) rangeRects(s seg, a, z int, tx, ty float32, fill func(ui.Rect)) {
 	da, dz := s.toDisp(max(a, s.base)), s.toDisp(min(z, s.end))
 	if da >= dz {
 		return
@@ -341,6 +350,6 @@ func (e *Editor) paintHighlights(p *ui.Painter, s seg, tx, ty float32) {
 		if k == e.current {
 			c = e.pal.foundCurrent
 		}
-		e.paintRange(p, s, hs[k][0], hs[k][1], tx, ty, func(rc ui.Rect) { p.Fill(rc, c, 2) })
+		e.rangeRects(s, hs[k][0], hs[k][1], tx, ty, func(rc ui.Rect) { p.Fill(rc, c, 2) })
 	}
 }
