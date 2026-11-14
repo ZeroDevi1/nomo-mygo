@@ -351,21 +351,29 @@ func (c *ACPConnection) Stage(files map[string]string) error {
 	return nil
 }
 
-// ReadEdits stops the agent before checking the work tree. An unsupported
-// operation is reported independently of the other staged manuscripts.
+// ReadEdits attempts to stop the agent before checking the work tree. A
+// cleanup warning does not prevent review of validated manuscript snapshots.
 func (c *ACPConnection) ReadEdits(files map[string]string) (map[string]string, error) {
-	if err := c.stopProcess(); err != nil {
-		return nil, err
-	}
+	stopErr := c.stopProcess()
 	root, err := os.OpenRoot(string(c.Cwd))
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(stopErr, err)
 	}
 	defer root.Close()
 	changes := make(map[string]string)
-	var warnings []error
+	warnings := []error{stopErr}
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		after, err := readACPManuscript(root, name)
+		if err == nil && stopErr != nil {
+			// Cleanup could not confirm the process tree is gone. Require
+			// two matching reads before presenting a detached text copy.
+			again, readErr := readACPManuscript(root, name)
+			if readErr != nil {
+				err = readErr
+			} else if after != again {
+				err = fmt.Errorf("ACP 稿件仍在变化，无法审阅：%s", name)
+			}
+		}
 		if err != nil {
 			warnings = append(warnings, err)
 		} else if after != files[name] {
