@@ -1,8 +1,8 @@
 # MyGo 版 Nomo 的 Homebrew cask：本仓库即 tap（brew tap zerodevi1/nomo-mygo https://github.com/ZeroDevi1/nomo-mygo）。
 # 发布正式版时 release.yml 的 update-package-manifests 任务更新 version 与 sha256。
 cask "nomo-mygo" do
-  version "0.8.1"
-  sha256 "12019a0eee6e7868d64ebfbd07cb983870f46df04c856cc47bee8fdbf6cfe452"
+  version "0.9.0"
+  sha256 "64e86dc70e0de13d1eaea0163fde07905e29e2aacebc16021d6d095a7c0bd734"
 
   url "https://github.com/ZeroDevi1/nomo-mygo/releases/download/v#{version}/Nomo_#{version}_aarch64.dmg"
   name "Nomo Scholar"
@@ -19,7 +19,7 @@ cask "nomo-mygo" do
   depends_on arch: :arm64
   depends_on macos: :monterey
 
-  app "Nomo.app"
+  app "Nomo Scholar.app"
 
   zap trash: [
     "~/Library/Application Support/com.nomo.desktop",
