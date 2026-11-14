@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/xml"
+	"errors"
 	"image"
 	"io"
 	"math"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"nomo/desktop/internal/pdfium"
 )
 
 // PageAnchor 使用 PDF 的左上角坐标（点）；页面缩放时原框随整页等比缩放。
@@ -91,6 +94,23 @@ func (s *Session) PrepareAnchors(ctx context.Context) {
 
 func (s *Session) readAnchors(ctx context.Context) map[[32]byte]PageAnchor {
 	dir := filepath.Join(s.dir, "pages")
+	idx := make(map[[32]byte]PageAnchor)
+	var words int
+	err := pdfium.VisitTextPages(ctx, filepath.Join(dir, "current.pdf"), 0, func(page int, p pdfium.TextPage) error {
+		for _, line := range p.Lines {
+			words += len(line.Words)
+		}
+		if words > 96000 || !indexPDFiumAnchors(idx, page, p) {
+			return errors.New("PDF paragraph index exceeds budget")
+		}
+		return nil
+	})
+	if err == nil {
+		return idx
+	}
+	if !errors.Is(err, pdfium.ErrUnavailable) {
+		return nil
+	}
 	file := filepath.Join(dir, "boxes.xhtml")
 	defer os.Remove(file)
 	if _, e := run(ctx, dir, "", nil, "pdftotext", "-bbox-layout", "current.pdf", "boxes.xhtml"); e != nil {
@@ -105,6 +125,81 @@ func (s *Session) readAnchors(ctx context.Context) map[[32]byte]PageAnchor {
 		return nil
 	}
 	return parseAnchors(f)
+}
+
+// PDFium provides glyph positions rather than paragraphs. Only merge successive
+// lines with a common left edge, normal line spacing and a near-full previous
+// line. Anchor still requires the complete paragraph text to match uniquely.
+func indexPDFiumAnchors(idx map[[32]byte]PageAnchor, page int, p pdfium.TextPage) bool {
+	type row struct {
+		x, y, r, b float64
+		text       string
+	}
+	rows := make([]row, 0, len(p.Lines))
+	var pageRight float64
+	for _, line := range p.Lines {
+		if len(line.Words) == 0 {
+			continue
+		}
+		first := line.Words[0]
+		bounds := row{x: first.X, y: first.Y, r: first.R, b: first.B}
+		var text strings.Builder
+		for _, word := range line.Words {
+			bounds.x, bounds.y = min(bounds.x, word.X), min(bounds.y, word.Y)
+			bounds.r, bounds.b = max(bounds.r, word.R), max(bounds.b, word.B)
+			text.WriteString(word.Text)
+		}
+		bounds.text = text.String()
+		rows = append(rows, bounds)
+		pageRight = max(pageRight, bounds.r)
+	}
+	joins := func(a, b row) bool {
+		line := b.y - a.y
+		font := a.b - a.y
+		return font > 0 && line > font*.7 && line < font*2 &&
+			math.Abs(a.x-b.x) < font*2 && a.r >= pageRight-font*2
+	}
+	for first := 0; first < len(rows); {
+		a := rows[first]
+		x, y, r, b := a.x, a.y, a.r, a.b
+		font, leading := a.b-a.y, (a.b-a.y)*1.25
+		var text strings.Builder
+		text.WriteString(a.text)
+		last := first + 1
+		for ; last < len(rows) && joins(rows[last-1], rows[last]); last++ {
+			next := rows[last]
+			if text.Len()+len(next.text) > 8192 {
+				break
+			}
+			if last == first+1 {
+				leading = next.y - a.y
+			}
+			text.WriteString(next.text)
+			x, r, b = min(x, next.x), max(r, next.r), max(b, next.b)
+		}
+		first = last
+		if !addAnchor(idx, text.String(), page, p.Width, p.Height, x, y, r, b, font, leading, a.x-x) {
+			return false
+		}
+	}
+	return true
+}
+
+func addAnchor(idx map[[32]byte]PageAnchor, text string, page int, w, h, x, y, r, b, font, leading, indent float64) bool {
+	if len(idx) >= 8192 {
+		return false
+	}
+	key := blockKey(text)
+	if _, seen := idx[key]; seen {
+		idx[key] = PageAnchor{}
+		return true
+	}
+	if !(x >= 0 && y >= 0 && r > x && b > y && r <= w && b <= h && w <= 10000 && h <= 10000) {
+		return true
+	}
+	x, y = max(0, x-.5), max(0, y-.5)
+	idx[key] = PageAnchor{page, x, y, min(w, r+.5) - x, min(h, b+.5) - y, w, h, font, leading, indent}
+	return true
 }
 
 func parseAnchors(r io.Reader) map[[32]byte]PageAnchor {
@@ -144,9 +239,6 @@ func parseAnchors(r io.Reader) map[[32]byte]PageAnchor {
 			return nil
 		}
 		for _, b := range p.Blocks {
-			if len(idx) >= 8192 {
-				return nil
-			}
 			if len(b.Lines) == 0 {
 				continue
 			}
@@ -156,21 +248,14 @@ func parseAnchors(r io.Reader) map[[32]byte]PageAnchor {
 					words.WriteString(w)
 				}
 			}
-			key := blockKey(words.String())
-			if _, seen := idx[key]; seen {
-				idx[key] = PageAnchor{}
-				continue
-			}
-			if !(b.X >= 0 && b.Y >= 0 && b.R > b.X && b.B > b.Y && b.R <= p.Width && b.B <= p.Height && p.Width <= 10000 && p.Height <= 10000) {
-				continue
-			}
-			x, y := math.Max(0, b.X-.5), math.Max(0, b.Y-.5)
 			font := b.Lines[0].B - b.Lines[0].Y
 			line := font * 1.25
 			if len(b.Lines) > 1 {
 				line = b.Lines[1].Y - b.Lines[0].Y
 			}
-			idx[key] = PageAnchor{page, x, y, math.Min(p.Width, b.R+.5) - x, math.Min(p.Height, b.B+.5) - y, p.Width, p.Height, font, line, b.Lines[0].X - b.X}
+			if !addAnchor(idx, words.String(), page, p.Width, p.Height, b.X, b.Y, b.R, b.B, font, line, b.Lines[0].X-b.X) {
+				return nil
+			}
 		}
 	}
 }

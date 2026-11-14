@@ -108,6 +108,9 @@ jobs:
           case '${{ matrix.platform }}' in
             windows/amd64)
               out=target/mygo/windows-amd64
+              for file in typst.exe pdfium.dll vcruntime140.dll typeset-fonts/NotoSansSC-Regular.otf; do
+                test -s "$out/$file"
+              done
               cp "$out/$app_slug-setup-$version-amd64.exe" "$assets/Nomo_${version}_x64-setup.exe"
               stage="$RUNNER_TEMP/zip/Nomo"
               mkdir -p "$stage"

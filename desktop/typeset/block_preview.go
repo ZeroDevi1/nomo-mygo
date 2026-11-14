@@ -45,6 +45,14 @@ func RenderBlockPreviews(parent context.Context, blocks []BlockPreview) []BlockP
 	if len(blocks) == 0 {
 		return out
 	}
+	if IsLaTeXPath(blocks[0].Path) {
+		if err := PrepareLaTeX(parent); err != nil {
+			for i := range out {
+				out[i].Err = err
+			}
+			return out
+		}
+	}
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
 	var render func(int, int)
@@ -186,18 +194,10 @@ func renderLaTeXBlocks(ctx context.Context, dir string, blocks []BlockPreview) (
 		ends[i] = n
 	}
 	pdf := filepath.Join(dir, "block.pdf")
-	if _, err := run(ctx, dir, "", nil, "pdftoppm", "-png", "-scale-to", "1684", "-f", "1", "-l",
-		fields[len(fields)-1], pdf, "latex"); err != nil {
-		return nil, err
-	}
-	pages, err := previewPageFiles(dir, "latex-")
-	if err != nil {
-		return nil, err
-	}
 	out := make([]BlockPreviewResult, len(blocks))
 	first := 1
 	for i, last := range ends {
-		out[i].Image, out[i].Err = readBlockPages(ctx, pages, first, last, blocks[i])
+		out[i].Image, out[i].Err = readBlockPages(ctx, pdf, first, last, blocks[i])
 		first = last + 1
 	}
 	return out, nil
@@ -331,14 +331,14 @@ func previewPageFiles(dir, prefix string) (map[int]string, error) {
 	return pages, nil
 }
 
-func readBlockPages(ctx context.Context, pages map[int]string, first, last int, block BlockPreview) (image.Image, error) {
+func readBlockPages(ctx context.Context, pdf string, first, last int, block BlockPreview) (image.Image, error) {
 	if first > last || last-first >= 3 {
 		return nil, errors.New("block exceeds preview page limit")
 	}
 	var imgs []image.Image
 	var w, h int
 	for i := first; i <= last; i++ {
-		raw, err := readPreviewPNG(pages[i])
+		raw, err := ReadPDFPage(ctx, pdf, i, 1684)
 		if err != nil {
 			return nil, err
 		}

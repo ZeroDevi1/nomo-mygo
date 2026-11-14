@@ -2,6 +2,7 @@ package typeset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/egoist/mygo"
 
 	"nomo/desktop/internal/childproc"
 )
@@ -43,11 +46,17 @@ func runReaderOutput(parent context.Context, dir string, input io.Reader, env []
 	}
 	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
+	if name == "typst" {
+		args = typstArgs(path, args)
+	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Dir = dir
 	cmd.Stdin = input
 	cmd.Env = append(cmd.Environ(), env...)
-	if runtime.GOOS == "darwin" {
+	if dir := filepath.Dir(path); isLaTeXTool(name) && path == managedLatexTool(name) {
+		// XeTeX starts xdvipdfmx by name. Only the compiler child sees this PATH.
+		cmd.Env = append(cmd.Env, "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	} else if runtime.GOOS == "darwin" {
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH")+":/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin")
 	}
 	var log previewLog
@@ -71,7 +80,65 @@ func runReaderOutput(parent context.Context, dir string, input io.Reader, env []
 	return string(log), nil
 }
 
+func isLaTeXTool(name string) bool {
+	switch name {
+	case "xelatex", "biber", "bibtex", "synctex", "kpsewhich":
+		return true
+	}
+	return false
+}
+
+func executableAt(dir, name string) string {
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path, err := exec.LookPath(filepath.Join(dir, name))
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func bundledTypst() string {
+	dir, err := mygo.App.Path(mygo.PathResources)
+	if err != nil {
+		return ""
+	}
+	return executableAt(dir, "typst")
+}
+
+func typstArgs(bin string, args []string) []string {
+	if len(args) == 0 || (args[0] != "compile" && args[0] != "watch" && args[0] != "eval") {
+		return args
+	}
+	fonts := filepath.Join(filepath.Dir(bin), "typeset-fonts")
+	if info, err := os.Stat(fonts); err == nil && info.IsDir() {
+		return append([]string{args[0], "--font-path", fonts}, args[1:]...)
+	}
+	return args
+}
+
 func tool(name string) (string, error) {
+	if name == "typst" {
+		if path := bundledTypst(); path != "" {
+			return path, nil
+		}
+		if mygo.App.IsPackaged() {
+			return "", errors.New("bundled Typst is unavailable")
+		}
+	}
+	if isLaTeXTool(name) {
+		if path := managedLatexTool(name); path != "" {
+			return path, nil
+		}
+		if mygo.App.IsPackaged() && latexManagementSupported() {
+			return "", fmt.Errorf("managed LaTeX: %s is unavailable", name)
+		}
+	}
+	return systemTool(name)
+}
+
+func systemTool(name string) (string, error) {
 	path, err := exec.LookPath(name)
 	if err != nil && runtime.GOOS == "darwin" {
 		for _, folder := range []string{"/opt/homebrew/bin", "/usr/local/bin", "/Library/TeX/texbin"} {

@@ -63,6 +63,13 @@ if [[ ! -f "$APP_BUNDLE/Contents/Resources/Assets.car" ]]; then
   exit 1
 fi
 
+RESOURCES="$APP_BUNDLE/Contents/Resources"
+if [[ ! -x "$RESOURCES/typst" || ! -s "$RESOURCES/libpdfium.dylib" ||
+      ! -s "$RESOURCES/typeset-fonts/NotoSansSC-Regular.otf" ]]; then
+  echo "Bundled typesetting resources are missing from $APP_BUNDLE." >&2
+  exit 1
+fi
+
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
 # PlugInKit 拒绝加载未沙盒化的扩展；对主应用 --deep 重签会静默抹掉这些 entitlements。

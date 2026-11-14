@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"nomo/desktop/internal/childproc"
+	"nomo/desktop/internal/pdfium"
 )
 
 type LocalSearchResult struct {
@@ -163,6 +164,9 @@ func localPDFText(ctx context.Context, path string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	if text, err := pdfium.Text(ctx, path, 4<<20); !errors.Is(err, pdfium.ErrUnavailable) {
+		return text, err
+	}
 	cmd := exec.CommandContext(ctx, "pdftotext", "-enc", "UTF-8", path, "-")
 	out := new(boundedPDFText)
 	cmd.Stdout, cmd.Stderr = out, io.Discard

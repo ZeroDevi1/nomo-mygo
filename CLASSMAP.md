@@ -56,7 +56,7 @@
 | 上下标语法（^上标^、~下标~） | `desktop/ui/mdedit/script.go` | `projection.go`（`text`、删除线改判）, `api.go`（`toggleScript`）, `desktop/ui/shell/export.go`（`ExpandScripts`） | 修改上下标与 GFM 删除线的分工规则、工具栏写法、导出改写 |
 | 内嵌 SVG 显示 | `desktop/ui/mdedit/imageview.go`（`svgDataURI`、`svgElementEnd`） | `projection.go`（`svgClose`）, `images.go`（data URI 解码） | 修改 HTML 块与段落内 `<svg>` 作为图片显示的识别规则 |
 | 导出 HTML 安全清理 | `desktop/ui/shell/sanitize.go` | `export.go`（`exportDocument`） | 修改导出时去掉的元素、属性与 URL 协议 |
-| LaTeX / Typst 编译、预览与 PDF 导出 | `desktop/typeset/session.go`（Go 接口）、`anchor.go`（PDF 段落定位）、`inverse.go`（点击文字反查源码行）、`paragraph.go`（段落转译与 Typst watch） | `desktop/ui/shell/compile.go`（快照、异步取消与双栏）、`export.go`（保存对话框） | 修改编译器、段落快览、整页校正或导出流程 |
+| LaTeX / Typst 编译、预览与 PDF 导出 | `desktop/typeset/session.go`（Go 接口）、`latex_runtime.go`（便携 TeX Live）、`desktop/internal/pdfium`（PDF 页图与文字坐标） | `desktop/ui/shell/compile.go`（快照、异步取消与双栏）、`export.go`（保存对话框）、`anchor.go`、`inverse.go`、`paragraph.go` | 修改编译器、段落快览、整页校正或导出流程 |
 | Nomo Scholar 项目与三区布局 | `desktop/ui/shell/scholar.go`（根目录、主文件菜单、导航、检查器与状态栏） | `view.go`、`platform.go`、`scholar_win_layout.go`、`prefs.go`、`scholar_navigation.go`、`scholar_files.go`、`scholar_watch.go`、`scholar_page_navigation.go`、`docs/nomo-scholar.md` | 修改学术工作区布局、项目设置、状态栏与生命周期 |
 | 学术视图选择与命令 | `desktop/ui/shell/scholar_toolbar.go` | `view.go`、`menu.go`、`platform.go`、`compile.go` | 修改标题栏／命令栏、紧凑视图选择、溢出菜单、检查器开关或排版取消与重试 |
 | 标签分栏与编辑组 | `desktop/ui/shell/editor_groups.go` | `view.go`（标签栏、拖放入口）、`shell.go`（文档切换）、`scholar_reference_tabs.go`（文献标签） | 修改分栏方向、分隔条、组内选中项、跨组移动及视图可见性 |
@@ -182,6 +182,7 @@
 | Responsibility | Primary code | Related code | Change when |
 |---|---|---|---|
 | macOS 构建、Quick Look 嵌入与 DMG | `scripts/build-macos.sh` | `scripts/build-macos-quicklook.sh`, `scripts/verify-macos-bundle.sh`, `desktop/packaging/macos/NomoQuickLookPreview/`, `mygo.json` | 按 `mygo.json` 定位产物，修改扩展架构/版本同步、由内向外签名（扩展保留沙盒 entitlements，主应用不带 `--deep`）或 DMG 生成 |
+| 内置排版资源 | `scripts/typeset-assets/main.go`（准备和校验各平台资源） | `mygo.json` 的 `buildCommand`、`internal/typesetassets` | 更新 Typst、PDFium 和中文字体，或检查发行包是否包含它们 |
 | SVG 图标与平台资源生成 | `scripts/icons/main.go`（`go run ./scripts/icons`） | `desktop/packaging/icons/nomo/source/nomo-app-light.svg`, `desktop/packaging/icons/nomo/macos/AppIcon.icon`（mygo.json 的 `macos.icon`）, `desktop/tray.go` | 修改应用 Logo、浅深色配色、平台边距、多尺寸位图或托盘图标；浅色 SVG 为造型母版，桌面与系统文件图标单独派生描边，应用内 Logo 保持母版造型 |
 | Windows Store MSIX 构建与校验 | `scripts/msix/Build-Msix.ps1` | `scripts/msix/Build-IconResources.ps1`, `.github/workflows/msix.yml`, `desktop/packaging/msix/`, `mygo.json` | 修改 Store 包身份、版本映射、MyGo 构建与产物复制、图标 PRI 生成、Shell 扩展封装或上传产物 |
 

@@ -581,6 +581,9 @@ func (s *Shell) exportTo(t *Tab, ext, filter, success string, render func(path s
 				return
 			}
 			write := render(path)
+			if ext == "pdf" && typeset.IsLaTeXPath(t.Path) && typeset.LatexNeedsDownload() {
+				s.status = s.tr("downloadingLaTeX")
+			}
 			go func() {
 				note, err := write()
 				s.postToSettings(func() {

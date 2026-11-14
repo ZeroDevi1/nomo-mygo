@@ -3,7 +3,7 @@ package typeset
 
 import (
 	"context"
-	"encoding/xml"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -11,15 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"nomo/desktop/internal/pdfium"
 )
 
-type pdfWord struct {
-	X    float64 `xml:"xMin,attr"`
-	Y    float64 `xml:"yMin,attr"`
-	R    float64 `xml:"xMax,attr"`
-	B    float64 `xml:"yMax,attr"`
-	Text string  `xml:",chardata"`
-}
+type pdfWord = pdfium.Word
 
 // SourceLine 返回主文件中从零起算的行。空白、外部 TeX 文件或无法唯一定位时返回 -1。
 func (s *Session) SourceLine(ctx context.Context, page int, x, y float64, source func() string) int {
@@ -51,11 +47,7 @@ type pdfSourceHit struct {
 
 type pdfSourcePage struct {
 	number int
-	Width  float64 `xml:"width,attr"`
-	Height float64 `xml:"height,attr"`
-	Lines  []struct {
-		Words []pdfWord `xml:"word"`
-	} `xml:"flow>block>line"`
+	pdfium.TextPage
 }
 
 func (s *Session) readSourcePage(ctx context.Context, page int) *pdfSourcePage {
@@ -71,6 +63,30 @@ func (s *Session) readSourcePage(ctx context.Context, page int) *pdfSourcePage {
 }
 
 func readPDFSourcePage(ctx context.Context, dir, path string, page int) (*pdfSourcePage, error) {
+	if page < 1 {
+		return nil, fmt.Errorf("invalid PDF page %d", page)
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	result := &pdfSourcePage{number: page}
+	err := pdfium.VisitTextPages(ctx, path, page, func(_ int, p pdfium.TextPage) error {
+		result.TextPage = p
+		return nil
+	})
+	if err == nil {
+		return result, nil
+	}
+	if !errors.Is(err, pdfium.ErrUnavailable) {
+		return nil, err
+	}
+	if dir == "" {
+		dir, err = os.MkdirTemp("", "nomo-pdf-text-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(dir)
+	}
 	n := strconv.Itoa(page)
 	file := filepath.Join(dir, "click.xhtml")
 	defer os.Remove(file)
@@ -85,27 +101,19 @@ func readPDFSourcePage(ctx context.Context, dir, path string, page int) (*pdfSou
 	if stat, err := f.Stat(); err != nil || stat.Size() > 2<<20 {
 		return nil, fmt.Errorf("PDF text layer exceeds the page budget")
 	}
-	var doc struct {
-		Page pdfSourcePage `xml:"body>doc>page"`
-	}
-	if err := xml.NewDecoder(pdfXML{f}).Decode(&doc); err != nil {
+	result.TextPage, err = pdfium.DecodePoppler(pdfXML{f})
+	if err != nil {
 		return nil, err
 	}
-	if doc.Page.Width <= 0 || doc.Page.Height <= 0 {
+	if result.Width <= 0 || result.Height <= 0 {
 		return nil, fmt.Errorf("invalid PDF text layer")
 	}
-	doc.Page.number = page
-	return &doc.Page, nil
+	return result, nil
 }
 
 // PDFRegionText copies words centered inside a page-relative selection rectangle.
 func PDFRegionText(ctx context.Context, path string, page int, x, y, width, height float64, limit int) (string, error) {
-	dir, err := os.MkdirTemp("", "nomo-pdf-text-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(dir)
-	source, err := readPDFSourcePage(ctx, dir, path, page)
+	source, err := readPDFSourcePage(ctx, "", path, page)
 	if err != nil {
 		return "", err
 	}

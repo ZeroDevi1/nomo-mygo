@@ -980,7 +980,7 @@ func (s *Shell) scholarStatus(c *ui.Context, p *scholarState, tab *Tab) {
 		if pane := s.compile; pane != nil && pane.tab == tab && pane.parkedPage == 0 {
 			switch {
 			case pane.busy:
-				s.scholarStatusButton(c, "loader-circle", "brand", s.tr("scholarCompiling"), s.tr("scholarStopTypeset")+" · "+pane.path).
+				s.scholarStatusButton(c, "loader-circle", "brand", s.tr(pane.progressMessage("scholarCompiling")), s.tr("scholarStopTypeset")+" · "+pane.path).
 					Menu(func(m *ui.Menu) { s.scholarCompileActions(m, tab) })
 			case pane.err != "":
 				if s.scholarStatusButton(c, "triangle-alert", "warning", s.tr("scholarCompileFailed"), s.tr("scholarOpenDiagnostics")+" · "+pane.path).Clicked() {

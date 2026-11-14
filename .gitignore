@@ -39,3 +39,15 @@ Thumbs.db
 # 导出精细排版的 WebAssembly 构建产物（scripts/kpwasm 生成）
 /desktop/ui/kpexport/gen/*
 !/desktop/ui/kpexport/gen/.gitkeep
+
+# 构建时生成的 Typst、PDFium 与中文字体
+/resources/*/typst
+/resources/*/typst.exe
+/resources/*/pdfium.dll
+/resources/*/libpdfium.dylib
+/resources/*/libpdfium.so
+/resources/*/vcruntime140.dll
+/resources/*/typeset-licenses/
+/resources/*/.typeset-version
+/resources/typeset-fonts/
+/resources/.typeset-*/

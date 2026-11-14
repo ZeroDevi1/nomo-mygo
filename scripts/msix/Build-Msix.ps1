@@ -352,7 +352,7 @@ Reset-TaskDirectory $packageValidationRoot
 if ($LASTEXITCODE -ne 0) {
     throw "MakeAppx 回读验证失败，退出码：$LASTEXITCODE"
 }
-foreach ($requiredPackageFile in @('AppxManifest.xml', 'nomo.exe', 'NomoShellExtension.dll', 'resources.pri')) {
+foreach ($requiredPackageFile in @('AppxManifest.xml', 'nomo.exe', 'NomoShellExtension.dll', 'resources.pri', 'typst.exe', 'pdfium.dll', 'vcruntime140.dll', 'typeset-fonts\NotoSansSC-Regular.otf')) {
     if (-not (Test-Path -LiteralPath (Join-Path $packageValidationRoot $requiredPackageFile))) {
         throw "MSIX 回读验证缺少必要文件：$requiredPackageFile"
     }

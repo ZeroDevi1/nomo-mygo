@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"nomo/desktop/internal/fsutil"
+	"nomo/desktop/internal/pdfium"
 )
 
 // Session 由单个调用方串行使用；Close 结束段落引擎并删除预览临时目录。
@@ -136,7 +137,7 @@ func (s *Session) PageAtSize(ctx context.Context, n, edge int) (image.Image, err
 	if n < 1 || n > s.pages || edge < 1 || edge > MaxPageEdge {
 		return nil, errors.New("invalid page")
 	}
-	return renderPage(ctx, filepath.Join(s.dir, "pages", "current.pdf"), n, edge)
+	return ReadPDFPage(ctx, filepath.Join(s.dir, "pages", "current.pdf"), n, edge)
 }
 func writeSource(path string, r io.Reader) error {
 	f, e := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
@@ -191,13 +192,23 @@ func replacePDF(ctx context.Context, pdf, target string) error {
 	return fsutil.ReplaceFile(out.Name(), target)
 }
 
-func renderPage(ctx context.Context, pdf string, page, edge int) (image.Image, error) {
-	return renderPageIn(ctx, filepath.Dir(pdf), pdf, page, edge)
-}
-
-func renderPageIn(ctx context.Context, dir, pdf string, page, edge int) (image.Image, error) {
+// ReadPDFPage renders a local attachment without writing beside the original.
+func ReadPDFPage(ctx context.Context, path string, page, edge int) (image.Image, error) {
+	if !filepath.IsAbs(path) || page < 1 || edge < 1 || edge > MaxPageEdge {
+		return nil, errors.New("invalid PDF page request")
+	}
+	img, err := pdfium.Render(ctx, path, page, edge)
+	if !errors.Is(err, pdfium.ErrUnavailable) {
+		return img, err
+	}
+	// Unpackaged developer runs can still use an existing Poppler.
+	dir, err := os.MkdirTemp("", "nomo-pdf-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
 	n := strconv.Itoa(page)
-	if _, err := run(ctx, dir, "", nil, "pdftoppm", "-png", "-scale-to", strconv.Itoa(edge), "-f", n, "-l", n, "-singlefile", pdf, "page"); err != nil {
+	if _, err := run(ctx, dir, "", nil, "pdftoppm", "-png", "-scale-to", strconv.Itoa(edge), "-f", n, "-l", n, "-singlefile", path, "page"); err != nil {
 		return nil, err
 	}
 	f, err := os.Open(filepath.Join(dir, "page.png"))
@@ -205,36 +216,20 @@ func renderPageIn(ctx context.Context, dir, pdf string, page, edge int) (image.I
 		return nil, err
 	}
 	defer f.Close()
-	img, err := png.Decode(f)
-	if err != nil {
-		return nil, err
-	}
+	img, err = png.Decode(f)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	return img, nil
-}
-
-// ReadPDFPage renders a local attachment without writing beside the original.
-func ReadPDFPage(ctx context.Context, path string, page, edge int) (image.Image, error) {
-	if !filepath.IsAbs(path) || page < 1 || edge < 1 || edge > MaxPageEdge {
-		return nil, errors.New("invalid PDF page request")
-	}
-	dir, err := os.MkdirTemp("", "nomo-pdf-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	return renderPageIn(ctx, dir, path, page, edge)
+	return img, err
 }
 
 // PDFPages reads the page count of an existing local PDF.
 func PDFPages(ctx context.Context, path string) (int, error) {
-	return pdfPages(ctx, "", path)
-}
-
-func pdfPages(ctx context.Context, dir, path string) (int, error) {
-	info, err := run(ctx, dir, "", []string{"LC_ALL=C"}, "pdfinfo", path)
+	count, err := pdfium.PageCount(ctx, path)
+	if !errors.Is(err, pdfium.ErrUnavailable) {
+		return count, err
+	}
+	info, err := run(ctx, "", "", []string{"LC_ALL=C"}, "pdfinfo", path)
 	if err != nil {
 		return 0, err
 	}
@@ -272,6 +267,9 @@ func (s *Session) build(ctx context.Context, source io.Reader, export, projectSo
 			s.collectWarnings(log, false)
 		}
 	case ".tex", ".ltx":
+		if err = PrepareLaTeX(ctx); err != nil {
+			return err
+		}
 		if err = writeSource(filepath.Join(dir, "preview.tex"), source); err != nil {
 			return err
 		}
@@ -379,8 +377,11 @@ func (s *Session) compile(ctx context.Context, source io.Reader, publish, projec
 	if err := s.build(ctx, source, false, projectSource); err != nil {
 		return 0, err
 	}
-	n, err := pdfPages(ctx, s.dir, s.pdf)
+	n, err := PDFPages(ctx, s.pdf)
 	if err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	store := filepath.Join(s.dir, "pages")

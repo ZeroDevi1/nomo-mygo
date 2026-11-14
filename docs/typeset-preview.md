@@ -20,14 +20,16 @@ LaTeX 的 `\maketitle`、`thebibliography` 和 Typst 的 `#bibliography` 支持�
 PDF 视图连续排列纸面，可缩放和上下滚动。拖动分隔条调整双栏比例。文档大纲可按层级浏览 PDF 书签并跳到对应页，也可按源码标题定位。
 | 输入 | 完整编译和导出 | 源码与 PDF 双栏的实时段落试排 |
 |---|---|---|
-| LaTeX | XeLaTeX；有文献库时需对应的 BibTeX 或 Biber | 可选 Typst CLI |
-| Typst | Typst CLI | 合并输入后由 Typst 编译整页 |
+| LaTeX | XeLaTeX，按需调用 BibTeX 或 Biber | 随应用内置的 Typst |
+| Typst | 随应用内置的 Typst | 合并输入后由 Typst 编译整页 |
 
-分页预览需要 Poppler 的 `pdfinfo` 和 `pdftoppm`；仅导出 PDF 不需要 Poppler。工具从 PATH 查找，macOS 也检查 Homebrew 和 MacTeX 的常见安装目录。模板指定的字体、宏包和资源需要在本机可用。
+发行包内置 Typst、PDFium 和 Noto Sans SC 常规字体。PDFium 负责分页、页图和 PDF 文字提取，无需安装 Poppler。Typst 使用系统、项目和随包字体。来自 Typst Universe 的项目依赖首次获取时可能需要联网，之后使用 Typst 的缓存。未打包的开发运行可使用本机 Typst 和 Poppler。
 
-LaTeX 实时模式使用 Poppler 的 `pdftotext -bbox-layout` 读取上一份 PDF 的文本块。若变更只涉及一个段落，且能找到唯一匹配，就在右侧切到对应页，在原矩形内更新文字。纯正文直接使用原页的字号、行高和缩进试排；支持的粗体、强调和行内公式用 Typst 试排。输入期间不挤动周边内容，超出原框的正文可能暂时裁切。停顿后 XeLaTeX 重新排整页，若能重新定位该段落则跟随新页码。重复段落、跨页段落、缺少文本层或缺少 `pdftotext` 时，不猜位置，使用试排卡片或等待整页。每次成功编译替换上一份索引，最多 8192 个块，超过 12 MiB 的位置文件不建索引。
+首次预览、局部排版或导出 LaTeX 时，发行版 Nomo 下载便携 TeX Live、SyncTeX 和 CTeX 字体及宏包。未打包的开发运行可以使用本机 TeX Live。Windows x64、macOS 和 Linux x64 的首次下载约 166–257 MiB，安装到 Nomo 的用户缓存。下载过程中仍可编辑源码，关闭预览可取消该预览的下载，之后可通过重新排版重试。准备完成后，已包含宏包和字体的项目可以离线编译。使用自定义字体和模板的项目仍需提供指定资源。中文模板可使用 `fontset=fandol`，避免依赖操作系统自带的字体名。当前便携包的 arm64 Biber 要求 macOS 26 或更新版本。较早版本的 Apple Silicon Mac 可编译不依赖 Biber 的稿件（包括传统 BibTeX）。
 
-点击 PDF 正文可定位到当前主文件的源码行；在纯预览中点击会展开双栏。定位需要 Poppler 的 `pdftotext`。LaTeX 优先使用 SyncTeX，Typst 按点击的词和相邻文本匹配源码。空白区域、无法区分的重复行或过期页面不跳转。
+LaTeX 实时模式用 PDF 文字坐标定位上一份 PDF 中的段落。若变更只涉及一个段落，且能找到唯一匹配，就在右侧切到对应页，在原矩形内更新文字。纯正文直接使用原页的字号、行高和缩进试排。支持的粗体、强调和行内公式用 Typst 试排。输入期间不挤动周边内容，超出原框的正文可能暂时裁切。停顿后 XeLaTeX 重新排整页，若能重新定位则跟随新页码。重复段落、跨页段落或缺少文本层时，使用试排卡片或等待整页。每次成功编译替换上一份索引，最多保留 8192 个段落。
+
+点击 PDF 正文可定位到源码行，在纯预览中点击会展开双栏。LaTeX 优先使用 SyncTeX，Typst 按点击的词和相邻文本匹配源码。空白区域、无法区分的重复行或过期页面不跳转。
 
 源码编辑器提供本地高亮、括号配对和补全。在 LaTeX 中输入 `\`、在 Typst 中输入 `#` 即可查看命令、签名和所选命令的简要说明。继续输入 `\subsec`、`\begin{equa`、`#fig` 或 `#set tex` 可看到候选名称与签名；按 Enter 接受，也可在命令或环境名位置按 Ctrl+Space 手动触发。LaTeX 导言区的常用宏声明、Typst 的 `#let` 名称也会参与提示（当前文件前 32 KiB，最多 128 个声明）。没有启动语言服务器或扫描工作区。
 

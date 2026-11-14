@@ -87,12 +87,19 @@ type compilePane struct {
 	parkedPage              int
 	checkingPreview         bool
 	reuseChecks             chan func(bool) // nil 请求释放段落快览，有回调的请求校验当前 PDF。
-	busy                    bool
+	busy, downloadingLaTeX  bool
 	pageNavigation          scholarPageNavigation
 	elapsed                 time.Duration
 	warnings                []typeset.Diagnostic
 	err                     string
 	image                   *ui.Bitmap
+}
+
+func (p *compilePane) progressMessage(compiling string) string {
+	if p.downloadingLaTeX {
+		return "downloadingLaTeX"
+	}
+	return compiling
 }
 
 func (s *Shell) closeCompile() {
@@ -206,7 +213,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				}
 				// 学术工作区的排版状态与错误详情由状态栏和诊断检查器呈现。
 				if workspace == nil && p.busy && p.image == nil {
-					ui.Text(c, s.tr("compiling"))
+					ui.Text(c, s.tr(p.progressMessage("compiling")))
 				}
 				if workspace == nil && p.err != "" {
 					el := ui.Scroll(c).FillWidth().MaxHeight(150)
@@ -449,27 +456,47 @@ func (s *Shell) openTypesetMode(t *Tab, live, semantic bool) {
 		p.projectInput = s.projectPreviewRevision(p)
 	}
 	revision := previewRevision{snap: initial, ctx: buildCtx, version: p.version, project: p.projectInput, semantic: semantic}
+	download := typeset.IsLaTeXPath(path) && typeset.LatexNeedsDownload()
+	p.downloadingLaTeX = download
 	s.compile = p
 	go func() {
-		err := p.runPreview(ctx, revision, func(v uint64, draft bool, apply func()) {
+		var prepareErr error
+		if download {
+			// Use the pane lifetime so typing during the download only
+			// replaces the requested revision, not the download itself.
+			prepareErr = typeset.PrepareLaTeX(ctx)
 			post(func() {
-				if s.compile != p || s.activeTab() != t || t.Path != p.sourcePath {
-					return
+				if s.compile == p {
+					p.downloadingLaTeX = false
 				}
-				if project.Root != "" {
-					if p.parkedPage == 0 {
-						s.updateProjectPreview(p)
-					}
-					if v != p.version {
+			})
+		}
+		err := prepareErr
+		if err == nil && ctx.Err() == nil {
+			select {
+			case revision = <-p.liveUpdates:
+			default:
+			}
+			err = p.runPreview(ctx, revision, func(v uint64, draft bool, apply func()) {
+				post(func() {
+					if s.compile != p || s.activeTab() != t || t.Path != p.sourcePath {
 						return
 					}
-				} else if live && t.Source().Buffer.Version() != v && !(draft && v >= p.shown) {
-					return
-				}
-				p.shown = v
-				apply()
+					if project.Root != "" {
+						if p.parkedPage == 0 {
+							s.updateProjectPreview(p)
+						}
+						if v != p.version {
+							return
+						}
+					} else if live && t.Source().Buffer.Version() != v && !(draft && v >= p.shown) {
+						return
+					}
+					p.shown = v
+					apply()
+				})
 			})
-		})
+		}
 		if err != nil && ctx.Err() == nil {
 			post(func() {
 				if s.compile == p {

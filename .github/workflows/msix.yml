@@ -8,6 +8,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'scripts/msix/**'
+      - 'scripts/typeset-assets/**'
+      - 'internal/typesetassets/**'
       - 'mygo.json'
       - '.github/workflows/msix.yml'
   push:
@@ -18,6 +20,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'scripts/msix/**'
+      - 'scripts/typeset-assets/**'
+      - 'internal/typesetassets/**'
       - 'mygo.json'
       - '.github/workflows/msix.yml'
 

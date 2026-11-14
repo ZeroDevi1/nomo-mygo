@@ -110,7 +110,7 @@ func paragraphDocument(header, body string) (string, bool) {
 			fonts = append(fonts, typString(m[1]))
 		}
 	}
-	fonts = append(fonts, `"Libertinus Serif","Songti SC","SimSun","Noto Serif CJK SC"`)
+	fonts = append(fonts, `"Libertinus Serif","Songti SC","SimSun","Noto Serif CJK SC","Noto Sans SC"`)
 	return "#set page(width: 410pt, height: auto, margin: 4pt)\n#set text(size: 12pt, lang: \"zh\", font: (" + strings.Join(fonts, ",") + "))\n" + content, true
 }
 
@@ -134,7 +134,7 @@ func startParagraph(ctx context.Context, dir, doc string) (*paragraphEngine, err
 		return nil, e
 	}
 	child, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(child, bin, "watch", "--root", dir, "--diagnostic-format", "short", "--ppi", "144", "paragraph.typ", "paragraph.png")
+	cmd := exec.CommandContext(child, bin, typstArgs(bin, []string{"watch", "--root", dir, "--diagnostic-format", "short", "--ppi", "144", "paragraph.typ", "paragraph.png"})...)
 	cmd.Dir = dir
 	cmd.WaitDelay = time.Second
 	stream, e := cmd.StdoutPipe()

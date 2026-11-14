@@ -76,7 +76,7 @@ scoop install nomo-mygo/nomo-mygo
 
 - **Markdown 编辑**：即时预览、源码与双栏模式，输入 `/` 快速插入内容。
 - **丰富内容**：支持表格、代码高亮、数学公式、Mermaid 图表、提示块与文字颜色。
-- **LaTeX / Typst**：打开可信的 `.tex`、`.ltx` 或 `.typ` 主文件，可切换预览、源码与双栏，在预览正文上点击定位源码行，也可从文件菜单导出未保存版本的 PDF。LaTeX 正文可在 PDF 原位置实时试排，再由 XeLaTeX 校正分页；两种源码均支持语法高亮与补全。依赖、Go 接口与适用范围见[编译预览](docs/typeset-preview.md)。
+- **LaTeX / Typst**：打开可信的 `.tex`、`.ltx` 或 `.typ` 主文件，可切换预览、源码与双栏，在预览正文上点击定位源码行，也可从文件菜单导出未保存版本的 PDF。LaTeX 正文可在 PDF 原位置实时试排，再由 XeLaTeX 校正分页；两种源码均支持语法高亮与补全。发行包内置 Typst 和 PDFium；首次排版 LaTeX 时由 Nomo 下载组件。详细说明见[编译预览](docs/typeset-preview.md)。
 - **学术工作区**：在 LaTeX / Typst 工作区查找项目与 Zotero 文献、查看最近一次编辑的词级或行级差异，并审阅 Codex 的选区改写提议及可选 PDF 试排。见[使用说明](docs/nomo-scholar.md)。
 - **文件管理**：文件树键入定位、多标签，以及 TXT / JSON 大文件分段编辑。
 - **保存与恢复**：可启用自动保存和 Markdown 本地快照，恢复工作区与阅读位置。
@@ -98,7 +98,7 @@ go tool mygo dev
 - 检查与测试：`go vet ./...`、`go test ./...`
 - 打包：`go tool mygo build`；macOS 含 Quick Look 扩展与 DMG 用 `bash scripts/build-macos.sh`；Windows Store 包见 [desktop/packaging/msix](desktop/packaging/msix/README.md)
 - 图标：修改 `desktop/packaging/icons/nomo/source/nomo-app-light.svg` 后运行 `go run ./scripts/icons`
-- 导出精细排版的 WebAssembly 由 `go tool mygo build` 自动生成（`go run ./scripts/kpwasm`），不纳入版本库
+- `go tool mygo build` 自动准备 Typst、PDFium 和默认中文字体，并生成导出排版的 WebAssembly。构建产物不纳入版本库。
 
 ## 参与项目
 
