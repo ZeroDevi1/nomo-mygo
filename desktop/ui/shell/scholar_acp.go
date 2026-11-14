@@ -251,16 +251,22 @@ func (s *Shell) scholarACPSessions(c *ui.Context, p *scholarState) {
 func (s *Shell) scholarACPTranscript(c *ui.Context, p *scholarState, viewport ui.Rect) {
 	state := &p.agent.acp
 	sources, attachments := s.indexScholarACPSources(p)
+	pdfAttachments := scholarACPSourceAttachments(sources)
+	multipleAttachments := func(source scholarACPSentSource) bool {
+		pdf := source.PDF
+		key, backed := pdfAttachments[scholarACPAttachmentParent{pdf.Library, pdf.Item}]
+		return backed && key == "" && pdf.Attachment != ""
+	}
 	for i, m := range state.history {
-		s.scholarACPMessage(c.Key("history-message").Key(i), p, m, sources, attachments[m.ID])
+		s.scholarACPMessage(c.Key("history-message").Key(i), p, m, sources, attachments[m.ID], multipleAttachments)
 	}
 	if p.agent.running {
 		m := scholarACPUserMessage(state.progress, p.agent.instruction)
-		s.scholarACPMessage(c.Key("pending-message"), p, m, sources, attachments[m.ID])
+		s.scholarACPMessage(c.Key("pending-message"), p, m, sources, attachments[m.ID], multipleAttachments)
 	}
 	for i, m := range state.progress.Messages {
 		if m.Role != "user" {
-			s.scholarACPMessage(c.Key("message").Key(i), p, m, sources, nil)
+			s.scholarACPMessage(c.Key("message").Key(i), p, m, sources, nil, multipleAttachments)
 		}
 	}
 	end := ui.Box(c.Key("chat-end")).Height(1).FillWidth()
@@ -295,7 +301,7 @@ func (s *Shell) scholarACPTranscript(c *ui.Context, p *scholarState, viewport ui
 	}
 }
 
-func (s *Shell) scholarACPMessage(c *ui.Context, p *scholarState, m scholar.ACPMessage, sources map[string]scholarACPSentSource, attached []scholarACPSentSource) {
+func (s *Shell) scholarACPMessage(c *ui.Context, p *scholarState, m scholar.ACPMessage, sources map[string]scholarACPSentSource, attached []scholarACPSentSource, multipleAttachments func(scholarACPSentSource) bool) {
 	if m.Role == "thought" {
 		return
 	}
@@ -324,7 +330,7 @@ func (s *Shell) scholarACPMessage(c *ui.Context, p *scholarState, m scholar.ACPM
 					ui.Text(c.Key("attached"), s.tr("scholarACPAttached")).FontSize(11).TextColor(s.ch.muted)
 				}
 				for _, source := range attached {
-					s.scholarACPSentSource(c.Key(source.ID), p, source, previews[source.ID], fmt.Sprint("user/", m.ID, "/", source.ID), 0)
+					s.scholarACPSentSource(c.Key(source.ID), p, source, previews[source.ID], fmt.Sprint("user/", m.ID, "/", source.ID), 0, multipleAttachments(source))
 				}
 			})
 		})
@@ -340,7 +346,7 @@ func (s *Shell) scholarACPMessage(c *ui.Context, p *scholarState, m scholar.ACPM
 		if len(matched) > 0 {
 			ui.Text(c.Key("sources"), s.tr("scholarACPCitedSources")).FontSize(11).TextColor(s.ch.muted)
 			for i, source := range matched {
-				s.scholarACPSentSource(c.Key(source.ID), p, source, "", fmt.Sprint("agent/", m.ID, "/", source.ID), i+1)
+				s.scholarACPSentSource(c.Key(source.ID), p, source, "", fmt.Sprint("agent/", m.ID, "/", source.ID), i+1, multipleAttachments(source))
 			}
 		}
 	})
@@ -743,10 +749,10 @@ func (s *Shell) quoteScholar(p *scholarState, ref scholarACPQuote, newChat bool,
 	if !newChat && p.agent.hasDraft() {
 		thread = p.agent.acp.thread
 	}
-	s.attachScholarACPQuote(p, ref, thread, newChat, after)
+	s.attachScholarACPQuote(p, ref, thread, newChat, nil, after)
 }
 
-func (s *Shell) attachScholarACPQuote(p *scholarState, ref scholarACPQuote, thread scholarACPThread, forceNew bool, after func()) bool {
+func (s *Shell) attachScholarACPQuote(p *scholarState, ref scholarACPQuote, thread scholarACPThread, forceNew bool, stillWanted func() bool, after func()) bool {
 	if p.busy || p.agent.pendingPatch() != nil {
 		return false
 	}
@@ -779,7 +785,7 @@ func (s *Shell) attachScholarACPQuote(p *scholarState, ref scholarACPQuote, thre
 		attach()
 		return true
 	}
-	return s.switchScholarACPThread(p, thread, forceNew, attach)
+	return s.switchScholarACPThreadWhen(p, thread, forceNew, stillWanted, attach)
 }
 
 const scholarACPImageLimit = 2 << 20

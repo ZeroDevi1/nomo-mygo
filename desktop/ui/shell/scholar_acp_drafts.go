@@ -107,6 +107,10 @@ func (s *Shell) activateScholarACPThread(p *scholarState, thread scholarACPThrea
 // Apply a history switch only after ACP has replayed the destination session.
 // The live draft stays with the current session while the request is in flight.
 func (s *Shell) switchScholarACPThread(p *scholarState, thread scholarACPThread, newThread bool, after func()) bool {
+	return s.switchScholarACPThreadWhen(p, thread, newThread, nil, after)
+}
+
+func (s *Shell) switchScholarACPThreadWhen(p *scholarState, thread scholarACPThread, newThread bool, stillWanted func() bool, after func()) bool {
 	a := &p.agent
 	state := &a.acp
 	if p.busy || a.pendingPatch() != nil {
@@ -175,7 +179,7 @@ func (s *Shell) switchScholarACPThread(p *scholarState, thread scholarACPThread,
 		defer client.ReleaseSession(id)
 		progress := client.Progress()
 		return func() {
-			if ctx.Err() != nil || !canSwitch() {
+			if ctx.Err() != nil || (stillWanted != nil && !stillWanted()) || !canSwitch() {
 				return
 			}
 			thread.Title = title

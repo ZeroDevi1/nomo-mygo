@@ -96,6 +96,34 @@ func (s *Shell) indexScholarACPSources(p *scholarState) (map[string]scholarACPSe
 	return byID, byMessage
 }
 
+// A bibliography entry can supply several PDFs with the same display title.
+// Track their keys so old and new citations can be distinguished without a
+// metadata lookup during transcript rendering.
+func scholarACPSourceAttachments(sources map[string]scholarACPSentSource) map[scholarACPAttachmentParent]string {
+	var attachments map[scholarACPAttachmentParent]string
+	for _, source := range sources {
+		pdf := source.PDF
+		if pdf.Item == "" || pdf.Attachment == "" {
+			continue
+		}
+		if attachments == nil {
+			attachments = make(map[scholarACPAttachmentParent]string)
+		}
+		parent := scholarACPAttachmentParent{pdf.Library, pdf.Item}
+		if key, seen := attachments[parent]; !seen {
+			attachments[parent] = pdf.Attachment
+		} else if key != pdf.Attachment {
+			attachments[parent] = ""
+		}
+	}
+	return attachments
+}
+
+type scholarACPAttachmentParent struct {
+	library int
+	item    string
+}
+
 func scholarACPCitationLinks(text string, sources map[string]scholarACPSentSource) (string, []scholarACPSentSource) {
 	if len(sources) == 0 || !strings.Contains(text, scholarACPMarkerPrefix) {
 		return text, nil
@@ -329,9 +357,12 @@ func (a *scholarACPState) closeSourcePreview() {
 	a.cancelSourcePreview, a.sourcePreviewContext = nil, nil
 }
 
-func (s *Shell) scholarACPSentSource(c *ui.Context, p *scholarState, source scholarACPSentSource, excerpt, previewKey string, ordinal int) {
+func (s *Shell) scholarACPSentSource(c *ui.Context, p *scholarState, source scholarACPSentSource, excerpt, previewKey string, ordinal int, multipleAttachments bool) {
 	state := &p.agent.acp
 	label := s.scholarACPSourceLabel(source)
+	if multipleAttachments {
+		label = source.PDF.Attachment + " · " + label
+	}
 	if ordinal > 0 {
 		label = fmt.Sprintf("[%d] %s", ordinal, label)
 	}

@@ -282,6 +282,10 @@ func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, 
 	original := p.agent.acp.thread
 	draft, instruction := p.agent.hasDraft(), p.agent.instruction
 	switching := newChat || !sameScholarACPThread(original, thread)
+	stillWanted := func() bool {
+		return s.scholar == p && !p.references.catalog && p.references.focused == t &&
+			t.generation == generation && q.attempt == attempt
+	}
 	go func() {
 		defer cancel()
 		var err error
@@ -317,7 +321,7 @@ func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, 
 			}
 		}
 		s.post(func() {
-			if s.scholar != p || p.references.catalog || p.references.focused != t || t.generation != generation || q.attempt != attempt {
+			if !stillWanted() {
 				return
 			}
 			q.cancel = nil
@@ -330,7 +334,7 @@ func (s *Shell) captureScholarPDFQuote(p *scholarState, t *scholarReferenceTab, 
 				q.err = s.tr("scholarACPChooseDraft")
 			} else if known, available := scholarACPImageCapability(); picture && known && !available {
 				q.err = s.tr("scholarACPImageUnsupported")
-			} else if !s.attachScholarACPQuote(p, ref, thread, newChat, func() {
+			} else if !s.attachScholarACPQuote(p, ref, thread, newChat, stillWanted, func() {
 				if prompt != "" && strings.TrimSpace(p.agent.instruction) == "" {
 					p.agent.instruction = prompt
 				}
