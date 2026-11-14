@@ -1,13 +1,13 @@
 {
-    "version": "0.9.0",
+    "version": "0.9.1",
     "description": "Nomo Scholar, a local-first editor for Markdown, LaTeX, and Typst",
     "homepage": "https://github.com/ZeroDevi1/nomo-mygo",
     "license": "AGPL-3.0-or-later",
     "notes": "Settings are stored in %APPDATA%\\com.nomo.desktop. Update with 'scoop update nomo-mygo'.",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/ZeroDevi1/nomo-mygo/releases/download/v0.9.0/Nomo_0.9.0_x64.zip",
-            "hash": "add2af4f98c277261d560c505f89b04808b740b5cf2f8b98645d1e17c4f4aea2"
+            "url": "https://github.com/ZeroDevi1/nomo-mygo/releases/download/v0.9.1/Nomo_0.9.1_x64.zip",
+            "hash": "eb08cbcf4bcf88f6d30e960cd2f67b5ee5934c09ba2c4006feb01055ae8102cc"
         }
     },
     "extract_dir": "Nomo",
