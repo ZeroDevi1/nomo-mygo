@@ -22,6 +22,7 @@ const (
 	typesetPreview
 	typesetSplit
 	typesetSemantic
+	typesetPageEdit
 )
 
 type pageRequest struct {
@@ -39,6 +40,7 @@ type pageClick struct {
 	version, serial uint64
 	x, y            float64
 	scroll          bool
+	edit            bool
 }
 type previewRevision struct {
 	snap     editor.Snapshot
@@ -83,6 +85,7 @@ type compilePane struct {
 	jump                    func(int)
 	jumpProject             func(typeset.ProjectLocation, int, bool)
 	sync                    typesetPositionSync
+	pageEdit                *manuscriptPageEdit
 	page, pages, resumePage int
 	parkedPage              int
 	checkingPreview         bool
@@ -163,6 +166,9 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 		s.openTypesetMode(t, true, mode == typesetSemantic)
 	}
 	if p := s.compile; p != nil && p.parkedPage == 0 {
+		if mode != typesetPageEdit {
+			p.pageEdit = nil
+		}
 		leavingCanvas := p.semantic && mode != typesetSemantic && wantPreview
 		enteringTypstCanvas := !p.semantic && mode == typesetSemantic && !typeset.IsLaTeXPath(p.path)
 		p.semantic = mode == typesetSemantic
@@ -225,7 +231,10 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				}
 				viewport := ui.Column(c).Fill().Grow(1).MinHeight(0).Padding(8)
 				viewport.Children(func() {
-					s.previewPages(c, p, viewport.Bounds())
+					editFrame := s.previewPages(c, p, viewport.Bounds(), mode == typesetPageEdit)
+					if mode == typesetPageEdit && p.pageEdit != nil {
+						s.manuscriptPageEditor(c, p, editFrame)
+					}
 				})
 				if p.paragraph != nil && p.anchor.Page == 0 {
 					ui.Column(c).Absolute().Bottom(12).Left(12).Right(12).Background(c.Theme().Surface).Padding(6).Gap(3).Children(func() {
@@ -236,7 +245,7 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 				}
 			})
 		}
-		if mode == typesetPreview {
+		if mode == typesetPreview || mode == typesetPageEdit {
 			preview()
 			el = paper
 		} else {
@@ -252,13 +261,29 @@ func (s *Shell) sourceDocument(c *ui.Context, t *Tab) (el ui.Element) {
 		p.flushPositionSync(c)
 	}
 	if workspace != nil && paper.Valid() {
-		if s.focusEditor && (mode == typesetPreview || t.typesetFocusPDF) {
+		if s.focusEditor && (mode == typesetPreview || mode == typesetPageEdit || t.typesetFocusPDF) {
 			paper.Focus()
 			s.focusEditor = false
 		} else if paper.FocusWithin() {
 			t.typesetFocusPDF = true
 		} else if el.FocusWithin() {
 			t.typesetFocusPDF = false
+		}
+	}
+	if mode == typesetPageEdit {
+		paper.HandleInput(func(ev ui.InputEvent) bool {
+			if ev.Kind == ui.InputCommand && (ev.Text == "undo" || ev.Text == "redo") {
+				return s.editCommand(ev.Text)
+			}
+			return false
+		})
+		if p == nil || p.pageEdit == nil {
+			switch {
+			case paper.Shortcut(ui.Cmd|ui.Shift, ui.KeyZ) || paper.Shortcut(ui.Cmd, ui.KeyY):
+				s.editCommand("redo")
+			case paper.Shortcut(ui.Cmd, ui.KeyZ):
+				s.editCommand("undo")
+			}
 		}
 	}
 	return
@@ -286,7 +311,7 @@ func (s *Shell) scholarPDFHeader(c *ui.Context, tab *Tab, pane *compilePane) {
 }
 
 // 整页缓存的原始 RGBA 像素预算为 128 MiB；拖宽窗口时保留现有位图，待后台从 PDF 补绘。
-func (s *Shell) previewPages(c *ui.Context, p *compilePane, viewport ui.Rect) {
+func (s *Shell) previewPages(c *ui.Context, p *compilePane, viewport ui.Rect, editing bool) (editFrame ui.Rect) {
 	dark := p.tab.typesetDarkReading
 	width := s.documentWidth(p.tab)
 	follow := p.observePDFLayout(viewport, width)
@@ -312,6 +337,9 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane, viewport ui.Rect) {
 		}
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(0, 0, 8, 0).Children(func() {
 			frame := ui.Box(c).WidthPercent(float32(width)).AspectRatio(float32(w) / float32(h)).Clip()
+			if edit := p.pageEdit; editing && edit != nil && edit.page == number && row >= first && row <= last {
+				editFrame = frame.Bounds()
+			}
 			if row >= first && row <= last && p.syncPDFPage(c, number, frame.Bounds(), follow) {
 				follow = false
 			}
@@ -346,12 +374,19 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane, viewport ui.Rect) {
 					return
 				}
 				pageImage := ui.Image(c, bmp).Fill().Label(s.tr("compiledPage"))
+				if editing {
+					pageImage.Cursor(ui.CursorText)
+				}
 				if pageImage.Clicked() && p.canLocate() {
 					x, y, over := pageImage.PointerPosition()
 					box := pageImage.Bounds()
 					x, y = x/box.W, y/box.H
 					if over && x >= 0 && y >= 0 && x <= 1 && y <= 1 {
-						p.requestPDFPosition(number, float64(x), float64(y))
+						if editing {
+							p.requestPDFEdit(number, float64(x), float64(y))
+						} else {
+							p.requestPDFPosition(number, float64(x), float64(y))
+						}
 					}
 				}
 				if a := p.anchor; (p.paragraph != nil || p.inlineText != "") && a.Page == number {
@@ -375,6 +410,7 @@ func (s *Shell) previewPages(c *ui.Context, p *compilePane, viewport ui.Rect) {
 			})
 		})
 	}).TrackScroll(&p.sync.pdfScroll).Grow(1).FillWidth().MinHeight(0)
+	return editFrame
 }
 func (p *compilePane) keepPage(n int, bmp *ui.Bitmap) {
 	if p.cached == nil {
@@ -477,7 +513,9 @@ func (s *Shell) openTypesetMode(t *Tab, live, semantic bool) {
 			case revision = <-p.liveUpdates:
 			default:
 			}
-			err = p.runPreview(ctx, revision, func(v uint64, draft bool, apply func()) {
+			err = p.runPreview(ctx, revision, func(hit typeset.PDFTextHit, page int) {
+				s.beginManuscriptPageEdit(p, hit, page)
+			}, func(v uint64, draft bool, apply func()) {
 				post(func() {
 					if s.compile != p || s.activeTab() != t || t.Path != p.sourcePath {
 						return
@@ -512,7 +550,7 @@ func (s *Shell) openTypesetMode(t *Tab, live, semantic bool) {
 }
 
 // 工作协程独占编译器与临时文件。界面只投递最新的只读 rope 快照，过期结果不能覆盖当前版本。
-func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, publish func(uint64, bool, func())) error {
+func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, editPDFText func(typeset.PDFTextHit, int), publish func(uint64, bool, func())) error {
 	var session provider.Session
 	var projectSession *typeset.Session
 	var disk uint64
@@ -719,6 +757,18 @@ func (p *compilePane) runPreview(ctx context.Context, revision previewRevision, 
 			check(current)
 		case click := <-p.clicks:
 			if click.page < 1 || click.page > pages || click.version != baseVersion || buildCtx.Err() != nil {
+				continue
+			}
+			if click.edit {
+				var hit typeset.PDFTextHit
+				if engine, ok := session.(*typeset.Session); ok {
+					hit = engine.EditablePDFText(buildCtx, click.page, click.x, click.y, p.sourcePath, base.String)
+				}
+				publish(click.version, false, func() {
+					if click.serial == p.sync.serial && p.tab.typesetMode == typesetPageEdit && p.canLocate() {
+						editPDFText(hit, click.page)
+					}
+				})
 				continue
 			}
 			if projectSession != nil {

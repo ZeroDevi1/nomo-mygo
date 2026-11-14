@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"nomo/desktop/internal/pdfium"
 )
@@ -24,6 +25,162 @@ func (s *Session) SourceLine(ctx context.Context, page int, x, y float64, source
 
 func (s *Session) SourceLineNear(ctx context.Context, page int, x, y float64, source func() string) int {
 	return s.sourceLine(ctx, page, x, y, source, true)
+}
+
+// PDFTextHit maps a rendered line to a contiguous literal span of one source line.
+// Coordinates are fractions of the displayed page, from its upper left.
+type PDFTextHit struct {
+	ProjectLocation
+	Start, End  int
+	X, Y, W     float64
+	DisplayText string
+}
+
+func (s *Session) EditablePDFText(ctx context.Context, page int, x, y float64, path string, source func() string) PDFTextHit {
+	hit := s.sourceHit(ctx, page, x, y, false)
+	if hit == nil || len(hit.words) == 0 {
+		return PDFTextHit{}
+	}
+	var location ProjectLocation
+	if s.mirror != nil {
+		location = s.projectSourceLocation(ctx, page, x, y, false)
+	} else {
+		text := source()
+		var line int
+		if IsLaTeXPath(s.path) {
+			line, _ = s.syncTeXLine(ctx, page, hit.x, hit.y)
+		} else {
+			line = matchSourceLine(ctx, text, hit.words, hit.index)
+		}
+		if line < 0 {
+			return PDFTextHit{}
+		}
+		n := 0
+		for row := range strings.Lines(text) {
+			if n == line {
+				row = strings.TrimSuffix(row, "\n")
+				location = ProjectLocation{Path: path, Line: line, Text: strings.TrimSuffix(strings.TrimPrefix(row, "\ufeff"), "\r")}
+				break
+			}
+			n++
+		}
+	}
+	if location.Path == "" || len(location.Text) > 16<<10 {
+		return PDFTextHit{}
+	}
+	// Editing is scoped to the active source. Preserve the location so the
+	// caller can distinguish text from another included file.
+	if s.mirror != nil {
+		clicked, ok := s.mirror.sourcePath(location.Path)
+		active, activeOK := s.mirror.sourcePath(path)
+		if !ok || !activeOK || clicked != active {
+			return PDFTextHit{ProjectLocation: ProjectLocation{Path: location.Path}}
+		}
+		location.Path = path
+	}
+	words := make([]string, 0, len(hit.words))
+	left, top, right := hit.words[0].X, hit.words[0].Y, hit.words[0].R
+	for _, word := range hit.words {
+		words = append(words, word.Text)
+		left, top = min(left, word.X), min(top, word.Y)
+		right = max(right, word.R)
+	}
+	latex := IsLaTeXPath(location.Path)
+	text := strings.Join(words, " ")
+	start, end := literalPDFSpan(location.Text, text, latex)
+	if start < 0 {
+		// PDF text extraction may divide adjacent CJK glyphs into words.
+		text = strings.Join(words, "")
+		start, end = literalPDFSpan(location.Text, text, latex)
+	}
+	if start < 0 {
+		return PDFTextHit{}
+	}
+	p := s.sourcePage // sourceHit loaded this page's text layer.
+	location.Text = strings.Clone(location.Text)
+	return PDFTextHit{ProjectLocation: location, Start: start, End: end, X: left / p.Width, Y: top / p.Height,
+		W: (right - left) / p.Width, DisplayText: text}
+}
+
+func literalPDFSpan(source, text string, latex bool) (start, end int) {
+	if text == "" || len(text) > 4096 {
+		return -1, -1
+	}
+	escaped := LiteralManuscriptText(text, latex)
+	start = strings.Index(source, text)
+	literal := text
+	if other := strings.Index(source, escaped); escaped != text && other >= 0 {
+		if start >= 0 && (start < other || start+len(text) > other+len(escaped)) {
+			return -1, -1
+		}
+		start, literal = other, escaped
+	}
+	if start < 0 || strings.LastIndex(source, literal) != start {
+		return -1, -1
+	}
+	end = start + len(literal)
+	before, _ := utf8.DecodeLastRuneInString(source[:start])
+	after, _ := utf8.DecodeRuneInString(source[end:])
+	first, _ := utf8.DecodeRuneInString(text)
+	last, _ := utf8.DecodeLastRuneInString(text)
+	if before == '\\' || before == '#' || before == '@' || !editableMarkupSpan(source[:end], latex) ||
+		isLatinWordEdge(before) && isLatinWordEdge(first) || isLatinWordEdge(after) && isLatinWordEdge(last) {
+		return -1, -1
+	}
+	return start, end
+}
+
+// The inverse map provides a source line, not a parse tree. Avoid rewriting
+// text reached through a comment, math, or Typst code on that line.
+func editableMarkupSpan(text string, latex bool) bool {
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\\':
+			if latex && i+1 < len(text) && (text[i+1] == '(' || text[i+1] == '[') {
+				return false
+			}
+			i++
+		case '$':
+			return false
+		case '%':
+			if latex {
+				return false
+			}
+		case '#', '\x60':
+			if !latex {
+				return false
+			}
+		case '/':
+			if !latex && i+1 < len(text) && (text[i+1] == '/' || text[i+1] == '*') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isLatinWordEdge(r rune) bool {
+	return unicode.In(r, unicode.Latin) || unicode.IsDigit(r) || unicode.IsMark(r)
+}
+
+var latexLiteralText = strings.NewReplacer(
+	"\\", "\\textbackslash{}", "{", "\\{", "}", "\\}", "$", "\\$", "&", "\\&", "#", "\\#",
+	"%", "\\%", "_", "\\_", "^", "\\textasciicircum{}", "~", "\\textasciitilde{}",
+	"<", "\\textless{}", ">", "\\textgreater{}", "|", "\\textbar{}",
+)
+
+var typstLiteralText = strings.NewReplacer(
+	"\\", "\\\\", "\x60", "\\\x60", "#", "\\#", "@", "\\@", "$", "\\$", "*", "\\*", "_", "\\_",
+	"[", "\\[", "]", "\\]", "<", "\\<", ">", "\\>", "~", "\\~", "=", "\\=", "+", "\\+",
+	"-", "\\-", "...", "\\...", "//", "\\//", "/*", "\\/*",
+)
+
+// LiteralManuscriptText escapes replacement text for use in manuscript markup.
+func LiteralManuscriptText(text string, latex bool) string {
+	if latex {
+		return latexLiteralText.Replace(text)
+	}
+	return typstLiteralText.Replace(text)
 }
 
 func (s *Session) sourceLine(ctx context.Context, page int, x, y float64, source func() string, nearest bool) int {

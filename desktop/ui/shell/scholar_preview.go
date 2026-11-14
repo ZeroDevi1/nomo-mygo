@@ -168,6 +168,7 @@ func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
 	if p == nil {
 		return
 	}
+	p.pageEdit = nil
 	covered := workspace != nil && (workspace.drawer != scholarClosed || workspace.references.catalog ||
 		workspace.references.focused != nil || workspace.accountOpen || workspace.winSettings != nil ||
 		workspace.winCompactProject || tab != nil && (tab.typesetMode == typesetSplit && !tab.typesetCompactPDF ||

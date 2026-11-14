@@ -97,6 +97,14 @@ func (p *compilePane) requestPDFPosition(page int, x, y float64) {
 	p.sendPDFPosition(pageClick{page: page, version: p.fullVersion, serial: p.sync.serial, x: x, y: y})
 }
 
+func (p *compilePane) requestPDFEdit(page int, x, y float64) {
+	if p.pageEdit != nil {
+		return
+	}
+	p.sync.invalidate()
+	p.sendPDFPosition(pageClick{page: page, version: p.fullVersion, serial: p.sync.serial, x: x, y: y, edit: true})
+}
+
 func (p *compilePane) sendSourcePosition(req sourcePageRequest) {
 	select {
 	case <-p.sections:
