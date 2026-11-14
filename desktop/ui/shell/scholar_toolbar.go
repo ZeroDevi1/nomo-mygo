@@ -246,7 +246,7 @@ func (s *Shell) scholarDocumentTools(c *ui.Context, p *scholarState, tab *Tab) {
 func (s *Shell) scholarAssistantButton(c *ui.Context, p *scholarState, visible, disabled bool) {
 	label := s.tr("scholarWritingAssistant")
 	if s.toolButton(c.Key("assistant"), "message-square-text", label, visible).
-		Label(label).FocusRing(true).Selected(visible).Disabled(disabled).Clicked() {
+		Label(label).FocusRing(true).Role(ui.RoleToggleButton).Checked(visible).Disabled(disabled).Clicked() {
 		s.openScholarAgent(p)
 	}
 }
