@@ -309,11 +309,12 @@ func (s *Shell) scholarPatchView(c *ui.Context, p *scholarState, patch *scholarP
 		}
 		return
 	}
-	if ui.Button(c, s.tr("scholarShowReview")).Clicked() {
+	if ui.Button(c, s.tr("scholarShowReview")).Disabled(p.busy).Clicked() {
 		s.openScholarReview(p)
 	}
 	ui.Row(c).Gap(4).Children(func() {
 		if ui.Button(c, s.tr("scholarPDFDiff")).Disabled(p.busy).Clicked() {
+			s.openScholarReview(p)
 			s.trialScholarPatch(p, patch)
 		}
 		if p.busy && ui.Button(c, s.tr("scholarAgentCancelWork")).Clicked() {

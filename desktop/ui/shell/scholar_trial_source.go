@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
@@ -13,13 +12,24 @@ import (
 type scholarTrialSource struct {
 	path          string
 	before, after editor.Snapshot
-	patches       []*scholarPatch
+	patches       []scholarTrialPatch
+}
+
+// The original patch identifies the decision target. Its coordinates can move
+// after acceptance, so trial workers read the frozen target instead.
+type scholarTrialPatch struct {
+	patch  *scholarPatch
+	target scholarTarget
+	next   string
+}
+
+func (s scholarTrialSource) contains(patch *scholarPatch) bool {
+	return slices.ContainsFunc(s.patches, func(edit scholarTrialPatch) bool { return edit.patch == patch })
 }
 
 func scholarTrialInitialSource(sources []scholarTrialSource, patch *scholarPatch) int {
-	slices.SortFunc(sources, func(a, b scholarTrialSource) int { return strings.Compare(a.path, b.path) })
 	for i, source := range sources {
-		if slices.Contains(source.patches, patch) {
+		if source.contains(patch) {
 			return i
 		}
 	}
@@ -32,7 +42,7 @@ func scholarTrialInitialSource(sources []scholarTrialSource, patch *scholarPatch
 func (s scholarTrialSource) diff() (*editor.DiffState, []editor.DiffHunk, []int) {
 	d := &editor.DiffState{
 		Old: editor.NewBuffer(s.before.String()), New: editor.NewBuffer(s.after.String()),
-		Layout: editor.DiffUnified, Indicators: editor.DiffClassic, Inline: editor.DiffInlineNone,
+		Layout: editor.DiffUnified, Indicators: editor.DiffClassic, Inline: editor.DiffInlineWord,
 		ExpandUnchanged: true, Wrap: true, LineHeight: scholarDiffLineHeight,
 	}
 	hunks := d.Hunks()
@@ -98,8 +108,9 @@ func (s *scholarTrialSourceState) reveal(patch *scholarPatch) {
 	}
 	s.hunk = 0
 	if patch != nil {
+		line := patch.target.line
 		for i, h := range s.hunks {
-			if h.OldEnd >= patch.target.line {
+			if h.OldEnd > line || h.OldStart == line {
 				s.hunk = i
 				break
 			}
@@ -129,9 +140,9 @@ func (s *Shell) requestScholarTrialSource(p *scholarState, index int) {
 				return
 			}
 			v.source.diff, v.source.hunks, v.source.targets, v.source.cancel = d, hunks, targets, nil
-			var patch *scholarPatch
-			if len(source.patches) > 0 {
-				patch = source.patches[0]
+			patch := p.agent.pendingPatch()
+			if len(source.patches) > 0 && !source.contains(patch) {
+				patch = source.patches[0].patch
 				s.locateScholarTrialPatch(p, patch)
 			}
 			v.source.reveal(patch)
@@ -153,41 +164,39 @@ func (s *Shell) selectScholarTrialPatch(p *scholarState, patch *scholarPatch) bo
 
 func (s *Shell) locateScholarTrialPatch(p *scholarState, patch *scholarPatch) {
 	if s.selectScholarTrialPatch(p, patch) {
-		if v := &p.agent.trial; v.anchors[patch].Page > 0 {
-			v.jumpPage(v.anchors[patch].Page)
-		}
+		v := &p.agent.trial
+		v.jumpPosition(v.anchors[patch])
 	}
 }
 
 func (s *Shell) scholarTrialPatchActions(c *ui.Context, p *scholarState, patch *scholarPatch) {
-	if patch == nil {
-		return
-	}
-	if p.agent.trial.anchors[patch].Page > 0 && s.scholarReviewIcon(c.Key("locate"), "file-diff", s.tr("scholarTrialLocatePDF"), "", false).Clicked() {
-		s.locateScholarTrialPatch(p, patch)
-	}
 	reject := s.scholarReviewIcon(c.Key("reject"), "undo-2", s.tr("scholarAgentReject"), "", false).Disabled(p.busy).Clicked()
 	accept := s.scholarReviewIcon(c.Key("accept"), "check", s.tr("scholarAgentAccept"), "addition", false).Disabled(p.busy).Clicked()
-	if reject || accept {
-		pdfs := p.agent.trial.pdfs
-		// A decision can release the diff that is currently building annotations.
-		s.post(func() {
-			if s.scholar != p || p.busy || p.agent.trial.pdfs != pdfs || !s.selectScholarTrialPatch(p, patch) {
-				return
-			}
-			p.agent.reviewHidden = false
-			switch {
-			case accept && p.agent.batch != nil:
-				s.acceptScholarHunks(p, []*scholarPatch{patch})
-			case accept:
-				s.acceptScholarPatch(p, patch)
-			case p.agent.batch != nil:
-				s.rejectScholarHunk(p)
-			default:
-				s.rejectScholarSingle(p)
-			}
-		})
+	s.decideScholarTrialPatch(p, patch, accept, reject)
+}
+
+func (s *Shell) decideScholarTrialPatch(p *scholarState, patch *scholarPatch, accept, reject bool) {
+	if patch == nil || !accept && !reject {
+		return
 	}
+	pdfs := p.agent.trial.pdfs
+	// A decision can release the diff that is currently building annotations.
+	s.post(func() {
+		if s.scholar != p || p.busy || p.agent.trial.pdfs != pdfs || !s.selectScholarTrialPatch(p, patch) {
+			return
+		}
+		p.agent.reviewHidden = false
+		switch {
+		case accept && p.agent.batch != nil:
+			s.acceptScholarHunks(p, []*scholarPatch{patch})
+		case accept:
+			s.acceptScholarPatch(p, patch)
+		case p.agent.batch != nil:
+			s.rejectScholarHunk(p)
+		default:
+			s.rejectScholarSingle(p)
+		}
+	})
 }
 
 func (s *Shell) scholarTrialSourcePane(c *ui.Context, p *scholarState) {
@@ -228,7 +237,7 @@ func (s *Shell) scholarTrialSourcePane(c *ui.Context, p *scholarState) {
 						v.source.hunk = i
 						d.GoToHunk(i)
 						if target := v.source.targets[i]; target >= 0 {
-							s.locateScholarTrialPatch(p, file.patches[target])
+							s.locateScholarTrialPatch(p, file.patches[target].patch)
 						}
 					}
 				}
@@ -238,15 +247,16 @@ func (s *Shell) scholarTrialSourcePane(c *ui.Context, p *scholarState) {
 		if !v.show {
 			return
 		}
-		if p.err != "" {
-			ui.Text(c, p.err).TextColor(scholarInk(c, "warning")).FontSize(11).Wrap()
-		}
 		d.RenderAnnotation = func(c *ui.Context, a editor.DiffAnnotation) {
 			if !v.show {
 				return
 			}
 			ui.Row(c).Fill().Padding(0, 10).Gap(1).Justify(ui.End).AlignItems(ui.Center).Children(func() {
-				s.scholarTrialPatchActions(c, p, file.patches[a.Key.(int)])
+				patch := file.patches[a.Key.(int)].patch
+				if v.anchors[patch].Page > 0 && s.scholarReviewIcon(c.Key("locate"), "file-diff", s.tr("scholarTrialLocatePDF"), "", false).Clicked() {
+					s.locateScholarTrialPatch(p, patch)
+				}
+				s.scholarTrialPatchActions(c, p, patch)
 			})
 		}
 		editor.DiffView(c.Key(v.source.index), d).FillWidth().Grow(1).MinHeight(0)

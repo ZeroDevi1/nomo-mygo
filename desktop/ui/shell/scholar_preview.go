@@ -60,6 +60,9 @@ func (s *Shell) typesetProject(t *Tab) scholar.Project {
 	if p == nil || !isManuscript(t) {
 		return scholar.Project{}
 	}
+	if typeset.IsLaTeXPath(t.Path) != typeset.IsLaTeXPath(p.project.Main) {
+		return scholar.Project{}
+	}
 	if p.mainSelected || !samePath(t.Path, p.project.Main) || len(p.bibNames) > 0 {
 		return p.project
 	}
@@ -138,6 +141,8 @@ func (s *Shell) queuePreview(p *compilePane, revision previewRevision) {
 	default:
 	}
 	p.cancelBuild()
+	p.cancelManuscriptNote()
+	p.pdfText.clear()
 	revision.semantic = p.semantic
 	revision.ctx, p.cancelBuild = context.WithCancel(p.lifetime)
 	p.version, p.projectInput, p.sourceVersion = revision.version, revision.project, revision.snap.Version()
@@ -169,6 +174,8 @@ func (s *Shell) hideTypesetPreview(workspace *scholarState, tab *Tab) {
 		return
 	}
 	p.pageEdit = nil
+	p.cancelManuscriptNote()
+	p.pdfText.clear()
 	covered := workspace != nil && (workspace.drawer != scholarClosed || workspace.references.catalog ||
 		workspace.references.focused != nil || workspace.accountOpen || workspace.winSettings != nil ||
 		workspace.winCompactProject || tab != nil && (tab.typesetMode == typesetSplit && !tab.typesetCompactPDF ||
@@ -227,7 +234,7 @@ func (s *Shell) restoreTypesetPreview(p *compilePane) {
 	}
 }
 
-func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocation, page int, scroll bool) {
+func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocation, page int, scroll, openSource bool) {
 	if location.Path == "" || s.compile != p || p.busy || p.fullVersion != p.version {
 		return
 	}
@@ -238,8 +245,8 @@ func (s *Shell) jumpProjectPreview(p *compilePane, location typeset.ProjectLocat
 	if _, err := p.project.Path(name); err != nil {
 		return
 	}
-	if t := s.scholarTab(location.Path); t == nil || t != s.activeTab() {
-		if scroll {
+	if !samePath(p.tab.Path, location.Path) {
+		if !openSource {
 			return
 		}
 		s.OpenFiles([]string{location.Path})

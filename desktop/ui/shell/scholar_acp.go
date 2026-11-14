@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,9 @@ type scholarACPThread struct {
 
 type scholarACPQuote struct {
 	id, scope, label, locator, text string
+	note, noteStamp, manuscript     string
+	noteRegion                      ui.Rect
+	notePage, manuscriptTarget      int
 	pdf                             scholarPDFSource
 	png                             []byte
 }
@@ -46,6 +50,7 @@ type scholarACPState struct {
 	quotes                    []scholarACPQuote
 	settings                  []acp.SetSessionConfigOptionRequest
 	historyOpen, activityOpen bool
+	reviewChat                bool
 	focusComposer             bool
 	modelDetails, modelPicker bool
 	requestedContextWindow    int
@@ -66,14 +71,15 @@ type scholarACPState struct {
 func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState, singlePane bool) {
 	a := &p.agent
 	state := &a.acp
-	sessions := state.historyOpen
 	review := a.pendingPatch() != nil
+	sessions := state.historyOpen && !review
+	showReview := review && !state.reviewChat
 	empty := len(state.history) == 0 && len(state.progress.Messages) == 0 && !a.running
 	ready := registry.acp.ready()
 	ui.Column(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 		s.scholarACPHeader(c.Key("header"), p, singlePane, sessions)
-		body := ui.Scroll(c.Key("chat-body").Key(sessions).Key(review)).Grow(1).FillWidth().MinHeight(0)
-		if review {
+		body := ui.Scroll(c.Key("chat-body").Key(sessions).Key(showReview)).Grow(1).FillWidth().MinHeight(0)
+		if showReview {
 			body.TrackScroll(&state.reviewScroll)
 		} else if !sessions {
 			body.TrackScroll(&state.scroll).Focusable().Label(s.tr("scholarACPChat"))
@@ -89,10 +95,10 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState, singlePane bool
 		body.Children(func() {
 			ui.Column(c).FillWidth().Padding(8, scholarReaderInset).Gap(6).Children(func() {
 				switch {
-				case a.batch != nil:
+				case showReview && a.batch != nil:
 					s.scholarACPError(c.Key("error"), p)
 					s.scholarPatchSetView(c, p, a.batch)
-				case a.patch != nil:
+				case showReview && a.patch != nil:
 					s.scholarACPError(c.Key("error"), p)
 					s.scholarPatchView(c, p, a.patch)
 				case sessions:
@@ -111,6 +117,9 @@ func (s *Shell) scholarAgentView(c *ui.Context, p *scholarState, singlePane bool
 						}
 					}
 					s.scholarACPTranscript(c, p, body.Bounds())
+					if review && s.scholarACPAction(c.Key("review"), "file-diff", s.tr("scholarShowReview"), true).Clicked() {
+						s.leaveScholarReviewChat(p)
+					}
 				}
 			})
 		})
@@ -136,9 +145,9 @@ func (s *Shell) scholarACPHeader(c *ui.Context, p *scholarState, singlePane, ses
 	state := &a.acp
 	title := s.tr("scholarWritingAssistant")
 	review := a.pendingPatch() != nil
-	if review {
+	if review && !state.reviewChat {
 		title = s.tr("scholarShowReview")
-	} else if sessions {
+	} else if sessions && !review {
 		title = s.tr("scholarACPHistory")
 	}
 	subtitle := state.thread.Label
@@ -154,6 +163,19 @@ func (s *Shell) scholarACPHeader(c *ui.Context, p *scholarState, singlePane, ses
 		}
 	}, func() {
 		blocked := p.busy || review
+		if review {
+			glyph, label := "message-square", "scholarACPChat"
+			if state.reviewChat {
+				glyph, label = "file-diff", "scholarShowReview"
+			}
+			if s.scholarCompactIcon(c.Key("review-chat"), glyph, s.tr(label), state.reviewChat).Clicked() {
+				if state.reviewChat {
+					s.leaveScholarReviewChat(p)
+				} else {
+					state.reviewChat, state.scrollToEnd = true, true
+				}
+			}
+		}
 		if len(state.forms) > 0 && p.cancelJob != nil &&
 			s.scholarCompactIcon(c.Key("stop-form"), "x", s.tr("scholarAgentCancel"), false).Clicked() {
 			p.cancelJob()
@@ -182,6 +204,13 @@ func (s *Shell) scholarACPHeader(c *ui.Context, p *scholarState, singlePane, ses
 			s.closeScholarInspector(p)
 		}
 	})
+}
+
+func (s *Shell) leaveScholarReviewChat(p *scholarState) {
+	p.agent.acp.reviewChat = false
+	if p.agent.trial.show {
+		s.closeScholarInspector(p)
+	}
 }
 
 func (s *Shell) scholarACPError(c *ui.Context, p *scholarState) {
@@ -261,7 +290,7 @@ func (s *Shell) scholarACPTranscript(c *ui.Context, p *scholarState, viewport ui
 		s.scholarACPMessage(c.Key("history-message").Key(i), p, m, sources, attachments[m.ID], multipleAttachments)
 	}
 	if p.agent.running {
-		m := scholarACPUserMessage(state.progress, p.agent.instruction)
+		m := scholarACPUserMessage(state.progress, s.scholarACPInstruction(&p.agent))
 		s.scholarACPMessage(c.Key("pending-message"), p, m, sources, attachments[m.ID], multipleAttachments)
 	}
 	for i, m := range state.progress.Messages {
@@ -389,14 +418,19 @@ func (s *Shell) scholarACPComposer(c *ui.Context, p *scholarState) {
 				s.scholarACPModelDetails(c.Key("model-details"), p)
 			}
 			ui.Box(c).Grow(1)
-			ready := !p.busy && command != "" && connection.ready()
+			hasNotes := state.hasManuscriptNotes()
+			ready := !p.busy && (command != "" || hasNotes) && connection.ready()
 			if a.running {
 				if ui.Button(c.Key("stop"), s.tr("scholarAgentCancel")).Height(26).Shrink(0).FontSize(12).
 					Disabled(p.cancelJob == nil).Clicked() && p.cancelJob != nil {
 					p.cancelJob()
 				}
 			} else {
-				send := ui.PrimaryButton(c.Key("send"), s.tr("scholarAgentSend")).Height(26).Shrink(0).FontSize(12).
+				label := "scholarAgentSend"
+				if command == "" && hasNotes {
+					label = "scholarACPSendNotes"
+				}
+				send := ui.PrimaryButton(c.Key("send"), s.tr(label)).Height(26).Shrink(0).FontSize(12).
 					Disabled(!ready).Clicked()
 				if ready && (send || input.Shortcut(ui.Cmd, ui.KeyEnter)) {
 					s.sendScholarACP(p)
@@ -422,7 +456,7 @@ func (s *Shell) scholarACPComposerReferences(c *ui.Context, p *scholarState) {
 		})
 	}
 	if remove >= 0 {
-		state.quotes = slices.Delete(state.quotes, remove, remove+1)
+		p.agent.removeACPQuote(remove)
 		state.previewQuote, state.previewImage = 0, nil
 	}
 }
@@ -474,6 +508,10 @@ func (s *Shell) scholarACPQuotePreview(c *ui.Context, p *scholarState, i int, re
 	if len(ref.png) > 0 {
 		icon = "image"
 	}
+	if ref.note != "" {
+		icon = "message-square"
+		title = "p." + strconv.Itoa(ref.notePage) + " · " + strings.Join(strings.Fields(ref.note), " ")
+	}
 	button := s.scholarACPAction(c, icon, title, false).Grow(1)
 	if button.Clicked() {
 		if state.previewQuote == i+1 {
@@ -497,8 +535,12 @@ func (s *Shell) scholarACPQuotePreview(c *ui.Context, p *scholarState, i int, re
 			if state.previewImage != nil {
 				w, h := state.previewImage.Size()
 				ui.Image(c, state.previewImage).FillWidth().AspectRatio(float32(w) / float32(h)).Label(title)
-			} else {
+			} else if ref.text != "" {
 				ui.Text(c, ref.text).Wrap().Padding(8).FontSize(12)
+			}
+			if ref.note != "" {
+				ui.Text(c.Key("note"), ref.note).Wrap().Padding(8).FontSize(12)
+				ui.Text(c.Key("location"), ref.locator).Wrap().Padding(8).FontSize(11).TextColor(s.ch.muted)
 			}
 		})
 	})
@@ -796,7 +838,16 @@ func acpQuoteBlocks(info acp.InitializeResponse, quote scholarACPQuote) []acp.Co
 	if quote.id != "" {
 		source := quote.sentSource("", "")
 		label = "\n" + source.marker() + " " + strings.Join(strings.Fields(label), " ") + "\n"
+		if quote.note != "" {
+			label += "Requested revision for " + quote.manuscript + ":\n" + quote.note + "\n"
+			if quote.text != "" {
+				label += "Printed excerpt:\n"
+			}
+		}
 		if len(quote.png) > 0 {
+			if quote.note != "" && quote.text != "" {
+				label += quote.text + "\n"
+			}
 			return []acp.ContentBlock{acp.TextBlock(label), {Image: &acp.ContentBlockImage{
 				Type: "image", MimeType: "image/png", Data: base64.StdEncoding.EncodeToString(quote.png),
 			}}, acp.TextBlock("\n" + source.endMarker())}
@@ -805,7 +856,7 @@ func acpQuoteBlocks(info acp.InitializeResponse, quote scholarACPQuote) []acp.Co
 	} else if quote.text != "" {
 		label += "\n" + quote.text
 	}
-	if quote.text != "" {
+	if quote.text != "" || quote.note != "" {
 		uri := "nomo://reference/" + url.PathEscape(quote.label)
 		if quote.id != "" {
 			uri = "nomo://reference/" + quote.id
@@ -841,13 +892,19 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 	if thread.Workspace == "" {
 		thread.Workspace = scholar.NewACPWorkspace()
 	}
-	instruction := strings.TrimSpace(a.instruction)
+	instruction := s.scholarACPInstruction(a)
+	hasNotes := a.acp.hasManuscriptNotes()
 	quotes := slices.Clone(a.acp.quotes)
+	known, imageOK := scholarACPImageCapability()
 	var textBytes = len(instruction)
 	hasSources := len(quotes) > 0
 	for i, ref := range quotes {
+		if len(ref.png) > 0 && known && !imageOK {
+			p.err = s.tr("scholarACPImageUnsupported")
+			return
+		}
 		quotes[i].id = scholarACPSourceID()
-		textBytes += len(ref.text) + len(ref.label) + len(ref.locator)
+		textBytes += ref.textBytes()
 	}
 	for i, part := range a.parts {
 		if i != 0 && a.include[i] && part != "" {
@@ -868,6 +925,7 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 		}
 	}
 	fileBytes := 0
+	fileBudget, limitLabel := scholarACPFileBudget(hasNotes)
 	for _, f := range targets {
 		if !s.scholarTargetValid(f.target) {
 			p.err = s.tr("scholarStaleBaseline")
@@ -879,11 +937,20 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 			return
 		}
 		fileBytes += len(f.target.before)
-		if len(bases) == 16 || fileBytes > 32<<10 {
-			p.err = s.tr("scholarFileContextLimit")
+		if len(bases) == 16 || fileBytes > fileBudget || len(f.target.before) > scholar.ACPFileLimit {
+			p.err = s.tr(limitLabel)
 			return
 		}
 		bases[name], files[name] = f.target, f.target.before
+	}
+	for _, ref := range quotes {
+		if ref.manuscriptTarget == 0 {
+			continue
+		}
+		if !slices.ContainsFunc(targets, func(file scholarContextFile) bool { return file.target.tabID == ref.manuscriptTarget }) {
+			p.err = s.tr("scholarACPNoteMissingFile")
+			return
+		}
 	}
 	settings := slices.Clone(a.acp.settings)
 	contextWindow := s.scholarACPWindowOverride(&a.acp)
@@ -953,6 +1020,9 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 			}
 		}
 		blocks := []acp.ContentBlock{acp.TextBlock(instruction)}
+		if hasNotes {
+			blocks = append(blocks, acp.TextBlock("Follow the requested revisions in each marked manuscript region. Use the source location when available. Match the printed excerpt or screenshot against the attached manuscript copies when locating other regions."))
+		}
 		if len(files) > 0 {
 			names := make([]string, 0, len(files))
 			for name := range files {
@@ -1091,6 +1161,7 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 				}
 				switch {
 				case len(patches) > 0:
+					a.acp.reviewChat = false
 					a.acp.reviewScroll.X, a.acp.reviewScroll.Y = 0, 0
 					if len(patches) == 1 && len(bases) == 1 && !wasMulti && warning == "" {
 						a.patch = patches[0]
@@ -1106,6 +1177,14 @@ func (s *Shell) sendScholarACP(p *scholarState) {
 			}
 		}, err
 	})
+}
+
+func (s *Shell) scholarACPInstruction(a *scholarAgentState) string {
+	instruction := strings.TrimSpace(a.instruction)
+	if instruction == "" && a.acp.hasManuscriptNotes() {
+		return s.tr("scholarACPApplyNotes")
+	}
+	return instruction
 }
 
 func scholarACPUserMessage(progress scholar.ACPProgress, instruction string) scholar.ACPMessage {

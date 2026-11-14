@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,11 +22,14 @@ type scholarTrialView struct {
 	ownerBatch                    *scholarPatchSet
 	identities                    map[int]*Tab
 	paths                         map[int]string
-	anchors                       map[*scholarPatch]typeset.PageAnchor
+	anchors                       map[*scholarPatch]typeset.PDFPosition
+	revealPDF                     typeset.PDFPosition
 	pdfs                          *typeset.TrialPDFPair
 	sources                       []scholarTrialSource
 	source                        scholarTrialSourceState
 	pageList                      ui.ListState
+	pageScroll                    ui.ScrollState
+	pageViewport                  ui.Rect
 	cached                        map[int]scholarTrialPage
 	cacheBytes                    int
 	firstVisible, failedPage      int
@@ -37,7 +41,7 @@ type scholarTrialView struct {
 	markChanges, searched         bool
 	searching                     bool
 	split                         float32
-	show                          bool
+	show, showSource              bool
 	versions                      map[int]uint64
 }
 
@@ -53,37 +57,39 @@ func (v *scholarTrialView) close() {
 }
 
 func (s *Shell) trialScholarPatchSet(p *scholarState, set *scholarPatchSet) {
-	s.trialScholarHunks(p, append([]*scholarPatch(nil), set.hunks...))
+	s.trialScholarHunks(p, slices.Clone(set.hunks))
 }
 
-func (s *Shell) resumeScholarTrial(p *scholarState, all bool) {
+func (s *Shell) resumeScholarTrial(p *scholarState, all, showSource bool) {
 	if set := p.agent.batch; set != nil && all {
-		s.trialScholarPatchSet(p, set)
+		s.trialScholarRevisions(p, slices.Clone(set.hunks), nil, showSource)
 	} else if patch := p.agent.pendingPatch(); patch != nil {
-		s.trialScholarPatch(p, patch)
+		s.trialScholarRevisions(p, []*scholarPatch{patch}, nil, showSource)
 	}
 }
 
 func (s *Shell) trialScholarEdit(p *scholarState, revision *scholarChangeBatch) {
-	s.trialScholarRevisions(p, nil, revision)
+	s.trialScholarRevisions(p, nil, revision, true)
 }
 func (s *Shell) trialScholarHunks(p *scholarState, hunks []*scholarPatch) {
-	s.trialScholarRevisions(p, hunks, nil)
+	s.trialScholarRevisions(p, hunks, nil, false)
 }
-func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, revision *scholarChangeBatch) {
-	if p.busy || len(hunks) == 0 && revision == nil {
+func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, revision *scholarChangeBatch, showSource bool) {
+	if p.busy || len(hunks) == 0 && revision == nil || !s.canPreviewTypeset(s.activeTab()) {
 		return
 	}
-	if s.scholarTab(p.project.Main) == nil {
-		prior := s.activeTab()
-		s.OpenFiles([]string{p.project.Main})
-		if s.scholarTab(p.project.Main) == nil {
+	reviewTab := s.activeTab()
+	project := p.project
+	if typeset.IsLaTeXPath(reviewTab.Path) != typeset.IsLaTeXPath(project.Main) {
+		project.Main = reviewTab.Path
+	}
+	if s.scholarTab(project.Main) == nil {
+		s.OpenFiles([]string{project.Main})
+		if s.scholarTab(project.Main) == nil {
 			p.err = s.tr("scholarMainUnavailable")
 			return
 		}
-		if isManuscript(prior) {
-			s.activate(s.findTabIndex(prior.ID))
-		}
+		s.activate(s.findTabIndex(reviewTab.ID))
 	}
 	snapshots := make(map[string]editor.Snapshot)
 	versions := make(map[int]uint64)
@@ -112,11 +118,22 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 		versions[t.ID] = snap.Version()
 		identities[t.ID], paths[t.ID] = t, t.Path
 	}
+	patchesByFile := make(map[string][]scholarTrialPatch)
 	for _, h := range hunks {
 		if !s.scholarTargetValid(h.target) {
 			p.err = s.tr("scholarStaleBaseline")
 			return
 		}
+		name, err := scholar.Relative(project.Root, h.target.path)
+		if err != nil {
+			p.err = err.Error()
+			return
+		}
+		if _, ok := snapshots[name]; !ok {
+			p.err = s.tr("scholarStaleBaseline")
+			return
+		}
+		patchesByFile[name] = append(patchesByFile[name], scholarTrialPatch{patch: h, target: h.target, next: h.next})
 	}
 	if revision != nil {
 		t := s.tabWithID(revision.change.tabID)
@@ -125,10 +142,8 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 			return
 		}
 	}
-	project := p.project
 	ownerPatch, ownerBatch := p.agent.patch, p.agent.batch
 	allPending := revision == nil && ownerBatch != nil && len(hunks) == len(ownerBatch.hunks)
-	reviewTab := s.activeTab()
 	selectedPatch := p.agent.pendingPatch()
 	p.agent.trial.close()
 	p.agent.trialPreparing = true
@@ -155,18 +170,14 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 					out[name] = &scholarSnapshotReader{snap: snap}
 					continue
 				}
-				var edits []editor.Edit
-				var patches []*scholarPatch
-				for _, h := range hunks {
-					n, _ := scholar.Relative(project.Root, h.target.path)
-					if n == name {
-						edits = append(edits, editor.Edit{Start: h.target.start, End: h.target.end, Text: h.next})
-						patches = append(patches, h)
-					}
-				}
-				if len(edits) == 0 {
+				patches := patchesByFile[name]
+				if len(patches) == 0 {
 					out[name] = &scholarSnapshotReader{snap: snap}
 					continue
+				}
+				edits := make([]editor.Edit, 0, len(patches))
+				for _, h := range patches {
+					edits = append(edits, editor.Edit{Start: h.target.start, End: h.target.end, Text: h.next})
 				}
 				// The source budget is checked before making the temporary edited rope.
 				buf := editor.NewBuffer(snap.String())
@@ -196,25 +207,41 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 		if err != nil {
 			return nil, nil, err
 		}
-		var anchor typeset.PageAnchor
-		anchors := make(map[*scholarPatch]typeset.PageAnchor, len(hunks))
-		if len(hunks) == 0 {
-			anchor = after.Anchor(ctx, strings.TrimSpace(revision.change.after))
-		} else {
-			for _, h := range hunks {
-				a := after.Anchor(ctx, strings.TrimSpace(h.next))
-				if a.Page == 0 && strings.TrimSpace(h.next) == "" {
-					a = before.Anchor(ctx, strings.TrimSpace(h.target.before))
-				}
-				anchors[h] = a
+		position := func(session *typeset.Session, path string, snap editor.Snapshot, offset int, text string) typeset.PDFPosition {
+			if a := session.Anchor(ctx, strings.TrimSpace(text)); a.Page > 0 {
+				return typeset.PDFPosition{Page: a.Page, Y: a.Y / a.PageH}
 			}
-			initial := selectedPatch
-			if _, ok := anchors[initial]; !ok {
-				initial = hunks[0]
+			if typeset.IsLaTeXPath(project.Main) && ctx.Err() == nil {
+				line := snap.LineOf(offset)
+				return session.PositionForProjectLine(ctx, path, line, strings.TrimSuffix(strings.TrimPrefix(snap.Line(line), "\ufeff"), "\r"))
 			}
-			selectedPatch, anchor = initial, anchors[initial]
+			return typeset.PDFPosition{}
 		}
-		page := min(max(1, anchor.Page), nAfter)
+		var initial typeset.PDFPosition
+		anchors := make(map[*scholarPatch]typeset.PDFPosition, len(hunks))
+		if len(hunks) == 0 {
+			if a := after.Anchor(ctx, strings.TrimSpace(revision.change.after)); a.Page > 0 {
+				initial = typeset.PDFPosition{Page: a.Page, Y: a.Y / a.PageH}
+			}
+		} else {
+			for _, source := range sources {
+				shift := 0
+				for _, h := range source.patches {
+					if strings.TrimSpace(h.next) == "" {
+						anchors[h.patch] = position(before, h.target.path, source.before, h.target.start, h.target.before)
+					} else {
+						path := filepath.Join(before.TrialRoot(), source.path)
+						anchors[h.patch] = position(after, path, source.after, h.target.start+shift, h.next)
+					}
+					shift += len(h.next) - (h.target.end - h.target.start)
+				}
+			}
+			if _, ok := anchors[selectedPatch]; !ok {
+				selectedPatch = hunks[0]
+			}
+			initial = anchors[selectedPatch]
+		}
+		page := min(max(1, initial.Page), max(nBefore, nAfter))
 		pdfs, err := typeset.KeepTrialPDFs(before, after)
 		if err != nil {
 			return nil, nil, err
@@ -225,11 +252,13 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 			return nil, nil, err
 		}
 		result := newScholarTrialPage(diff)
-		sourceIndex := scholarTrialInitialSource(sources, selectedPatch)
+		slices.SortFunc(sources, func(a, b scholarTrialSource) int { return strings.Compare(a.path, b.path) })
+		sourceIndex := -1
 		var sourceView *editor.DiffState
 		var sourceHunks []editor.DiffHunk
 		var sourceTargets []int
-		if sourceIndex >= 0 {
+		if showSource && len(sources) > 0 {
+			sourceIndex = scholarTrialInitialSource(sources, selectedPatch)
 			sourceView, sourceHunks, sourceTargets = sources[sourceIndex].diff()
 		}
 		return func() {
@@ -296,13 +325,14 @@ func (s *Shell) trialScholarRevisions(p *scholarState, hunks []*scholarPatch, re
 					pdfs: pdfs, pagesBefore: nBefore, pagesAfter: nAfter,
 					page: page, pageInput: strconv.Itoa(page), tabID: t.ID,
 					versions: versions, identities: identities, paths: paths, anchors: anchors,
-					show: true, markChanges: true, pending: revision == nil, allPending: allPending,
+					show: true, showSource: showSource, markChanges: true, pending: revision == nil, allPending: allPending,
 					ownerPatch: ownerPatch, ownerBatch: ownerBatch,
 					sources: sources, source: scholarTrialSourceState{index: sourceIndex, diff: sourceView, hunks: sourceHunks, targets: sourceTargets},
 					firstVisible: -1,
 				}
 				p.agent.trial.keepPage(page, result)
 				p.agent.trial.jumpPage(page)
+				p.agent.trial.revealPDF = initial
 				p.agent.trial.source.reveal(selectedPatch)
 				installed = true
 				s.focusEditor = true

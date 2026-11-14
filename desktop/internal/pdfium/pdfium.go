@@ -232,6 +232,23 @@ func withText(page uintptr, visit func(uintptr, int32) error) error {
 // boxes in points from the upper-left corner of each displayed page.
 // A zero page number visits the whole document.
 func VisitTextPages(ctx context.Context, path string, number int, visit func(int, TextPage) error) error {
+	return visitTextPages(ctx, path, number, false, visit)
+}
+
+// ReadSelectionPage emits individual CJK glyph boxes for text selection.
+func ReadSelectionPage(ctx context.Context, path string, number int) (TextPage, error) {
+	if number < 1 {
+		return TextPage{}, errors.New("invalid PDF selection page")
+	}
+	var result TextPage
+	err := visitTextPages(ctx, path, number, true, func(_ int, p TextPage) error {
+		result = p
+		return nil
+	})
+	return result, err
+}
+
+func visitTextPages(ctx context.Context, path string, number int, splitCJK bool, visit func(int, TextPage) error) error {
 	return withDocument(ctx, path, func(doc uintptr, count int) error {
 		first, last := number, number
 		if number == 0 {
@@ -242,7 +259,7 @@ func VisitTextPages(ctx context.Context, path string, number int, visit func(int
 				return err
 			}
 			err := withPage(doc, count, n, func(page uintptr) error {
-				p, err := extractBoxes(ctx, page)
+				p, err := extractBoxes(ctx, page, splitCJK)
 				if err != nil {
 					return err
 				}
@@ -256,7 +273,7 @@ func VisitTextPages(ctx context.Context, path string, number int, visit func(int
 	})
 }
 
-func extractBoxes(ctx context.Context, page uintptr) (TextPage, error) {
+func extractBoxes(ctx context.Context, page uintptr, splitCJK bool) (TextPage, error) {
 	w, h := dimensions(page)
 	p := TextPage{Width: w, Height: h}
 	if !(w > 0 && h > 0 && w < 1e6 && h < 1e6) {
@@ -284,6 +301,7 @@ func extractBoxes(ctx context.Context, page uintptr) (TextPage, error) {
 		var line Line
 		var word Word
 		var value strings.Builder
+		previousCJK := false
 		flushWord := func() {
 			if value.Len() > 0 {
 				word.Text = value.String()
@@ -328,7 +346,7 @@ func extractBoxes(ctx context.Context, page uintptr) (TextPage, error) {
 				height := max(word.B-word.Y, bot-y)
 				if y > word.B || bot < word.Y || x-word.R > height*2 {
 					flushLine()
-				} else if x-word.R > height*.32 {
+				} else if x-word.R > height*.32 || splitCJK && (previousCJK || IsCJK(r)) && !unicode.IsMark(r) {
 					flushWord()
 				}
 			}
@@ -339,11 +357,17 @@ func extractBoxes(ctx context.Context, page uintptr) (TextPage, error) {
 				word.R, word.B = max(word.R, rgt), max(word.B, bot)
 			}
 			value.WriteRune(r)
+			previousCJK = splitCJK && IsCJK(r)
 		}
 		flushLine()
 		return nil
 	})
 	return p, err
+}
+
+func IsCJK(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) ||
+		r >= 0x3000 && r <= 0x303f || r >= 0xff00 && r <= 0xffef
 }
 
 // Text reads the full text layer up to the caller's UTF-8 byte budget.

@@ -89,16 +89,16 @@ func (p *compilePane) requestSourcePosition(line int) {
 	p.sendSourcePosition(sourcePageRequest{line: line, version: p.fullVersion, serial: p.sync.serial})
 }
 
-func (p *compilePane) requestPDFPosition(page int, x, y float64) {
+func (p *compilePane) requestPDFPosition(page int, x, y float64, openSource bool) {
 	if !p.canLocate() {
 		return
 	}
 	p.sync.invalidate()
-	p.sendPDFPosition(pageClick{page: page, version: p.fullVersion, serial: p.sync.serial, x: x, y: y})
+	p.sendPDFPosition(pageClick{page: page, version: p.fullVersion, serial: p.sync.serial, x: x, y: y, openSource: openSource})
 }
 
 func (p *compilePane) requestPDFEdit(page int, x, y float64) {
-	if p.pageEdit != nil {
+	if p.pageEdit != nil || !p.canLocate() {
 		return
 	}
 	p.sync.invalidate()

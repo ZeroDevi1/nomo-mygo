@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"image/color"
 	"image/draw"
 	"os"
 	"path/filepath"
@@ -65,8 +66,9 @@ func (p *TrialPDFPair) cleanupDir() string {
 const trialDiffEdge = 1200
 
 type TrialPageDiff struct {
-	After                      image.Image
+	Raster                     image.Image
 	Regions                    []image.Rectangle
+	Additions                  []image.Rectangle
 	Excerpts                   []TrialPDFExcerpt
 	Changed, DimensionsChanged bool
 }
@@ -74,15 +76,16 @@ type TrialPageDiff struct {
 // TrialPDFExcerpt is a cropped baseline raster to insert before At, in
 // proposed-page pixels. X preserves the old content's horizontal position.
 type TrialPDFExcerpt struct {
-	Raster image.Image
-	At, X  int
+	Raster  image.Image
+	Regions []image.Rectangle
+	At, X   int
 }
 
-// DiffPage marks changes at the same page number on the proposed PDF. The
-// baseline raster is temporary; callers only display the proposed page.
+// DiffPage compares the same page number in both PDFs, including pages that
+// exist on only one side. For paired pages only crops of the baseline survive.
 func (p *TrialPDFPair) DiffPage(ctx context.Context, page int) (TrialPageDiff, error) {
 	p.mu.Lock()
-	if p.closed || page < 1 || page > p.pages[1] {
+	if p.closed || page < 1 || page > max(p.pages[0], p.pages[1]) {
 		p.mu.Unlock()
 		return TrialPageDiff{}, errors.New("invalid trial PDF page")
 	}
@@ -117,7 +120,49 @@ func (p *TrialPDFPair) DiffPage(ctx context.Context, page int) (TrialPageDiff, e
 		}
 		imgs[i] = rgba
 	}
-	return compareTrialRasters(ctx, imgs[0], imgs[1])
+	if imgs[0] == nil || imgs[1] == nil {
+		raster := imgs[1]
+		if raster == nil {
+			raster = imgs[0]
+		}
+		return TrialPageDiff{Raster: raster, Changed: true}, ctx.Err()
+	}
+	rows, err := compareTrialRasters(ctx, imgs[0], imgs[1])
+	if err != nil {
+		return TrialPageDiff{}, err
+	}
+	pageBounds := image.Rectangle{Max: imgs[1].Bounds().Size()}
+	bands := trialPDFBands(pageBounds, rows)
+	resized := imgs[0].Bounds().Size() != pageBounds.Size()
+	diff := TrialPageDiff{
+		Raster: imgs[1], Changed: len(bands) > 0 || resized, DimensionsChanged: resized,
+	}
+	if len(bands) == 0 {
+		return diff, nil
+	}
+	var oldText, newText *pdfSourcePage
+	if !diff.DimensionsChanged {
+		oldText, _ = readPDFSourcePage(ctx, "", filepath.Join(dir, trialPDFNames[0]), page)
+		if oldText != nil {
+			newText, _ = readPDFSourcePage(ctx, "", filepath.Join(dir, trialPDFNames[1]), page)
+		}
+	}
+	marks := make([][]image.Rectangle, len(bands))
+	for i, band := range bands {
+		old, added, ok := trialPDFWordMarks(ctx, oldText, newText, imgs[0], imgs[1], pageBounds, band)
+		if ok {
+			marks[i] = old
+			diff.Additions = append(diff.Additions, added...)
+		}
+	}
+	diff.Excerpts = trialPDFExcerpts(imgs[0], pageBounds, rows, bands, marks)
+	for i, band := range bands {
+		// A coarse mark remains visible for old text outside the crop budget.
+		if marks[i] == nil || len(marks[i]) > 0 {
+			diff.Regions = append(diff.Regions, band)
+		}
+	}
+	return diff, ctx.Err()
 }
 
 type trialDiffRow struct {
@@ -125,22 +170,14 @@ type trialDiffRow struct {
 	oldChanged              bool
 }
 
-func compareTrialRasters(ctx context.Context, before, after *image.RGBA) (TrialPageDiff, error) {
-	diff := TrialPageDiff{After: after}
-	if before == nil {
-		diff.Changed = true
-		return diff, ctx.Err()
-	}
+func compareTrialRasters(ctx context.Context, before, after *image.RGBA) ([]trialDiffRow, error) {
 	oldBounds, newBounds := before.Bounds(), after.Bounds()
-	diff.DimensionsChanged = oldBounds.Size() != newBounds.Size()
-	const tolerance = 12
 	w, h := newBounds.Dx(), newBounds.Dy()
-	page := image.Rect(0, 0, w, h)
 	rows := make([]trialDiffRow, h)
 	for y := range rows {
 		if y%24 == 0 {
 			if err := ctx.Err(); err != nil {
-				return TrialPageDiff{}, err
+				return nil, err
 			}
 		}
 		row := &rows[y]
@@ -158,16 +195,13 @@ func compareTrialRasters(ctx context.Context, before, after *image.RGBA) (TrialP
 			if min(b.R, b.G, b.B) < 224 {
 				row.newInk = row.newInk.Union(px)
 			}
-			if max(channelDelta(a.R, b.R), channelDelta(a.G, b.G), channelDelta(a.B, b.B)) > tolerance {
+			if trialPixelChanged(a, b) {
 				row.changed = row.changed.Union(px)
 				row.oldChanged = row.oldChanged || oldInk
 			}
 		}
 	}
-	diff.Regions = trialPDFBands(page, rows)
-	diff.Changed = diff.DimensionsChanged || len(diff.Regions) > 0
-	diff.Excerpts = trialPDFExcerpts(before, page, rows, diff.Regions)
-	return diff, nil
+	return rows, nil
 }
 
 // Group nearby changes in the reading direction, then extend each band's
@@ -194,21 +228,31 @@ func trialPDFBands(page image.Rectangle, rows []trialDiffRow) []image.Rectangle 
 	return bands
 }
 
-func trialPDFExcerpts(before *image.RGBA, page image.Rectangle, rows []trialDiffRow, bands []image.Rectangle) []TrialPDFExcerpt {
+func trialPDFExcerpts(before *image.RGBA, page image.Rectangle, rows []trialDiffRow, bands []image.Rectangle, deletions [][]image.Rectangle) []TrialPDFExcerpt {
 	// Keep representative crops when a layout shift affects much of a page.
 	// The baseline raster itself is not kept by the reader.
 	budget := min(360, page.Dy()/3)
 	oldBounds := before.Bounds()
 	clip := page.Intersect(image.Rect(0, 0, oldBounds.Dx(), oldBounds.Dy()))
 	var excerpts []TrialPDFExcerpt
-	for _, band := range bands {
+	for i, band := range bands {
 		if budget < 18 || len(excerpts) == 4 {
 			break
 		}
+		marks := deletions[i]
+		if marks != nil && len(marks) == 0 {
+			continue
+		}
 		var oldText image.Rectangle
-		for y := band.Min.Y; y < band.Max.Y; y++ {
-			if rows[y].oldChanged {
-				oldText = oldText.Union(rows[y].oldInk)
+		if len(marks) != 0 {
+			for _, mark := range marks {
+				oldText = oldText.Union(mark)
+			}
+		} else {
+			for y := band.Min.Y; y < band.Max.Y; y++ {
+				if rows[y].oldChanged {
+					oldText = oldText.Union(rows[y].oldInk)
+				}
 			}
 		}
 		if oldText.Dy() < 5 || oldText.Dx() < 6 {
@@ -243,10 +287,27 @@ func trialPDFExcerpts(before *image.RGBA, page image.Rectangle, rows []trialDiff
 		}
 		raster := image.NewRGBA(image.Rect(0, 0, crop.Dx(), crop.Dy()))
 		draw.Draw(raster, raster.Bounds(), before, crop.Min.Add(oldBounds.Min), draw.Src)
-		excerpts = append(excerpts, TrialPDFExcerpt{Raster: raster, At: at, X: crop.Min.X})
+		if len(marks) == 0 {
+			marks = []image.Rectangle{raster.Bounds()}
+		} else {
+			fullyShown := true
+			for j, mark := range marks {
+				fullyShown = fullyShown && mark.In(crop)
+				marks[j] = mark.Intersect(crop).Sub(crop.Min)
+			}
+			if fullyShown {
+				deletions[i] = marks[:0]
+			}
+		}
+		excerpts = append(excerpts, TrialPDFExcerpt{Raster: raster, Regions: marks, At: at, X: crop.Min.X})
 		budget -= crop.Dy()
 	}
 	return excerpts
+}
+
+func trialPixelChanged(a, b color.RGBA) bool {
+	const tolerance = 12
+	return max(channelDelta(a.R, b.R), channelDelta(a.G, b.G), channelDelta(a.B, b.B)) > tolerance
 }
 
 func channelDelta(a, b uint8) uint8 { return max(a, b) - min(a, b) }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+	"nomo/desktop/typeset"
 )
 
 const scholarReviewMaxFragments = 64
@@ -99,8 +100,14 @@ func (s *Shell) scholarReviewPatch(p *scholarState, tab *Tab) *scholarPatch {
 
 func (s *Shell) presentScholarReview(p *scholarState) {
 	p.agent.reviewHidden = true
-	if p.winSettings == nil && !p.accountOpen {
-		s.openScholarReview(p)
+	if p.winSettings != nil || p.accountOpen {
+		return
+	}
+	s.openScholarReview(p)
+	tab := s.activeTab()
+	if !p.agent.reviewHidden && s.canPreviewTypeset(tab) &&
+		(!typeset.IsLaTeXPath(tab.Path) || typeset.LaTeXReady()) {
+		s.resumeScholarTrial(p, true, false)
 	}
 }
 

@@ -2,7 +2,6 @@ package shell
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"slices"
 	"sort"
@@ -27,7 +26,8 @@ type scholarAppliedFile struct {
 }
 
 type scholarContextFile struct {
-	target scholarTarget
+	target   scholarTarget
+	fromNote bool
 }
 
 func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
@@ -39,15 +39,10 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 		if _, err := scholar.Relative(p.project.Root, t.Path); err != nil {
 			continue
 		}
-		exists := false
-		for _, f := range a.files {
-			if f.target.tabID == t.ID {
-				exists = true
-				break
-			}
-		}
-		if (!exists || !a.multi) && ui.Button(c.Key(t.ID), "+ "+t.Name(s.untitledName)).Disabled(p.busy).Clicked() {
-			if exists {
+		existing := slices.IndexFunc(a.files, func(f scholarContextFile) bool { return f.target.tabID == t.ID })
+		if (existing < 0 || !a.multi || a.files[existing].fromNote) && ui.Button(c.Key(t.ID), "+ "+t.Name(s.untitledName)).Disabled(p.busy).Clicked() {
+			if existing >= 0 {
+				a.files[existing].fromNote = false
 				a.multi, a.attachments = true, false
 				continue
 			}
@@ -56,12 +51,12 @@ func (s *Shell) scholarFileContexts(c *ui.Context, p *scholarState) {
 			for _, f := range a.files {
 				total += len(f.target.before)
 			}
-			if total > 32<<10 {
-				p.err = s.tr("scholarFileContextLimit")
+			budget, label := scholarACPFileBudget(a.acp.hasManuscriptNotes())
+			if total > budget || snap.Len() > scholar.ACPFileLimit {
+				p.err = s.tr(label)
 				continue
 			}
-			text := snap.String()
-			a.files = append(a.files, scholarContextFile{target: scholarTarget{tabID: t.ID, path: t.Path, start: 0, end: snap.Len(), version: snap.Version(), before: text, digest: sha256.Sum256([]byte(text))}})
+			a.files = append(a.files, scholarContextFile{target: fullManuscriptTarget(t, snap)})
 			a.multi, a.attachments = true, false
 			p.err = ""
 		}
@@ -79,14 +74,20 @@ func (s *Shell) scholarAttachedFiles(c *ui.Context, p *scholarState) {
 		ck := c.Key("context-" + fmt.Sprint(f.target.tabID))
 		ui.Row(ck).FillWidth().Gap(4).Children(func() {
 			name, _ := scholar.Relative(p.project.Root, f.target.path)
-			ui.Text(ck, fmt.Sprintf("%s · %d B", name, len(f.target.before))).SingleLine().MinWidth(0).Shrink(1).FontSize(12)
+			label := fmt.Sprintf("%s · %d B", name, len(f.target.before))
+			ui.Text(ck, label).SingleLine().MinWidth(0).Shrink(1).FontSize(12).Tooltip(label)
 			if s.toolButton(ck.Key("remove"), "x", s.tr("scholarRemoveAttachment"), false).Disabled(p.busy).Clicked() {
 				remove = i
 			}
 		})
 	}
 	if remove >= 0 {
+		id := a.files[remove].target.tabID
 		a.files = slices.Delete(a.files, remove, remove+1)
+		if slices.ContainsFunc(a.acp.quotes, func(ref scholarACPQuote) bool { return ref.manuscriptTarget == id }) {
+			a.acp.quotes = slices.DeleteFunc(a.acp.quotes, func(ref scholarACPQuote) bool { return ref.manuscriptTarget == id })
+			a.acp.previewQuote, a.acp.previewImage = 0, nil
+		}
 	}
 }
 
@@ -126,7 +127,7 @@ func (s *Shell) scholarPatchSetView(c *ui.Context, p *scholarState, set *scholar
 	if stale {
 		ui.Text(c.Key("stale"), s.tr("scholarBaselineChanged")).FontSize(11).TextColor(scholarInk(c, "warning"))
 	}
-	ui.Row(c.Key("actions")).FillWidth().AlignItems(ui.Center).Gap(4).Children(func() {
+	ui.Row(c.Key("actions")).FillWidth().Wrap().AlignItems(ui.Center).Gap(4).Children(func() {
 		if stale {
 			if s.scholarACPAction(c.Key("reject"), "undo-2", s.tr("scholarAgentReject"), false).Disabled(p.busy).Clicked() {
 				s.rejectScholarHunk(p)
@@ -138,7 +139,8 @@ func (s *Shell) scholarPatchSetView(c *ui.Context, p *scholarState, set *scholar
 			if s.scholarACPAction(c.Key("cancel"), "x", s.tr("scholarAgentCancelWork"), false).Clicked() {
 				p.cancelCurrent()
 			}
-		} else if s.scholarACPAction(c.Key("trial"), "book-open", s.tr("scholarPDFDiffAll"), false).Disabled(p.busy).Clicked() {
+		} else if s.scholarACPAction(c.Key("trial"), "book-open", s.tr("scholarPDFDiffAll"), false).Disabled(stale || p.busy).Clicked() {
+			s.openScholarReview(p)
 			s.trialScholarPatchSet(p, set)
 		}
 		ui.Spacer(c)
@@ -173,6 +175,7 @@ func (s *Shell) rejectScholarHunk(p *scholarState) {
 	}
 	i := min(set.selected, len(set.hunks)-1)
 	resume, all := p.agent.trial.show && p.agent.trial.pending, p.agent.trial.allPending
+	showSource := p.agent.trial.showSource
 	advance := resume || !p.agent.reviewHidden && s.activeTab() != nil && s.activeTab().ID == set.hunks[i].target.tabID
 	set.hunks = slices.Delete(set.hunks, i, i+1)
 	p.agent.conversation = trimScholarConversation(p.agent.conversation + "\nReview: rejected one proposed change")
@@ -186,7 +189,7 @@ func (s *Shell) rejectScholarHunk(p *scholarState) {
 		if advance {
 			s.openScholarReview(p)
 			if resume {
-				s.resumeScholarTrial(p, all)
+				s.resumeScholarTrial(p, all, showSource)
 			}
 		}
 	}
@@ -199,6 +202,22 @@ func (s *Shell) navigateScholarHunk(p *scholarState, delta int) {
 		}
 		if set := p.agent.batch; set != nil {
 			set.selected = (set.selected + len(set.hunks) + delta) % len(set.hunks)
+			if v := &p.agent.trial; v.show && v.pending && v.allPending {
+				next := set.hunks[set.selected]
+				s.locateScholarTrialPatch(p, next)
+				if v.showSource {
+					file := scholarTrialInitialSource(v.sources, next)
+					if file != v.source.index {
+						v.source.close()
+						s.requestScholarTrialSource(p, file)
+					} else {
+						v.source.reveal(next)
+					}
+				}
+				return
+			}
+		} else if v := &p.agent.trial; v.show && v.pending {
+			return
 		}
 		s.openScholarReview(p)
 		return
@@ -271,6 +290,7 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 			p.agent.applied = applied
 			p.agent.conversation = trimScholarConversation(p.agent.conversation + fmt.Sprintf("\nReview: accepted %d proposed changes", len(chosen)))
 			resume, all := p.agent.trial.show && p.agent.trial.pending, p.agent.trial.allPending
+			showSource := p.agent.trial.showSource
 			p.agent.trial.close()
 			selected := p.agent.pendingPatch()
 			advance := resume || !p.agent.reviewHidden && slices.Contains(chosen, selected) && s.activeTab() != nil && s.activeTab().ID == selected.target.tabID
@@ -319,7 +339,7 @@ func (s *Shell) acceptScholarHunks(p *scholarState, chosen []*scholarPatch) {
 				if advance {
 					s.openScholarReview(p)
 					if resume {
-						s.resumeScholarTrial(p, all)
+						s.resumeScholarTrial(p, all, showSource)
 					}
 				}
 			}

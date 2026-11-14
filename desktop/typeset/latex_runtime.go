@@ -88,10 +88,16 @@ func latexManagementSupported() bool {
 
 var latexInstallGate = make(chan struct{}, 1)
 
+// LaTeXReady checks for XeLaTeX without provisioning the toolchain.
+func LaTeXReady() bool {
+	_, err := tool("xelatex")
+	return err == nil
+}
+
 // PrepareLaTeX provisions the portable toolchain if tool cannot find XeLaTeX. Callers with a preview lifetime can prepare once before their
 // first revision so edits do not restart a download.
 func PrepareLaTeX(ctx context.Context) error {
-	if _, err := tool("xelatex"); err == nil {
+	if LaTeXReady() {
 		return nil
 	}
 	spec, ok := platformLatex()
@@ -107,7 +113,7 @@ func PrepareLaTeX(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if _, err := tool("xelatex"); err == nil {
+	if LaTeXReady() {
 		return nil
 	}
 	if err := installLaTeX(ctx, root, spec); err != nil {

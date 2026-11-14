@@ -63,7 +63,7 @@ func (draft scholarACPDraft) payloadBytes() int {
 		size += len(file.target.before)
 	}
 	for _, quote := range draft.quotes {
-		size += len(quote.text) + len(quote.png)
+		size += quote.textBytes() + len(quote.png)
 	}
 	return size
 }
@@ -195,7 +195,7 @@ func (draft scholarACPDraft) acceptsQuote(ref scholarACPQuote) bool {
 	if len(ref.png) > scholarACPImageLimit || len(ref.text) > scholarSelectionLimit || len(draft.quotes) >= 8 {
 		return false
 	}
-	textBytes := len(ref.text) + len(ref.label) + len(ref.locator) + len(draft.instruction)
+	textBytes := ref.textBytes() + len(draft.instruction)
 	for i, part := range draft.parts {
 		if i != 0 && draft.include[i] {
 			textBytes += len(part)
@@ -205,7 +205,7 @@ func (draft scholarACPDraft) acceptsQuote(ref scholarACPQuote) bool {
 		if len(ref.png) > 0 && len(quote.png) > 0 {
 			return false
 		}
-		textBytes += len(quote.text) + len(quote.label) + len(quote.locator)
+		textBytes += quote.textBytes()
 	}
 	return textBytes <= 48<<10
 }

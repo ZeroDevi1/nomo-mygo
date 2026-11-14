@@ -184,7 +184,7 @@ func (s *Shell) macLayout(c *ui.Context) {
 func (s *Shell) macContent(c *ui.Context) {
 	bar := c.TitleBar()
 	p := s.scholarForTab(s.activeTab())
-	showTabs := s.groups.root != nil || len(s.tabs) > 1 || p != nil && p.references.hasTabs()
+	showTabs := s.groups.root != nil || len(s.tabs) > 0
 	ui.Column(c).Grow(1).Fill().Background(s.ch.content).Children(func() {
 		left := float32(12)
 		if s.scholarSidebarHidden(c) {
@@ -544,9 +544,9 @@ func (s *Shell) moveTab(id, target int) {
 
 // closeButton 画标签的关闭按钮；有未保存修改时平时显示圆点，悬停时显示 ×（与原版一致）。
 func (s *Shell) closeButton(c *ui.Context, tab *Tab, visible bool) {
-	x := ui.ButtonBase(c).Size(18, 18).Radius(4).Tooltip(s.tr("closeTab"))
+	x := ui.ButtonBase(c).Size(18, 18).Radius(4).Label(s.tr("closeTab")).Tooltip(s.tr("closeTab"))
 	if s.pf.windows {
-		x.Size(24, 24).Label(s.tr("closeTab")).FocusRing(true)
+		x.Size(24, 24).FocusRing(true)
 	}
 	hovered := x.Hovered()
 	if hovered {

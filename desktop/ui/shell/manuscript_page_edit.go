@@ -47,6 +47,7 @@ func (s *Shell) beginManuscriptPageEdit(p *compilePane, hit typeset.PDFTextHit, 
 		return
 	}
 	start := snap.LineStart(hit.Line) + len(line) - len(body)
+	p.pdfText.clear()
 	p.pageEdit = &manuscriptPageEdit{buffer: buf, version: snap.Version(), serial: p.fullSerial,
 		page: page, start: start + hit.Start, end: start + hit.End, x: float32(hit.X), y: float32(hit.Y), w: float32(hit.W),
 		original: hit.DisplayText, text: hit.DisplayText}

@@ -274,18 +274,36 @@ func PDFRegionText(ctx context.Context, path string, page int, x, y, width, heig
 	if err != nil {
 		return "", err
 	}
+	text, _, _, err := source.regionText(x, y, width, height, limit)
+	return text, err
+}
+
+// ManuscriptRegion reads the compiled page and locates the first printed word
+// in the selection, or its center for a figure with no printed text.
+func (s *Session) ManuscriptRegion(ctx context.Context, page int, x, y, width, height float64, limit int) (string, float64, float64, error) {
+	p := s.readSourcePage(ctx, page)
+	if p == nil {
+		return "", x + width/2, y + height/2, ctx.Err()
+	}
+	return p.regionText(x, y, width, height, limit)
+}
+
+func (p *pdfSourcePage) regionText(x, y, width, height float64, limit int) (string, float64, float64, error) {
 	var text strings.Builder
-	for _, line := range source.Lines {
+	hitX, hitY := x+width/2, y+height/2
+	for _, line := range p.Lines {
 		first := true
 		for _, word := range line.Words {
-			cx, cy := (word.X+word.R)/(2*source.Width), (word.Y+word.B)/(2*source.Height)
+			cx, cy := (word.X+word.R)/(2*p.Width), (word.Y+word.B)/(2*p.Height)
 			if cx < x || cx > x+width || cy < y || cy > y+height {
 				continue
 			}
 			if text.Len()+len(word.Text)+1 > limit {
-				return "", fmt.Errorf("PDF region text exceeds %d bytes", limit)
+				return "", 0, 0, fmt.Errorf("PDF region text exceeds %d bytes", limit)
 			}
-			if text.Len() > 0 {
+			if text.Len() == 0 {
+				hitX, hitY = cx, cy
+			} else {
 				if first {
 					text.WriteByte('\n')
 				} else {
@@ -296,7 +314,7 @@ func PDFRegionText(ctx context.Context, path string, page int, x, y, width, heig
 			first = false
 		}
 	}
-	return text.String(), nil
+	return text.String(), hitX, hitY, nil
 }
 
 func (s *Session) sourceHit(ctx context.Context, page int, x, y float64, nearest bool) *pdfSourceHit {

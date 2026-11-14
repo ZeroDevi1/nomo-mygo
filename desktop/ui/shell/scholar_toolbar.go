@@ -5,18 +5,16 @@ import (
 	"nomo/desktop/internal/scholar"
 )
 
-var scholarViewLabels = [...]string{"scholarSource", "scholarPreview", "scholarSplit", "scholarWritingCanvas", "semanticEditing"}
+var scholarViewLabels = [...]string{"scholarSource", "scholarPreview", "scholarSplit", "scholarWritingCanvas"}
 
 func (s *Shell) canUseTypesetView(tab *Tab, mode int) bool {
 	switch mode {
 	case typesetPreview, typesetSplit:
 		return s.canPreviewTypeset(tab)
-	case typesetPageEdit:
-		return canEditManuscript(tab) && s.canPreviewTypeset(tab)
 	case typesetSemantic:
 		return canEditManuscript(tab)
 	default:
-		return true
+		return mode == typesetSource
 	}
 }
 
@@ -27,8 +25,8 @@ func (s *Shell) canPreviewTypeset(tab *Tab) bool {
 	if provider := s.previewProvider(tab); provider == nil || provider.Open == nil {
 		return false
 	}
-	if p := s.scholarForTab(tab); p != nil && !samePath(p.project.Main, tab.Path) {
-		provider := s.previewProvider(&Tab{Path: p.project.Main})
+	if project := s.typesetProject(tab); project.Root != "" && !samePath(project.Main, tab.Path) {
+		provider := s.previewProvider(&Tab{Path: project.Main})
 		return provider != nil && provider.Open != nil
 	}
 	return true
@@ -40,6 +38,9 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 	}
 	if pane := s.compile; pane != nil && tab.typesetMode != mode {
 		pane.sync.invalidate()
+		pane.pageEdit = nil
+		pane.pdfText.clear()
+		pane.cancelManuscriptNote()
 	}
 	if mode != typesetSemantic {
 		s.closeManuscriptEditor()
@@ -56,7 +57,7 @@ func (s *Shell) setTypesetView(p *scholarState, tab *Tab, mode int) {
 	if tab.typesetMode != mode {
 		tab.typesetPaused = false
 	}
-	tab.typesetMode, tab.typesetFocusPDF = mode, mode == typesetPreview || mode == typesetPageEdit
+	tab.typesetMode, tab.typesetFocusPDF = mode, mode == typesetPreview
 	s.focusEditor = true
 }
 
@@ -73,7 +74,7 @@ func (s *Shell) scholarPreviewMode(c *ui.Context, p *scholarState, tab *Tab) int
 	if !s.canUseTypesetView(tab, mode) {
 		return typesetSource
 	}
-	if review && (mode == typesetPreview || mode == typesetSemantic || mode == typesetPageEdit) {
+	if review && (mode == typesetPreview || mode == typesetSemantic) {
 		mode = typesetSplit
 	}
 	if mode == typesetSplit && s.scholarManuscriptCompact(p, tab, width) {
@@ -118,7 +119,7 @@ func (s *Shell) revealScholarSource(tab *Tab) {
 		p.agent.trial.close()
 	}
 	switch tab.typesetMode {
-	case typesetPreview, typesetPageEdit:
+	case typesetPreview:
 		tab.typesetMode = typesetSplit
 	case typesetSemantic:
 		s.closeManuscriptEditor()
@@ -148,7 +149,7 @@ func (s *Shell) scholarManuscriptLayout(c *ui.Context, p *scholarState, tab *Tab
 	shown := s.scholarPreviewMode(c, p, tab)
 	compact := s.scholarManuscriptCompact(p, tab, total)
 	label := s.tr(scholarViewLabels[mode])
-	icon := [...]string{"code-xml", "book-open-text", "columns-2", "align-left", "file-pen-line"}[mode]
+	icon := [...]string{"code-xml", "book-open-text", "columns-2", "align-left"}[mode]
 	compactLabels := [typesetSplit]string{"scholarCompactSource", "scholarCompactPDF"}
 	if p.references.catalog || p.references.focused != nil {
 		label = s.tr("scholarManuscriptLayout")
